@@ -181,6 +181,7 @@ final class EditorWindowController: NSObject, NSWindowDelegate {
         callback?()
     }
 
+    #if DEBUG
     /// Headless smoke test for the inline text editor (SCRCAP_SMOKE=text):
     /// exercises begin → type → newline → commit without a real keyboard.
     /// Returns the committed string, or nil if the pipeline broke.
@@ -196,6 +197,7 @@ final class EditorWindowController: NSObject, NSWindowDelegate {
         _ = flattened() // render path, including the text shape
         return string
     }
+    #endif
 }
 
 // MARK: - CanvasDataSource
@@ -484,11 +486,13 @@ final class CanvasView: NSView, NSDraggingSource {
     // MARK: Text tool — type in place; Return behavior is configurable
 
     var isEditingText: Bool { textEditor != nil }
+    #if DEBUG
     var debugTextEditor: AnnotationTextView? { textEditor }
 
     func debugBeginTextEditing(at point: NSPoint) {
         beginTextEditing(at: point)
     }
+    #endif
 
     private func beginTextEditing(at point: NSPoint) {
         guard let source = dataSource else { return }

@@ -9,7 +9,7 @@ import ScrcapCore
 enum Exporter {
     /// Flattens the bitmap and annotation vectors into a single CGImage at
     /// the image's native pixel scale (capture at 2×, annotate in points,
-    /// export at 2× — plan §03).
+    /// export at 2×).
     static func flatten(
         bitmap: CGImage,
         shapes: [Shape],

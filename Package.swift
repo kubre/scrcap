@@ -5,7 +5,7 @@ let package = Package(
     name: "scrcap",
     platforms: [.macOS(.v14)],
     targets: [
-        // Portable core — no AppKit, no CoreGraphics types. See docs/core-model.md.
+        // Portable core: no AppKit, no CoreGraphics types. See docs/core-model.md.
         .target(
             name: "ScrcapCore",
             swiftSettings: [.swiftLanguageMode(.v5)]

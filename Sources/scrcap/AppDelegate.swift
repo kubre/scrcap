@@ -1,5 +1,5 @@
 // AppDelegate — menu-bar resident (LSUIElement). Hotkeys are registered
-// before any UI work (cold-launch budget, plan §08); the overlay windows are
+// before any UI work; the overlay windows are
 // pre-created so hotkey → overlay stays under 50 ms.
 
 import AppKit
@@ -58,15 +58,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             )
         }
 
-        if ProcessInfo.processInfo.environment["SCRCAP_SMOKE"] == "text" {
-            runTextSmokeTest()
-            return
-        }
+        #if DEBUG
+            if ProcessInfo.processInfo.environment["SCRCAP_SMOKE"] == "text" {
+                runTextSmokeTest()
+                return
+            }
+        #endif
 
         // Screen Recording is requested lazily on the first capture. Asking on
         // launch stacks macOS' permission prompt with scrcap's own startup UI.
     }
 
+    #if DEBUG
     /// Headless editor smoke test (no capture permission needed): opens the
     /// editor on a synthetic bitmap, drives the text tool, prints PASS/FAIL,
     /// and exits. Run with: SCRCAP_SMOKE=text .build/debug/scrcap
@@ -98,6 +101,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
     }
+    #endif
 
     // MARK: Status item
 

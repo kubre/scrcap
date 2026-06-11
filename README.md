@@ -2,7 +2,7 @@
 
 Capture at the speed of thought. A Shottr-inspired screenshot tool that is
 tiny, instant, and keyboard-first. macOS native (Swift + AppKit, zero
-dependencies); portable core by design. Full plan: `plan.html`.
+dependencies); portable core by design.
 
 ## Build & run
 
@@ -26,6 +26,16 @@ signing identity. `scripts/make_app.sh` requires stable signing by default
 because ad-hoc signing makes macOS treat every rebuild as a new app, forcing
 you to re-grant Screen Recording. For a throwaway build only, run
 `SCRCAP_ALLOW_ADHOC=1 scripts/make_app.sh`.
+
+The release script creates a fresh `dist/` containing only:
+
+- `scrcap.app` — signed macOS app bundle
+- `scrcap-macos.zip` — compressed app bundle for GitHub Releases
+- `scrcap-macos.dmg` — simple drag-to-Applications disk image
+
+The app bundle is stripped, optimized for size, and checked so development
+artifacts such as `.DS_Store`, Swift module files, object files, and dSYM
+bundles cannot slip into the release output.
 
 ## Default hotkeys (all remappable in Preferences → Shortcuts)
 
@@ -65,8 +75,8 @@ Drag the toolbar's empty background to move the editor window.
   overlay, editor, exporter, SwiftUI preferences.
 - `Sources/scrcap-core-tests/` — core test suite (plain executable; the
   CLT-only toolchain ships no XCTest).
-- `scripts/` — `make_app.sh` (bundle + stable sign), `check_budgets.sh`
-  (size gate, < 5 MB).
+- `scripts/` — `make_app.sh` (bundle + stable sign + release zip/DMG),
+  `check_budgets.sh` (size and artifact gate, < 5 MB).
 
 Settings live at `~/Library/Application Support/scrcap/settings.json` —
 versioned, human-readable, dotfiles-friendly.

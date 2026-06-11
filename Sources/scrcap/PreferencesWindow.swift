@@ -1,4 +1,4 @@
-// Preferences — SwiftUI is allowed here (plan §04): latency is irrelevant and
+// Preferences — SwiftUI is allowed here: latency is irrelevant and
 // the frameworks ship with macOS. Same design language as the editor: dense,
 // red primary, monospaced shortcut hints, follows the system theme.
 
@@ -565,6 +565,10 @@ struct AboutTab: View {
             VStack(alignment: .leading, spacing: 8) {
                 Text("scrcap is inspired by Shottr's fast, keyboard-first screenshot workflow.")
                     .font(.system(size: 12.5))
+                Link("Created by Vaibhav Kubre", destination: URL(string: "https://kubre.in")!)
+                    .font(.system(size: 12.5, weight: .medium))
+                Link("GitHub: kubre/scrcap", destination: URL(string: "https://github.com/kubre/scrcap")!)
+                    .font(.system(size: 12.5, weight: .medium))
                 Link("Visit Shottr", destination: URL(string: "https://shottr.cc")!)
                     .font(.system(size: 12.5, weight: .medium))
                 Text("If you want a screenshot app with more configuration and advanced features, use Shottr instead.")

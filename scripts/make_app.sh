@@ -1,5 +1,6 @@
 #!/bin/bash
-# Builds scrcap in release mode and packages it as scrcap.app.
+# Builds scrcap in release mode and packages it as scrcap.app plus zip and DMG
+# release artifacts.
 # Usage: scripts/make_app.sh [output-dir]   (default: ./dist)
 #
 # Signing: uses $CODESIGN_IDENTITY if set; otherwise auto-detects the
@@ -9,8 +10,23 @@
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
+ROOT="$(pwd -P)"
 OUT="${1:-dist}"
 APP="$OUT/scrcap.app"
+ZIP="$OUT/scrcap-macos.zip"
+DMG="$OUT/scrcap-macos.dmg"
+OUT_PARENT="$(dirname "$OUT")"
+OUT_NAME="$(basename "$OUT")"
+OUT_ABS="$(mkdir -p "$OUT_PARENT" && cd "$OUT_PARENT" && pwd -P)/$OUT_NAME"
+TMP_DIR="$(mktemp -d)"
+trap 'rm -rf "$TMP_DIR"' EXIT
+
+case "$OUT_ABS" in
+    "$ROOT"|"$HOME"|"/")
+        echo "✗ refusing to clean unsafe output directory: $OUT_ABS" >&2
+        exit 1
+        ;;
+esac
 
 echo "▸ building release (-Osize, whole-module, dead-strip)…"
 swift build -c release \
@@ -19,9 +35,9 @@ swift build -c release \
     -Xlinker -dead_strip 2>&1 | tail -1
 
 echo "▸ assembling bundle…"
-rm -rf "$APP"
-# Minimal bundle: binary + Info.plist + icons. No PkgInfo — nothing that isn't
-# required.
+rm -rf "$OUT"
+# Minimal bundle: binary + Info.plist + icons. No PkgInfo or SwiftPM build
+# metadata.
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 
 cp .build/release/scrcap "$APP/Contents/MacOS/scrcap"
@@ -71,7 +87,36 @@ else
     exit 1
 fi
 
-echo "▸ checking budgets (plan §08)…"
+echo "▸ checking release budgets…"
 scripts/check_budgets.sh "$APP"
 
+echo "▸ creating compressed release zip…"
+rm -f "$ZIP"
+(
+    cd "$OUT"
+    COPYFILE_DISABLE=1 zip -qry -9 "$(basename "$ZIP")" "$(basename "$APP")" \
+        -x "*.DS_Store" "*/.DS_Store" "__MACOSX/*" "*/._*"
+)
+
+if unzip -Z1 "$ZIP" | grep -E '(^|/)(__MACOSX|\.DS_Store|\.build|[^/]*\._|.*\.dSYM(/|$)|.*\.swiftmodule$|.*\.swiftdoc$|.*\.swiftinterface$|.*\.o$|.*\.a$|.*\.pcm$)' >/dev/null; then
+    echo "✗ release zip FAIL: $ZIP contains development files" >&2
+    unzip -Z1 "$ZIP" | grep -E '(^|/)(__MACOSX|\.DS_Store|\.build|[^/]*\._|.*\.dSYM(/|$)|.*\.swiftmodule$|.*\.swiftdoc$|.*\.swiftinterface$|.*\.o$|.*\.a$|.*\.pcm$)' >&2
+    exit 1
+fi
+
+echo "▸ creating compressed DMG…"
+DMG_ROOT="$TMP_DIR/dmg-root"
+mkdir -p "$DMG_ROOT"
+ditto "$APP" "$DMG_ROOT/scrcap.app"
+ln -s /Applications "$DMG_ROOT/Applications"
+rm -f "$DMG"
+hdiutil create -quiet \
+    -volname "scrcap" \
+    -srcfolder "$DMG_ROOT" \
+    -format UDZO \
+    -imagekey zlib-level=9 \
+    "$DMG"
+
 echo "✓ $APP"
+echo "✓ $ZIP ($(du -sh "$ZIP" | cut -f1))"
+echo "✓ $DMG ($(du -sh "$DMG" | cut -f1))"

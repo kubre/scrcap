@@ -98,21 +98,39 @@ final class OverlayController {
             guard let layer = entry[kCGWindowLayer as String] as? Int, layer == 0,
                   let pid = entry[kCGWindowOwnerPID as String] as? Int, pid != ourPID,
                   let id = entry[kCGWindowNumber as String] as? CGWindowID,
-                  let boundsDict = entry[kCGWindowBounds as String] as? [String: CGFloat]
+                  let boundsDict = entry[kCGWindowBounds as String] as? [String: Any],
+                  let x = cgFloat(boundsDict["X"]),
+                  let y = cgFloat(boundsDict["Y"]),
+                  let width = cgFloat(boundsDict["Width"]),
+                  let height = cgFloat(boundsDict["Height"])
             else { return nil }
-            let cgRect = CGRect(
-                x: boundsDict["X"] ?? 0, y: boundsDict["Y"] ?? 0,
-                width: boundsDict["Width"] ?? 0, height: boundsDict["Height"] ?? 0
-            )
-            guard cgRect.width >= 40, cgRect.height >= 40 else { return nil }
+            let cgRect = CGRect(x: x, y: y, width: width, height: height)
+            guard cgRect.isUsableWindowRect else { return nil }
             let owner = entry[kCGWindowOwnerName as String] as? String ?? ""
             let name = entry[kCGWindowName as String] as? String ?? ""
             let windowScreen = GeometryMapper.screen(containing: NSPoint(x: cgRect.midX, y: cgRect.midY))
+            let frame = GeometryMapper.cocoaRect(fromCG: cgRect, on: windowScreen)
+            guard frame.isUsableWindowRect else { return nil }
             return PickableWindow(
                 windowID: id,
-                frame: GeometryMapper.cocoaRect(fromCG: cgRect, on: windowScreen),
+                frame: frame,
                 title: name.isEmpty ? owner : "\(owner) — \(name)"
             )
+        }
+    }
+
+    private static func cgFloat(_ value: Any?) -> CGFloat? {
+        switch value {
+        case let number as NSNumber:
+            return CGFloat(truncating: number)
+        case let value as CGFloat:
+            return value
+        case let value as Double:
+            return CGFloat(value)
+        case let value as Int:
+            return CGFloat(value)
+        default:
+            return nil
         }
     }
 }
@@ -406,6 +424,10 @@ final class OverlayView: NSView {
             width: target.frame.width,
             height: target.frame.height
         ).intersection(bounds)
+        guard local.isDrawableRect else {
+            bounds.fill()
+            return
+        }
 
         let path = NSBezierPath(rect: bounds)
         path.append(NSBezierPath(rect: local).reversed)
@@ -442,5 +464,15 @@ final class OverlayView: NSView {
         NSColor.black.withAlphaComponent(0.75).setFill()
         NSBezierPath(roundedRect: box, xRadius: 5, yRadius: 5).fill()
         str.draw(at: NSPoint(x: origin.x + 7, y: origin.y + 3))
+    }
+}
+
+private extension CGRect {
+    var isDrawableRect: Bool {
+        [minX, minY, width, height].allSatisfy(\.isFinite) && width > 0 && height > 0
+    }
+
+    var isUsableWindowRect: Bool {
+        [minX, minY, width, height].allSatisfy(\.isFinite) && width >= 40 && height >= 40
     }
 }

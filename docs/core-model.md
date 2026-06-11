@@ -8,8 +8,8 @@ document is the spec a port implements.
 ## 1. Annotation model (`AnnotationModel.swift`)
 
 - A document is **one bitmap + an append-only stack of vector shapes** with an
-  undo cursor. There is no selection state, no transform handles ("draw stays
-  armed", plan §03).
+  undo cursor. There is no selection state and no transform handles; draw stays
+  armed.
 - `CorePoint` — image coordinates, **top-left origin, point units**. Retina
   scaling applies only at export (capture at 2×, annotate in points, export
   at 2×).

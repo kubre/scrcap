@@ -65,20 +65,19 @@ final class CaptureEngine: CaptureProviding {
     }
 
     func captureWindow(windowID: CGWindowID, includeShadow: Bool) async throws -> CaptureResult {
-        var imageOptions: CGWindowImageOption = [.bestResolution]
-        if !includeShadow {
-            imageOptions.insert(.boundsIgnoreFraming)
-        }
-
-        guard let image = Self.createWindowImage(windowID: windowID, options: imageOptions),
-              image.width > 0, image.height > 0 else {
+        let content = try await shareableContent()
+        guard let window = content.windows.first(where: { $0.windowID == windowID }) else {
             throw CaptureError.windowNotFound
         }
+        let filter = SCContentFilter(desktopIndependentWindow: window)
+        let scale = CGFloat(filter.pointPixelScale)
+        let config = baseConfig()
+        config.ignoreShadowsSingleWindow = !includeShadow
+        config.width = Int(filter.contentRect.width * scale)
+        config.height = Int(filter.contentRect.height * scale)
 
-        return CaptureResult(
-            image: image,
-            scale: Self.estimatedWindowScale(windowID: windowID, image: image)
-        )
+        let image = try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: config)
+        return CaptureResult(image: image, scale: scale)
     }
 
     private func shareableContent() async throws -> SCShareableContent {
@@ -90,52 +89,5 @@ final class CaptureEngine: CaptureProviding {
         config.showsCursor = false
         config.captureResolution = .best
         return config
-    }
-
-    @available(macOS, deprecated: 14.0)
-    private static func createWindowImage(windowID: CGWindowID, options: CGWindowImageOption) -> CGImage? {
-        CGWindowListCreateImage(.null, [.optionIncludingWindow], windowID, options)
-    }
-
-    private static func estimatedWindowScale(windowID: CGWindowID, image: CGImage) -> CGFloat {
-        guard let bounds = windowBounds(windowID), bounds.width > 0, bounds.height > 0 else {
-            return NSScreen.main?.backingScaleFactor ?? 1
-        }
-
-        let estimate = max(CGFloat(image.width) / bounds.width, CGFloat(image.height) / bounds.height)
-        let knownScales = Set(NSScreen.screens.map(\.backingScaleFactor) + [1, 2, 3])
-        return knownScales.min { lhs, rhs in
-            abs(lhs - estimate) < abs(rhs - estimate)
-        } ?? max(1, estimate.rounded())
-    }
-
-    private static func windowBounds(_ windowID: CGWindowID) -> CGRect? {
-        guard
-            let entries = CGWindowListCopyWindowInfo(.optionIncludingWindow, windowID) as? [[String: Any]],
-            let bounds = entries.first?[kCGWindowBounds as String] as? [String: Any],
-            let x = cgFloat(bounds["X"]),
-            let y = cgFloat(bounds["Y"]),
-            let width = cgFloat(bounds["Width"]),
-            let height = cgFloat(bounds["Height"])
-        else {
-            return nil
-        }
-
-        return CGRect(x: x, y: y, width: width, height: height)
-    }
-
-    private static func cgFloat(_ value: Any?) -> CGFloat? {
-        switch value {
-        case let number as NSNumber:
-            return CGFloat(truncating: number)
-        case let value as CGFloat:
-            return value
-        case let value as Double:
-            return CGFloat(value)
-        case let value as Int:
-            return CGFloat(value)
-        default:
-            return nil
-        }
     }
 }

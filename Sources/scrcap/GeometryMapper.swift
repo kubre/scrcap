@@ -1,5 +1,5 @@
 // Single owner of all point↔pixel and Cocoa↔CoreGraphics coordinate
-// conversion (the classic Retina/multi-monitor trap — see plan §11).
+// conversion for Retina and multi-monitor setups.
 
 import AppKit
 

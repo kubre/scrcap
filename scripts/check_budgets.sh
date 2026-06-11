@@ -1,6 +1,6 @@
 #!/bin/bash
-# Size budget gate (plan §08): a failing budget blocks merge like a failing
-# test. Binary budget: < 5 MB (stretch 3 MB).
+# Size and release-artifact gate: a failing budget blocks merge like a failing
+# test. App bundle budget: < 5 MB (stretch 3 MB).
 set -euo pipefail
 
 APP="${1:-dist/scrcap.app}"
@@ -9,6 +9,34 @@ STRETCH_BYTES=$((3 * 1024 * 1024))
 
 if [ ! -d "$APP" ]; then
     echo "✗ $APP not found — run scripts/make_app.sh first" >&2
+    exit 1
+fi
+
+if find "$APP" \( \
+    -name ".DS_Store" -o \
+    -name "__MACOSX" -o \
+    -name "*.dSYM" -o \
+    -name "*.swiftmodule" -o \
+    -name "*.swiftdoc" -o \
+    -name "*.swiftinterface" -o \
+    -name "*.o" -o \
+    -name "*.a" -o \
+    -name "*.pcm" -o \
+    -name ".build" \
+    \) -print -quit | grep -q .; then
+    echo "✗ release artifact FAIL: $APP contains development files" >&2
+    find "$APP" \( \
+        -name ".DS_Store" -o \
+        -name "__MACOSX" -o \
+        -name "*.dSYM" -o \
+        -name "*.swiftmodule" -o \
+        -name "*.swiftdoc" -o \
+        -name "*.swiftinterface" -o \
+        -name "*.o" -o \
+        -name "*.a" -o \
+        -name "*.pcm" -o \
+        -name ".build" \
+        \) -print >&2
     exit 1
 fi
 

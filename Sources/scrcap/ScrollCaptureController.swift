@@ -1,6 +1,6 @@
 // ScrollCaptureController — scroll injection + settle detection + the
 // StitchEngine row-hash aligner. Accessibility permission is requested lazily
-// here, the first time scrolling capture is invoked (plan §02).
+// here, the first time scrolling capture is invoked.
 
 import AppKit
 import ApplicationServices
@@ -124,7 +124,7 @@ final class ScrollCaptureController {
         }
 
         // A single frame's worth of rows means nothing scrolled: deliver a
-        // normal region capture instead (graceful bail, plan §06).
+        // normal region capture instead.
         let image = try composite(rows: accumulatedRows, width: width)
         return CaptureResult(image: image, scale: scale)
     }
