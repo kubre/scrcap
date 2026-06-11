@@ -1,0 +1,794 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>scrcap — Development Plan</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,300..800&family=IBM+Plex+Mono:wght@400;500;600&family=Instrument+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #0c0d0f;
+  --bg-raise: #131417;
+  --bg-card: #16181c;
+  --ink: #e8e6e1;
+  --ink-dim: #9b9890;
+  --ink-faint: #5c5a55;
+  --line: #26282d;
+  --red: #ff3b30;
+  --orange: #ff9500;
+  --yellow: #ffcc00;
+  --green: #34c759;
+  --blue: #0a84ff;
+  --purple: #bf5af2;
+  --white: #f2f2f7;
+  --mono: 'IBM Plex Mono', monospace;
+  --display: 'Bricolage Grotesque', sans-serif;
+  --body: 'Instrument Sans', sans-serif;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html { scroll-behavior: smooth; scroll-padding-top: 80px; }
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--body);
+  font-size: 16px;
+  line-height: 1.65;
+  -webkit-font-smoothing: antialiased;
+}
+body::before {
+  content: '';
+  position: fixed; inset: 0;
+  background-image: radial-gradient(circle at 1px 1px, rgba(255,255,255,0.035) 1px, transparent 0);
+  background-size: 28px 28px;
+  pointer-events: none;
+  z-index: 0;
+}
+::selection { background: var(--red); color: #fff; }
+
+/* ---------- nav ---------- */
+nav {
+  position: sticky; top: 0; z-index: 100;
+  background: rgba(12,13,15,0.85);
+  backdrop-filter: blur(12px);
+  border-bottom: 1px solid var(--line);
+  padding: 0 24px;
+  display: flex; align-items: center; gap: 24px;
+  height: 52px;
+  overflow-x: auto;
+  white-space: nowrap;
+}
+nav .brand {
+  font-family: var(--mono); font-weight: 600; font-size: 14px;
+  color: var(--red); letter-spacing: 0.05em;
+  flex-shrink: 0;
+}
+nav .brand::before { content: '▣ '; }
+nav a {
+  font-family: var(--mono); font-size: 12px;
+  color: var(--ink-dim); text-decoration: none;
+  letter-spacing: 0.03em;
+  transition: color .15s;
+}
+nav a:hover { color: var(--ink); }
+nav a span { color: var(--ink-faint); margin-right: 4px; }
+
+/* ---------- hero ---------- */
+header {
+  position: relative;
+  padding: 96px 24px 72px;
+  max-width: 1060px; margin: 0 auto;
+  cursor: crosshair;
+}
+.marquee {
+  position: relative;
+  border: 1px dashed var(--ink-faint);
+  padding: 64px 48px;
+  background: var(--bg-raise);
+}
+.marquee svg.ants {
+  position: absolute; inset: -1px;
+  width: calc(100% + 2px); height: calc(100% + 2px);
+  pointer-events: none;
+}
+.marquee svg.ants rect {
+  fill: none; stroke: var(--red); stroke-width: 2;
+  stroke-dasharray: 8 6;
+  animation: march 1.2s linear infinite;
+}
+@keyframes march { to { stroke-dashoffset: -14; } }
+.handle {
+  position: absolute; width: 9px; height: 9px;
+  background: var(--bg); border: 2px solid var(--red);
+  z-index: 2;
+}
+.handle.tl { top: -5px; left: -5px; }
+.handle.tr { top: -5px; right: -5px; }
+.handle.bl { bottom: -5px; left: -5px; }
+.handle.br { bottom: -5px; right: -5px; }
+.coords {
+  position: absolute; top: -28px; right: 0;
+  font-family: var(--mono); font-size: 11px;
+  color: var(--ink-faint); letter-spacing: 0.05em;
+}
+.coords em { color: var(--red); font-style: normal; }
+.kicker {
+  font-family: var(--mono); font-size: 12px; font-weight: 500;
+  color: var(--red); letter-spacing: 0.18em; text-transform: uppercase;
+  margin-bottom: 20px;
+}
+h1 {
+  font-family: var(--display);
+  font-size: clamp(44px, 7vw, 80px);
+  font-weight: 750;
+  line-height: 0.98;
+  letter-spacing: -0.025em;
+  margin-bottom: 24px;
+}
+h1 .thin { font-weight: 300; color: var(--ink-dim); }
+.lede {
+  font-size: 18px; color: var(--ink-dim); max-width: 620px;
+  margin-bottom: 40px;
+}
+.lede strong { color: var(--ink); font-weight: 600; }
+.statline { display: flex; flex-wrap: wrap; gap: 0; border-top: 1px solid var(--line); }
+.stat {
+  padding: 18px 32px 4px 0; margin-right: 32px;
+}
+.stat .n {
+  font-family: var(--display); font-size: 30px; font-weight: 700;
+  letter-spacing: -0.02em;
+}
+.stat .n em { color: var(--red); font-style: normal; }
+.stat .l {
+  font-family: var(--mono); font-size: 11px; color: var(--ink-faint);
+  letter-spacing: 0.1em; text-transform: uppercase;
+}
+
+/* ---------- sections ---------- */
+main { max-width: 1060px; margin: 0 auto; padding: 0 24px 120px; position: relative; z-index: 1; }
+section { margin-top: 88px; }
+.sec-head { display: flex; align-items: baseline; gap: 16px; margin-bottom: 8px; }
+.sec-num {
+  font-family: var(--mono); font-size: 13px; font-weight: 600;
+  color: var(--red); letter-spacing: 0.1em;
+}
+h2 {
+  font-family: var(--display); font-size: clamp(26px, 3.4vw, 36px);
+  font-weight: 700; letter-spacing: -0.02em;
+}
+.sec-sub { color: var(--ink-dim); max-width: 700px; margin-bottom: 32px; }
+h3 {
+  font-family: var(--display); font-size: 19px; font-weight: 650;
+  margin: 36px 0 12px; letter-spacing: -0.01em;
+}
+p { margin-bottom: 14px; color: var(--ink-dim); max-width: 760px; }
+p strong, li strong { color: var(--ink); font-weight: 600; }
+ul, ol { margin: 0 0 16px 20px; color: var(--ink-dim); max-width: 740px; }
+li { margin-bottom: 8px; }
+code {
+  font-family: var(--mono); font-size: 0.86em;
+  background: var(--bg-card); border: 1px solid var(--line);
+  padding: 1px 6px; border-radius: 4px; color: var(--ink);
+}
+kbd {
+  font-family: var(--mono); font-size: 12px; font-weight: 500;
+  background: #1d1f24; border: 1px solid #33363d;
+  border-bottom-width: 2px;
+  padding: 2px 7px; border-radius: 5px; color: var(--ink);
+  white-space: nowrap;
+}
+
+/* corner-tick frame for cards */
+.frame {
+  background: var(--bg-card);
+  border: 1px solid var(--line);
+  padding: 28px 32px;
+  position: relative;
+  background-image:
+    linear-gradient(var(--red), var(--red)),
+    linear-gradient(var(--red), var(--red)),
+    linear-gradient(var(--red), var(--red)),
+    linear-gradient(var(--red), var(--red)),
+    linear-gradient(var(--red), var(--red)),
+    linear-gradient(var(--red), var(--red)),
+    linear-gradient(var(--red), var(--red)),
+    linear-gradient(var(--red), var(--red));
+  background-repeat: no-repeat;
+  background-position: top left, top left, top right, top right, bottom left, bottom left, bottom right, bottom right;
+  background-size: 14px 2px, 2px 14px, 14px 2px, 2px 14px, 14px 2px, 2px 14px, 14px 2px, 2px 14px;
+}
+
+/* ---------- tables ---------- */
+table { width: 100%; border-collapse: collapse; margin: 16px 0 24px; font-size: 14.5px; }
+th {
+  font-family: var(--mono); font-size: 11px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: 0.1em;
+  color: var(--ink-faint); text-align: left;
+  padding: 10px 14px; border-bottom: 1px solid var(--line);
+}
+td {
+  padding: 12px 14px; border-bottom: 1px solid var(--line);
+  color: var(--ink-dim); vertical-align: top;
+}
+td:first-child { color: var(--ink); }
+tr:hover td { background: rgba(255,255,255,0.015); }
+.ok { color: var(--green); }
+.warn { color: var(--yellow); }
+.bad { color: var(--red); }
+.verdict { font-family: var(--mono); font-size: 12px; font-weight: 600; letter-spacing: 0.04em; }
+
+/* ---------- toolbar mockup ---------- */
+.toolbar-demo {
+  margin: 28px 0 8px;
+  display: flex; justify-content: center;
+}
+.toolbar {
+  display: inline-flex; align-items: center; gap: 4px;
+  background: #1a1c21;
+  border: 1px solid #2c2f36;
+  border-radius: 12px;
+  padding: 8px 10px;
+  box-shadow: 0 12px 40px rgba(0,0,0,0.55), 0 2px 8px rgba(0,0,0,0.4);
+}
+.tool {
+  display: flex; flex-direction: column; align-items: center; gap: 3px;
+  padding: 7px 11px 5px; border-radius: 8px;
+  color: var(--ink-dim); cursor: default;
+  transition: background .15s, color .15s;
+}
+.tool:hover { background: #24272d; color: var(--ink); }
+.tool.active { background: #2c2f36; color: var(--white); box-shadow: inset 0 0 0 1px #3a3e46; }
+.tool svg { width: 19px; height: 19px; stroke: currentColor; fill: none; stroke-width: 1.8; }
+.tool .hint {
+  font-family: var(--mono); font-size: 9px; color: var(--ink-faint);
+  letter-spacing: 0.05em;
+}
+.tool.active .hint { color: var(--ink-dim); }
+.tb-sep { width: 1px; height: 34px; background: #2c2f36; margin: 0 8px; }
+.swatch {
+  display: flex; flex-direction: column; align-items: center; gap: 3px;
+  padding: 7px 6px 5px; border-radius: 8px; cursor: default;
+}
+.swatch:hover { background: #24272d; }
+.swatch .dot {
+  width: 17px; height: 17px; border-radius: 50%;
+  border: 2px solid transparent;
+}
+.swatch.active .dot { box-shadow: 0 0 0 2px #1a1c21, 0 0 0 4px var(--white); }
+.swatch .hint { font-family: var(--mono); font-size: 9px; color: var(--ink-faint); }
+.caption {
+  text-align: center; font-family: var(--mono); font-size: 11.5px;
+  color: var(--ink-faint); letter-spacing: 0.04em; margin-bottom: 24px;
+}
+
+/* ---------- architecture diagram ---------- */
+.arch { display: flex; flex-direction: column; gap: 0; margin: 24px 0; font-family: var(--mono); }
+.arch-row { display: grid; grid-template-columns: 170px 1fr; gap: 16px; align-items: stretch; }
+.arch-label {
+  font-size: 11px; color: var(--ink-faint); text-transform: uppercase;
+  letter-spacing: 0.1em; display: flex; align-items: center; justify-content: flex-end;
+  text-align: right; padding-right: 4px;
+}
+.arch-boxes { display: flex; gap: 10px; flex-wrap: wrap; }
+.arch-box {
+  background: var(--bg-card); border: 1px solid var(--line);
+  padding: 12px 16px; font-size: 12.5px; flex: 1; min-width: 150px;
+}
+.arch-box b { display: block; color: var(--ink); font-weight: 600; font-size: 13px; margin-bottom: 3px; }
+.arch-box span { color: var(--ink-faint); font-size: 11px; line-height: 1.5; display: block; }
+.arch-box.core { border-color: #4a2522; background: linear-gradient(180deg, #1d1416, var(--bg-card)); }
+.arch-box.core b { color: var(--red); }
+.arch-arrow {
+  text-align: center; color: var(--ink-faint); font-size: 14px;
+  padding: 6px 0; margin-left: 186px;
+}
+@media (max-width: 720px) {
+  .arch-row { grid-template-columns: 1fr; }
+  .arch-label { justify-content: flex-start; text-align: left; padding: 8px 0 4px; }
+  .arch-arrow { margin-left: 0; }
+}
+
+/* ---------- milestones ---------- */
+.milestone { display: grid; grid-template-columns: 120px 1fr; gap: 24px; padding: 24px 0; border-bottom: 1px solid var(--line); }
+.milestone:last-child { border-bottom: none; }
+.ms-id { font-family: var(--mono); }
+.ms-id .tag {
+  display: inline-block; font-size: 13px; font-weight: 600;
+  color: var(--red); border: 1px solid #45211f;
+  background: #1d1315; padding: 3px 10px; border-radius: 4px;
+}
+.ms-id .dur { display: block; font-size: 11px; color: var(--ink-faint); margin-top: 8px; letter-spacing: 0.05em; }
+.milestone h4 { font-family: var(--display); font-size: 17px; font-weight: 650; margin-bottom: 8px; }
+.milestone p { font-size: 15px; margin-bottom: 8px; }
+.milestone ul { font-size: 14.5px; margin-bottom: 0; }
+.exit {
+  font-family: var(--mono); font-size: 12px; color: var(--green);
+  margin-top: 10px; display: block; letter-spacing: 0.02em;
+}
+.exit::before { content: '✓ exit criteria — '; color: var(--ink-faint); }
+@media (max-width: 600px) { .milestone { grid-template-columns: 1fr; gap: 8px; } }
+
+/* ---------- callouts ---------- */
+.rule {
+  border-left: 3px solid var(--red);
+  background: linear-gradient(90deg, rgba(255,59,48,0.06), transparent 60%);
+  padding: 16px 20px; margin: 20px 0;
+  max-width: 760px;
+}
+.rule p { margin-bottom: 0; }
+.rule .rl {
+  font-family: var(--mono); font-size: 11px; font-weight: 600;
+  color: var(--red); letter-spacing: 0.14em; text-transform: uppercase;
+  display: block; margin-bottom: 6px;
+}
+.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin: 20px 0; }
+@media (max-width: 720px) { .grid2 { grid-template-columns: 1fr; } }
+.mini {
+  background: var(--bg-card); border: 1px solid var(--line);
+  padding: 20px 22px;
+}
+.mini h4 { font-family: var(--display); font-size: 15.5px; font-weight: 650; margin-bottom: 8px; }
+.mini h4 .pre { font-family: var(--mono); font-size: 11px; color: var(--red); display: block; letter-spacing: 0.1em; margin-bottom: 4px; }
+.mini p { font-size: 14px; margin-bottom: 0; }
+
+footer {
+  border-top: 1px solid var(--line);
+  padding: 32px 24px 48px; max-width: 1060px; margin: 0 auto;
+  font-family: var(--mono); font-size: 12px; color: var(--ink-faint);
+  display: flex; justify-content: space-between; flex-wrap: wrap; gap: 12px;
+}
+</style>
+</head>
+<body>
+
+<nav>
+  <span class="brand">scrcap</span>
+  <a href="#vision"><span>01</span>Vision</a>
+  <a href="#capture"><span>02</span>Capture</a>
+  <a href="#editor"><span>03</span>Editor</a>
+  <a href="#stack"><span>04</span>Stack</a>
+  <a href="#arch"><span>05</span>Architecture</a>
+  <a href="#scroll"><span>06</span>Scrolling</a>
+  <a href="#settings"><span>07</span>Settings</a>
+  <a href="#perf"><span>08</span>Budgets</a>
+  <a href="#roadmap"><span>09</span>Roadmap</a>
+  <a href="#xplat"><span>10</span>Cross-platform</a>
+  <a href="#risks"><span>11</span>Risks</a>
+</nav>
+
+<header>
+  <div class="marquee">
+    <svg class="ants" preserveAspectRatio="none"><rect x="1" y="1" width="99.8%" height="99.6%"/></svg>
+    <div class="handle tl"></div><div class="handle tr"></div>
+    <div class="handle bl"></div><div class="handle br"></div>
+    <div class="coords" id="coords">x:<em>0</em> y:<em>0</em> — 1060×420</div>
+    <div class="kicker">Development Plan · v1.0 · June 2026</div>
+    <h1>scrcap<br><span class="thin">capture at the speed of thought.</span></h1>
+    <p class="lede">A Shottr-inspired screenshot tool that is <strong>tiny, instant, and keyboard-first</strong> — where the ergonomics you had to configure elsewhere are simply the defaults. macOS native first; portable by design, not by compromise.</p>
+    <div class="statline">
+      <div class="stat"><div class="n">&lt;<em>5</em> MB</div><div class="l">binary size</div></div>
+      <div class="stat"><div class="n">&lt;<em>150</em> ms</div><div class="l">capture → editor</div></div>
+      <div class="stat"><div class="n"><em>4</em></div><div class="l">capture modes</div></div>
+      <div class="stat"><div class="n"><em>3</em>+<em>7</em></div><div class="l">tools + colors</div></div>
+      <div class="stat"><div class="n"><em>0</em></div><div class="l">runtime deps</div></div>
+    </div>
+  </div>
+</header>
+
+<main>
+
+<!-- ============================================================ -->
+<section id="vision">
+  <div class="sec-head"><span class="sec-num">01</span><h2>Vision &amp; Principles</h2></div>
+  <p class="sec-sub">Everything in this plan derives from four non-negotiable principles. When a decision is ambiguous, these break the tie.</p>
+
+  <div class="grid2">
+    <div class="mini"><h4><span class="pre">P1</span>Speed is the feature</h4><p>Hotkey-to-crosshair in under 50&nbsp;ms, capture-to-editor in under 150&nbsp;ms. Anything that threatens this (webview runtimes, heavyweight frameworks, lazy-loaded toolbars) is rejected, including for cross-platform reasons.</p></div>
+    <div class="mini"><h4><span class="pre">P2</span>Tiny footprint</h4><p>Shottr is 2.7&nbsp;MB and proves it's possible. Target: &lt;5&nbsp;MB binary (stretch: 3&nbsp;MB), &lt;30&nbsp;MB idle RAM, 0% idle CPU. The app is a menu-bar resident — it should be invisible until summoned.</p></div>
+    <div class="mini"><h4><span class="pre">P3</span>Opinionated defaults, total remappability</h4><p>The workflow described in this spec — draw-stays-armed, Esc copies &amp; closes, red by default — ships as the <strong>default</strong> behavior, not buried config. But every shortcut and behavior is remappable for everyone else.</p></div>
+    <div class="mini"><h4><span class="pre">P4</span>macOS first, portable core</h4><p>v1 is pure native macOS. But the annotation model, document format, settings schema, and keymap engine are written UI-agnostic so a future Windows/Linux port reuses the brain and only rewrites the hands. Separate native frontends per OS are acceptable if that's what best preserves P1 and P2.</p></div>
+  </div>
+
+  <h3>Scope guardrails (v1)</h3>
+  <p><strong>In:</strong> region / window / fullscreen / scrolling capture, annotation editor (arrow, rectangle, counter), 7-color palette, full shortcut remapping, clipboard &amp; PNG export, preferences window.</p>
+  <p><strong>Out (deliberately, for now):</strong> OCR, pin-to-screen, color picker, blur/pixelate, ruler, cloud upload, video recording. These are Shottr features worth revisiting in v2 — listed in <a href="#roadmap" style="color:var(--red)">the roadmap</a> as candidates — but v1 ships the 90% workflow perfectly rather than the 100% workflow adequately.</p>
+</section>
+
+<!-- ============================================================ -->
+<section id="capture">
+  <div class="sec-head"><span class="sec-num">02</span><h2>Capture Modes</h2></div>
+  <p class="sec-sub">Four modes, each bound to its own global hotkey. Defaults avoid collisions with macOS's built-in <kbd>⌘⇧3</kbd>/<kbd>⌘⇧4</kbd>/<kbd>⌘⇧5</kbd>; all remappable to any combination (see §07).</p>
+
+  <table>
+    <thead><tr><th>Mode</th><th>Default hotkey</th><th>Behavior</th><th>Milestone</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Region</strong></td><td><kbd>⌥⇧2</kbd></td><td>Screen dims, crosshair with live pixel coordinates and dimension readout appears. Drag to select; release captures. <kbd>Esc</kbd> aborts. Holding <kbd>Space</kbd> mid-drag moves the selection.</td><td>M1</td></tr>
+      <tr><td><strong>Window</strong></td><td><kbd>⌥⇧3</kbd></td><td>Hovered window highlights with a tinted overlay; click captures it cleanly (no desktop bleed, optional shadow). <kbd>Tab</kbd> cycles overlapping windows.</td><td>M1</td></tr>
+      <tr><td><strong>Fullscreen</strong></td><td><kbd>⌥⇧1</kbd></td><td>Instant, zero UI. Captures the display under the cursor (multi-monitor aware).</td><td>M0</td></tr>
+      <tr><td><strong>Scrolling</strong></td><td><kbd>⌥⇧4</kbd></td><td>Select a region/window, scrcap auto-scrolls and stitches into one tall image. Full design in §06.</td><td>M4</td></tr>
+      <tr><td><strong>Repeat last</strong></td><td><kbd>⌥⇧R</kbd></td><td>Re-captures the exact previous region — invaluable for before/after shots. Cheap to build, disproportionately useful.</td><td>M3</td></tr>
+    </tbody>
+  </table>
+
+  <div class="rule">
+    <span class="rl">Default behavior</span>
+    <p>Every capture opens the editor. A per-mode toggle in Preferences switches any mode to <strong>copy-only</strong> (straight to clipboard, no editor) — the Shottr behavior you rely on, made configurable per mode rather than globally.</p>
+  </div>
+
+  <h3>Permissions flow</h3>
+  <ul>
+    <li><strong>Screen Recording (TCC)</strong> — required for any capture on modern macOS. First launch shows a one-screen onboarding that deep-links to the System Settings pane and live-detects when permission lands (no "restart the app" dance).</li>
+    <li><strong>Accessibility</strong> — required only for scrolling capture (synthetic scroll events). Requested lazily, the first time the user invokes scrolling capture, never up front.</li>
+  </ul>
+</section>
+
+<!-- ============================================================ -->
+<section id="editor">
+  <div class="sec-head"><span class="sec-num">03</span><h2>The Editor</h2></div>
+  <p class="sec-sub">The heart of the tool, and where the ergonomics live. A borderless window that appears already-loaded, with the screenshot at 1:1 and the toolbar docked below it.</p>
+
+  <div class="toolbar-demo">
+    <div class="toolbar">
+      <div class="tool active">
+        <svg viewBox="0 0 24 24"><path d="M5 19 L17 7 M17 7 v6 M17 7 h-6"/></svg>
+        <span class="hint">A</span>
+      </div>
+      <div class="tool">
+        <svg viewBox="0 0 24 24"><rect x="4.5" y="6" width="15" height="12" rx="1"/></svg>
+        <span class="hint">R</span>
+      </div>
+      <div class="tool">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><text x="12" y="16" font-size="11" text-anchor="middle" fill="currentColor" stroke="none" font-family="IBM Plex Mono">1</text></svg>
+        <span class="hint">C</span>
+      </div>
+      <div class="tb-sep"></div>
+      <div class="swatch active"><span class="dot" style="background:var(--red)"></span><span class="hint">1</span></div>
+      <div class="swatch"><span class="dot" style="background:var(--orange)"></span><span class="hint">2</span></div>
+      <div class="swatch"><span class="dot" style="background:var(--yellow)"></span><span class="hint">3</span></div>
+      <div class="swatch"><span class="dot" style="background:var(--green)"></span><span class="hint">4</span></div>
+      <div class="swatch"><span class="dot" style="background:var(--blue)"></span><span class="hint">5</span></div>
+      <div class="swatch"><span class="dot" style="background:var(--purple)"></span><span class="hint">6</span></div>
+      <div class="swatch"><span class="dot" style="background:var(--white)"></span><span class="hint">7</span></div>
+      <div class="tb-sep"></div>
+      <div class="tool">
+        <svg viewBox="0 0 24 24"><path d="M9 14 L4 9 L9 4 M4 9 h11 a5 5 0 0 1 0 10 h-3"/></svg>
+        <span class="hint">⌘Z</span>
+      </div>
+    </div>
+  </div>
+  <div class="caption">toolbar mockup — every control wears its shortcut. tools left, palette center, undo right.</div>
+
+  <h3>The one big behavioral decision</h3>
+  <div class="rule">
+    <span class="rl">Rule — draw stays armed</span>
+    <p>After you draw an arrow, rectangle, or counter, the shape is committed immediately and <strong>the tool stays armed</strong>. There is no selection state, no move/resize handles, no <kbd>Esc</kbd>-to-deselect step. Got it wrong? <kbd>⌘Z</kbd> and draw again. This inverts Shottr's default — and because there is no "selected object" state, <kbd>Esc</kbd> is freed up to mean exactly one thing: <em>done</em>.</p>
+  </div>
+  <p>This isn't just preference — it simplifies the architecture. The annotation layer becomes an append-only stack of vector shapes with an undo pointer. No hit-testing, no transform handles, no selection rendering. Less code, fewer bugs, smaller binary. (A move/edit mode can be added later as an opt-in without disturbing this model: shapes stay vector until export.)</p>
+
+  <h3>Editor keymap (defaults — all remappable)</h3>
+  <table>
+    <thead><tr><th>Key</th><th>Action</th><th>Notes</th></tr></thead>
+    <tbody>
+      <tr><td><kbd>A</kbd></td><td>Arrow tool</td><td>Slight curve + arrowhead scaled to drag length, Shottr-style</td></tr>
+      <tr><td><kbd>R</kbd></td><td>Rectangle tool</td><td>Stroke-only, rounded corners, 2–3&nbsp;px adaptive stroke. <kbd>⇧</kbd>-drag for square</td></tr>
+      <tr><td><kbd>C</kbd></td><td>Counter tool</td><td>Click to stamp ①②③…; auto-increments; <kbd>⌘Z</kbd> decrements; resets per screenshot</td></tr>
+      <tr><td><kbd>1</kbd>–<kbd>7</kbd></td><td>Color select</td><td>Red · orange · yellow · green · blue · purple · white. <strong>Red is default</strong> on every new screenshot. Applies to all three tools; switching color never switches tool</td></tr>
+      <tr><td><kbd>Esc</kbd></td><td><strong>Copy to clipboard + close editor</strong></td><td>The default exit. Flattens annotations, copies PNG, window closes. Configurable to close-without-copy for people who want it</td></tr>
+      <tr><td><kbd>⌘Z</kbd> / <kbd>⇧⌘Z</kbd></td><td>Undo / redo</td><td>Unlimited within session; operates on the annotation stack</td></tr>
+      <tr><td><kbd>⌘C</kbd></td><td>Copy, keep editor open</td><td>For "copy now, keep annotating" flows</td></tr>
+      <tr><td><kbd>⌘S</kbd></td><td>Save as PNG…</td><td>Configurable default folder + filename pattern (<code>scrcap-{date}-{time}.png</code>)</td></tr>
+      <tr><td><kbd>⌘W</kbd></td><td>Discard &amp; close</td><td>No clipboard write — the "never mind" exit</td></tr>
+      <tr><td>drag image out</td><td>Drag &amp; drop flattened PNG</td><td>Into Slack, Finder, mail — free win from <code>NSDraggingSource</code></td></tr>
+    </tbody>
+  </table>
+
+  <h3>Rendering model</h3>
+  <ul>
+    <li><strong>Bitmap layer:</strong> the screenshot, drawn once into a <code>CALayer</code>. Never re-encoded until export.</li>
+    <li><strong>Vector layer:</strong> annotations as a <code>[Shape]</code> array rendered via Core Graphics on top. Each shape: <code>{kind, color, geometry, seq}</code> — pure data, no AppKit types. This is the portable core (P4).</li>
+    <li><strong>Undo:</strong> a cursor into the shape array. Undo = decrement, redo = increment, new draw truncates redo tail. Trivially correct.</li>
+    <li><strong>Export:</strong> flatten bitmap + vectors at native scale (Retina-aware: capture at 2×, annotate in points, export at 2×).</li>
+  </ul>
+</section>
+
+<!-- ============================================================ -->
+<section id="stack">
+  <div class="sec-head"><span class="sec-num">04</span><h2>Tech Stack Decision</h2></div>
+  <p class="sec-sub">Evaluated against P1 (speed) and P2 (size) first, portability second — exactly the priority order you set.</p>
+
+  <table>
+    <thead><tr><th>Option</th><th>Binary</th><th>Idle RAM</th><th>Capture feel</th><th>Cross-platform</th><th>Verdict</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Swift + AppKit</strong> (native)</td><td class="ok">2–5 MB</td><td class="ok">15–30 MB</td><td class="ok">Instant — direct ScreenCaptureKit, CALayer editor</td><td class="bad">macOS only</td><td class="verdict ok">✓ CHOSEN for v1</td></tr>
+      <tr><td>Rust core + native shells</td><td class="ok">3–8 MB</td><td class="ok">20–40 MB</td><td class="ok">Native per-OS</td><td class="ok">Yes, with effort</td><td class="verdict warn">◌ Future path (§10)</td></tr>
+      <tr><td>Tauri (Rust + webview)</td><td class="warn">8–15 MB</td><td class="warn">60–120 MB</td><td class="warn">Webview editor adds latency &amp; input-feel risk; capture still needs per-OS native code anyway</td><td class="ok">Yes</td><td class="verdict warn">✗ Rejected for v1</td></tr>
+      <tr><td>Electron</td><td class="bad">120–200 MB</td><td class="bad">150–400 MB</td><td class="bad">Violates P1 and P2 outright</td><td class="ok">Yes</td><td class="verdict bad">✗ Rejected</td></tr>
+      <tr><td>Qt / C++</td><td class="bad">30–60 MB</td><td class="warn">50–90 MB</td><td class="warn">Good, but non-native feel on Mac; licensing friction</td><td class="ok">Yes</td><td class="verdict bad">✗ Rejected</td></tr>
+    </tbody>
+  </table>
+
+  <h3>The v1 stack, concretely</h3>
+  <ul>
+    <li><strong>Language:</strong> Swift 5.10+, AppKit. No third-party dependencies at all in v1 — every dependency is binary size and supply-chain surface. (SwiftUI allowed only for the Preferences window, where latency is irrelevant; it adds ~0 size since the frameworks ship with macOS.)</li>
+    <li><strong>Capture:</strong> <code>ScreenCaptureKit</code> (<code>SCScreenshotManager</code> on macOS 14+) with a <code>CGWindowListCreateImage</code> fallback for macOS 12–13. Min target: macOS 12.3.</li>
+    <li><strong>Hotkeys:</strong> Carbon <code>RegisterEventHotKey</code> — ancient but still the only API that delivers reliable system-wide hotkeys without requiring Accessibility permission or an event tap.</li>
+    <li><strong>App shape:</strong> <code>LSUIElement</code> menu-bar app — no Dock icon, no main window. Optional launch-at-login via <code>SMAppService</code>.</li>
+    <li><strong>Distribution:</strong> direct download, Developer ID–signed + notarized DMG. <em>Not</em> the App Store for v1 — sandboxing breaks scrolling capture's synthetic scroll events and complicates TCC flows.</li>
+  </ul>
+
+  <div class="rule">
+    <span class="rl">Portability discipline (the P4 tax we pay now)</span>
+    <p>Three modules are written as pure Swift with zero AppKit imports, with the spec documented in <code>docs/core-model.md</code>: the <strong>annotation model</strong> (shapes, undo), the <strong>keymap engine</strong> (action ↔ chord mapping, conflict detection), and the <strong>settings schema</strong> (versioned JSON). These are the parts a Rust or per-OS rewrite would otherwise re-invent badly. Cost today: near zero. Value later: the port starts at 40% done.</p>
+  </div>
+</section>
+
+<!-- ============================================================ -->
+<section id="arch">
+  <div class="sec-head"><span class="sec-num">05</span><h2>Architecture</h2></div>
+  <p class="sec-sub">Five layers, one direction of flow. Boxes marked red are the portable core — no AppKit allowed inside.</p>
+
+  <div class="arch">
+    <div class="arch-row">
+      <div class="arch-label">Input</div>
+      <div class="arch-boxes">
+        <div class="arch-box"><b>HotkeyService</b><span>Carbon hotkey registration; reads bindings from KeymapEngine; re-registers live on remap</span></div>
+        <div class="arch-box"><b>StatusItem</b><span>menu-bar icon: capture menu, preferences, quit</span></div>
+      </div>
+    </div>
+    <div class="arch-arrow">▼</div>
+    <div class="arch-row">
+      <div class="arch-label">Capture</div>
+      <div class="arch-boxes">
+        <div class="arch-box"><b>CaptureEngine</b><span>ScreenCaptureKit wrapper; per-display, per-window, region crop; Retina-scale aware</span></div>
+        <div class="arch-box"><b>OverlayUI</b><span>borderless NSWindow at .screenSaver level: dim mask, crosshair + coords, window highlighter</span></div>
+        <div class="arch-box"><b>ScrollStitcher</b><span>scroll injection + overlap-matching stitcher (§06)</span></div>
+      </div>
+    </div>
+    <div class="arch-arrow">▼</div>
+    <div class="arch-row">
+      <div class="arch-label">Core (portable)</div>
+      <div class="arch-boxes">
+        <div class="arch-box core"><b>AnnotationModel</b><span>Shape enum (arrow/rect/counter), append-only stack, undo cursor. Pure Swift, fully unit-tested</span></div>
+        <div class="arch-box core"><b>KeymapEngine</b><span>action registry, chord parsing, conflict detection, JSON persistence</span></div>
+        <div class="arch-box core"><b>SettingsStore</b><span>versioned Codable JSON in ~/Library/Application Support/scrcap/</span></div>
+      </div>
+    </div>
+    <div class="arch-arrow">▼</div>
+    <div class="arch-row">
+      <div class="arch-label">Presentation</div>
+      <div class="arch-boxes">
+        <div class="arch-box"><b>EditorWindow</b><span>CALayer bitmap + CG vector overlay; toolbar with live shortcut hints; tool state machine</span></div>
+        <div class="arch-box"><b>PreferencesWindow</b><span>SwiftUI: general, per-mode behavior, shortcuts recorder, palette editor</span></div>
+      </div>
+    </div>
+    <div class="arch-arrow">▼</div>
+    <div class="arch-row">
+      <div class="arch-label">Output</div>
+      <div class="arch-boxes">
+        <div class="arch-box"><b>Exporter</b><span>flatten → NSPasteboard (PNG + TIFF), file save via ImageIO, drag-out source</span></div>
+      </div>
+    </div>
+  </div>
+
+  <p>Each layer talks only downward through small protocol seams (<code>CaptureProviding</code>, <code>Exporting</code>…), which keeps the editor testable with fixture images and makes the eventual cross-platform split obvious: everything above and below the red core gets rewritten per OS; the core travels.</p>
+</section>
+
+<!-- ============================================================ -->
+<section id="scroll">
+  <div class="sec-head"><span class="sec-num">06</span><h2>Scrolling Capture Design</h2></div>
+  <p class="sec-sub">The hardest feature in the app, so it gets its own design and its own milestone — after the core workflow already ships.</p>
+
+  <h3>Algorithm: scroll-and-stitch</h3>
+  <ol>
+    <li><strong>Select</strong> — user picks a region or window (reusing the M1 overlay).</li>
+    <li><strong>Capture frame 0</strong>, then inject a smooth synthetic scroll (<code>CGEvent</code> scroll-wheel events targeted at the region's center) of ~70% of the visible height.</li>
+    <li><strong>Settle &amp; capture</strong> — wait for two consecutive identical frames (handles bounce, lazy-loading, animations) with a 600&nbsp;ms timeout, then capture frame N.</li>
+    <li><strong>Match overlap</strong> — compute per-row hashes of the new frame, find the best alignment against the previous frame's tail via normalized cross-correlation on the hash sequence. Sub-region matching ignores fixed headers/footers (detected as rows identical across all frames — they get cropped from middle frames automatically).</li>
+    <li><strong>Terminate</strong> when two consecutive frames produce zero new rows (bottom reached), the user presses <kbd>Esc</kbd>/clicks Stop, or a configurable max-height (default 20,000&nbsp;px) is hit.</li>
+    <li><strong>Composite</strong> into a single bitmap and hand to the standard editor — annotations work identically on tall images; the editor gains vertical scroll.</li>
+  </ol>
+
+  <h3>Known hard cases &amp; mitigations</h3>
+  <table>
+    <thead><tr><th>Case</th><th>Mitigation</th></tr></thead>
+    <tbody>
+      <tr><td>Sticky headers / floating elements</td><td>Cross-frame identical-row detection; crop from all but first frame</td></tr>
+      <tr><td>Lazy-loading content (infinite feeds)</td><td>Settle detection + max-height cap; live progress preview so the user can stop anytime</td></tr>
+      <tr><td>Elastic bounce at document end</td><td>Bounce produces negative-offset match → treated as terminal frame</td></tr>
+      <tr><td>Non-scrollable target picked</td><td>Frame 1 == frame 0 → bail gracefully with a toast, deliver a normal capture instead</td></tr>
+      <tr><td>Memory on very tall pages</td><td>Stitch incrementally into one growing buffer; 20k&nbsp;px × 2x-Retina ≈ 450&nbsp;MB worst case → cap + warn</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<!-- ============================================================ -->
+<section id="settings">
+  <div class="sec-head"><span class="sec-num">07</span><h2>Settings &amp; Shortcut Remapping</h2></div>
+  <p class="sec-sub">Every action in the app — global and in-editor — routes through the KeymapEngine, so remapping is universal by construction, not feature-by-feature.</p>
+
+  <h3>Preferences window (4 tabs)</h3>
+  <ul>
+    <li><strong>General</strong> — launch at login, after-capture behavior per mode (open editor / copy-only / both), save folder &amp; filename pattern, image format.</li>
+    <li><strong>Shortcuts</strong> — a recorder control per action (click, press any combination, done). Live conflict detection against both scrcap's own map and known macOS system shortcuts, shown inline in red. Built in-house (~200 lines) rather than importing a dependency.</li>
+    <li><strong>Editor</strong> — palette editor (reorder/replace the 7 colors; slot 1 stays the boot default), stroke width, counter style, Esc behavior (copy+close / close only), arrow style.</li>
+    <li><strong>Advanced</strong> — Retina export scale, scrolling-capture max height, reset to defaults.</li>
+  </ul>
+
+  <h3>Persistence</h3>
+  <p>One versioned JSON file: <code>~/Library/Application Support/scrcap/settings.json</code> with a <code>schemaVersion</code> field and explicit migration functions. Human-readable and hand-editable on purpose — power users (you) can sync it in dotfiles. Writes are atomic (temp file + rename).</p>
+</section>
+
+<!-- ============================================================ -->
+<section id="perf">
+  <div class="sec-head"><span class="sec-num">08</span><h2>Performance &amp; Size Budgets</h2></div>
+  <p class="sec-sub">Budgets are CI-enforced from M0 — a failing budget blocks merge, the same as a failing test. This is how the app stays at Shottr weight instead of drifting.</p>
+
+  <table>
+    <thead><tr><th>Metric</th><th>Budget</th><th>Stretch</th><th>How it's measured</th></tr></thead>
+    <tbody>
+      <tr><td>Binary size (.app, compressed DMG)</td><td>&lt; 5 MB</td><td>3 MB</td><td>CI check on release build, <code>-Osize</code>, dead-strip, no debug symbols in dist</td></tr>
+      <tr><td>Idle memory (resident)</td><td>&lt; 30 MB</td><td>20 MB</td><td><code>footprint(1)</code> after 60 s idle; editor windows fully torn down after close</td></tr>
+      <tr><td>Idle CPU</td><td>0.0%</td><td>—</td><td>No polling anywhere; everything event-driven</td></tr>
+      <tr><td>Hotkey → selection overlay visible</td><td>&lt; 50 ms</td><td>16 ms</td><td>Overlay window pre-created at launch and kept ordered-out, not built on demand</td></tr>
+      <tr><td>Capture → editor interactive</td><td>&lt; 150 ms</td><td>80 ms</td><td>Signpost instrumentation; editor window also pre-warmed</td></tr>
+      <tr><td>Cold launch → hotkeys live</td><td>&lt; 300 ms</td><td>—</td><td>Hotkey registration before any UI work</td></tr>
+      <tr><td>Editor memory, 5K screenshot</td><td>&lt; 160 MB</td><td>—</td><td>One bitmap copy, vectors are bytes; honest budget: 5120×2880×4 ≈ 56 MB raw</td></tr>
+    </tbody>
+  </table>
+
+  <p>Two design choices do most of the work here: <strong>pre-warmed windows</strong> (the overlay and an empty editor exist at launch, hidden — showing a window is fast, creating one is not), and <strong>zero dependencies</strong> (nothing to lazy-load, nothing to bloat).</p>
+</section>
+
+<!-- ============================================================ -->
+<section id="roadmap">
+  <div class="sec-head"><span class="sec-num">09</span><h2>Roadmap</h2></div>
+  <p class="sec-sub">Six milestones, ordered so the daily-driver workflow (capture → annotate → Esc) lands earliest. Each has hard exit criteria; durations assume part-time solo development.</p>
+
+  <div class="frame">
+    <div class="milestone">
+      <div class="ms-id"><span class="tag">M0</span><span class="dur">~1 week</span></div>
+      <div>
+        <h4>Skeleton &amp; proof of pipeline</h4>
+        <ul>
+          <li>Menu-bar app (<code>LSUIElement</code>), Carbon hotkey service, TCC onboarding flow</li>
+          <li>Fullscreen capture (<kbd>⌥⇧1</kbd>) → PNG → clipboard, no editor yet</li>
+          <li>CI with size + launch-time budget checks wired from day one</li>
+        </ul>
+        <span class="exit">press hotkey, paste a fullscreen PNG anywhere, app uses 0% idle CPU</span>
+      </div>
+    </div>
+    <div class="milestone">
+      <div class="ms-id"><span class="tag">M1</span><span class="dur">~2 weeks</span></div>
+      <div>
+        <h4>Region &amp; window capture</h4>
+        <ul>
+          <li>Dimming overlay, crosshair with live coords/dimensions, drag-select, <kbd>Space</kbd>-to-move</li>
+          <li>Window mode with hover highlight and <kbd>Tab</kbd> cycling</li>
+          <li>Multi-monitor and Retina correctness (the classic trap — test early)</li>
+        </ul>
+        <span class="exit">region &amp; window capture feel instant (&lt;50 ms overlay) on a 2-display setup</span>
+      </div>
+    </div>
+    <div class="milestone">
+      <div class="ms-id"><span class="tag">M2</span><span class="dur">~3 weeks</span></div>
+      <div>
+        <h4>The editor — the heart</h4>
+        <ul>
+          <li>AnnotationModel (portable core) with full unit tests; CALayer rendering</li>
+          <li>Arrow, rectangle, counter tools — draw-stays-armed, no selection state</li>
+          <li>Toolbar with visible shortcut hints, 7-color palette (<kbd>1</kbd>–<kbd>7</kbd>, red default)</li>
+          <li><kbd>⌘Z</kbd>/<kbd>⇧⌘Z</kbd>, <kbd>Esc</kbd> = copy + close, <kbd>⌘C</kbd>, <kbd>⌘S</kbd>, <kbd>⌘W</kbd>, drag-out</li>
+        </ul>
+        <span class="exit">the full daily workflow — capture, annotate, Esc, paste — works end to end. scrcap becomes your daily driver here</span>
+      </div>
+    </div>
+    <div class="milestone">
+      <div class="ms-id"><span class="tag">M3</span><span class="dur">~1.5 weeks</span></div>
+      <div>
+        <h4>Preferences &amp; remapping</h4>
+        <ul>
+          <li>KeymapEngine + shortcut recorder UI with conflict detection</li>
+          <li>Per-mode after-capture behavior, palette editor, Esc-behavior toggle</li>
+          <li>Versioned settings.json, repeat-last-capture (<kbd>⌥⇧R</kbd>)</li>
+        </ul>
+        <span class="exit">every shortcut in the app remappable to any combination; settings survive an app update</span>
+      </div>
+    </div>
+    <div class="milestone">
+      <div class="ms-id"><span class="tag">M4</span><span class="dur">~2–3 weeks</span></div>
+      <div>
+        <h4>Scrolling capture</h4>
+        <ul>
+          <li>Scroll injection, settle detection, row-hash stitcher, sticky-header cropping</li>
+          <li>Live progress preview with stop control; graceful bail on non-scrollable targets</li>
+        </ul>
+        <span class="exit">clean stitch of a long web page, a Slack thread, and a code file in an IDE</span>
+      </div>
+    </div>
+    <div class="milestone">
+      <div class="ms-id"><span class="tag">M5</span><span class="dur">~1 week + ongoing</span></div>
+      <div>
+        <h4>Ship</h4>
+        <ul>
+          <li>Developer ID signing, notarization, DMG, landing page, in-app update check (lightweight, no Sparkle if a ~100-line checker suffices)</li>
+          <li>Budget audit against §08; fix any drift</li>
+          <li><strong>v2 candidate list</strong> (revisit after real usage): OCR, pin-to-screen, blur tool, color picker, text annotations</li>
+        </ul>
+        <span class="exit">a stranger can download, install, and use scrcap without instructions</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================ -->
+<section id="xplat">
+  <div class="sec-head"><span class="sec-num">10</span><h2>Cross-Platform Strategy (later)</h2></div>
+  <p class="sec-sub">Explicitly deferred until macOS v1 is shipped and stable — per your priority call. But the door is designed now so it doesn't have to be forced later.</p>
+
+  <h3>What each OS needs replaced</h3>
+  <table>
+    <thead><tr><th>Layer</th><th>Windows</th><th>Linux</th></tr></thead>
+    <tbody>
+      <tr><td>Capture API</td><td><code>Windows.Graphics.Capture</code> / DXGI duplication</td><td>XDG Desktop Portal (Wayland) · XShm (X11)</td></tr>
+      <tr><td>Global hotkeys</td><td><code>RegisterHotKey</code></td><td>portal GlobalShortcuts (Wayland) · XGrabKey (X11)</td></tr>
+      <tr><td>Overlay + editor UI</td><td>Win32/WinUI or Rust-native (e.g. wgpu)</td><td>layer-shell surface · GTK or Rust-native</td></tr>
+      <tr><td>Clipboard</td><td>Win32 clipboard</td><td>wl-clipboard / X selections</td></tr>
+      <tr><td>Annotation model, keymap, settings</td><td colspan="2" style="color:var(--green)">— ported once from the documented portable core, shared thereafter —</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Decision framework (to be made then, not now)</h3>
+  <ul>
+    <li><strong>Path A — separate native apps per OS</strong> sharing the documented core model. Best feel, best size on every OS; highest total effort. You already said this is acceptable if it preserves performance.</li>
+    <li><strong>Path B — Rust core + thin native shells.</strong> Rewrite the portable core once in Rust, keep UI native per OS. Middle effort, keeps P1/P2 intact. The likely winner if Windows + Linux are both wanted.</li>
+    <li><strong>Path C — single cross-platform UI toolkit.</strong> Only if A and B prove impractical, and only with a toolkit that demonstrably meets the §08 budgets. Electron remains permanently out.</li>
+  </ul>
+  <p>The trigger to revisit: macOS v1 at M5, stable for a month of daily use, and actual demand for another OS.</p>
+</section>
+
+<!-- ============================================================ -->
+<section id="risks">
+  <div class="sec-head"><span class="sec-num">11</span><h2>Risks &amp; Open Questions</h2></div>
+
+  <h3>Risks</h3>
+  <table>
+    <thead><tr><th>Risk</th><th>Likelihood</th><th>Mitigation</th></tr></thead>
+    <tbody>
+      <tr><td>Scrolling capture flaky on real-world apps</td><td class="warn">High</td><td>It's the last feature milestone (M4), isolated behind its own module; the app is fully useful without it</td></tr>
+      <tr><td>Retina / multi-monitor coordinate bugs</td><td class="warn">Medium</td><td>Single <code>GeometryMapper</code> owning all point↔pixel conversion; tested on mixed-DPI setups from M1</td></tr>
+      <tr><td>ScreenCaptureKit API churn across macOS releases</td><td class="warn">Medium</td><td>Capture isolated behind <code>CaptureProviding</code> protocol; CGWindowList fallback retained</td></tr>
+      <tr><td>Carbon hotkey API eventually deprecated for real</td><td class="ok">Low</td><td>Isolated in HotkeyService; NSEvent global monitor is a known (worse but workable) fallback</td></tr>
+      <tr><td>Binary-size drift as features accrue</td><td class="warn">Medium</td><td>CI budget gate from M0; zero-dependency rule</td></tr>
+      <tr><td>Default hotkeys collide with user's other tools</td><td class="ok">Low</td><td>Full remapping ships in M3; conflict detection warns proactively</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Open questions (decisions to make as we build)</h3>
+  <ul>
+    <li><strong>Name:</strong> running with <code>scrcap</code> per the folder — confirm before M5 (domain, signing identity).</li>
+    <li><strong>Counter visuals:</strong> filled circle with white numeral (proposed) vs. outlined — decide in M2 with real renders.</li>
+    <li><strong>Window capture shadows:</strong> include macOS window shadow by default? (Proposed: off by default, toggle in Preferences.)</li>
+    <li><strong>Update mechanism:</strong> tiny in-house checker vs. Sparkle (~2 MB — would nearly double the binary). Proposed: in-house.</li>
+    <li><strong>v2 ergonomic question:</strong> after a month of daily use, does draw-stays-armed ever need an opt-in move/edit mode, or is undo-and-redraw fully sufficient?</li>
+  </ul>
+</section>
+
+</main>
+
+<footer>
+  <span>scrcap — development plan v1.0</span>
+  <span>drafted 2026-06-11 · plan.html</span>
+</footer>
+
+<script>
+const header = document.querySelector('header');
+const coords = document.getElementById('coords');
+header.addEventListener('mousemove', e => {
+  const r = header.getBoundingClientRect();
+  coords.innerHTML = 'x:<em>' + Math.round(e.clientX - r.left) + '</em> y:<em>' + Math.round(e.clientY - r.top) + '</em> — 1060×420';
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,39 @@
+.build/
+.swiftpm/
+.buildx/
+Packages/
+*.xcodeproj/
+*.xcworkspace/
+*.swiftpm/
+*.swiftpackage/
+
+# SwiftPM generated artifacts
+.build
+Package.resolved
+
+# macOS app/packaging outputs
+dist/
+*.app
+*.dmg
+*.zip
+
+# Logs and temporary files
+*.log
+*.tmp
+*.swp
+*~
+
+# macOS Finder files
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon?
+
+# Xcode and derived data
+DerivedData/
+xcuserdata/
+*.xcodeproj/xcuserdata/
+
+# Shell session / tool artifacts
+.env
+.env.local

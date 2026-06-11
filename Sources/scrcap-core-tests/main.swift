@@ -1,0 +1,285 @@
+import Foundation
+import ScrcapCore
+
+// MARK: - AnnotationModel
+
+func makeShape(_ kind: ShapeKind = .arrow, color: Int = 0) -> Shape {
+    Shape(kind: kind, colorIndex: color, start: CorePoint(x: 0, y: 0), end: CorePoint(x: 10, y: 10))
+}
+
+print("AnnotationModel")
+
+test("append makes visible") {
+    var stack = AnnotationStack()
+    stack.append(makeShape())
+    stack.append(makeShape(.rectangle))
+    checkEqual(stack.visible.count, 2)
+    check(stack.canUndo)
+    check(!stack.canRedo)
+}
+
+test("undo/redo") {
+    var stack = AnnotationStack()
+    stack.append(makeShape())
+    stack.append(makeShape(.rectangle))
+    check(stack.undo())
+    checkEqual(stack.visible.count, 1)
+    check(stack.canRedo)
+    check(stack.redo())
+    checkEqual(stack.visible.count, 2)
+    check(!stack.redo())
+}
+
+test("undo on empty fails") {
+    var stack = AnnotationStack()
+    check(!stack.undo())
+}
+
+test("new draw truncates redo tail") {
+    var stack = AnnotationStack()
+    stack.append(makeShape())
+    stack.append(makeShape(.rectangle))
+    stack.undo()
+    stack.append(makeShape(.counter(number: 1)))
+    check(!stack.canRedo)
+    checkEqual(stack.visible.count, 2)
+    checkEqual(stack.visible.last?.kind, .counter(number: 1))
+}
+
+test("counter numbering follows undo") {
+    var stack = AnnotationStack()
+    checkEqual(stack.nextCounterNumber, 1)
+    stack.append(makeShape(.counter(number: stack.nextCounterNumber)))
+    stack.append(makeShape(.counter(number: stack.nextCounterNumber)))
+    checkEqual(stack.nextCounterNumber, 3)
+    stack.undo()
+    checkEqual(stack.nextCounterNumber, 2)
+    stack.append(makeShape(.arrow)) // arrows don't affect numbering
+    checkEqual(stack.nextCounterNumber, 2)
+}
+
+test("shape codable round trip") {
+    let s = makeShape(.counter(number: 7), color: 3)
+    let data = try JSONEncoder().encode(s)
+    let back = try JSONDecoder().decode(Shape.self, from: data)
+    checkEqual(back, s)
+}
+
+test("text shape codable round trip") {
+    let s = makeShape(.text(string: "hello\nworld", size: 18), color: 4)
+    let data = try JSONEncoder().encode(s)
+    let back = try JSONDecoder().decode(Shape.self, from: data)
+    checkEqual(back, s)
+}
+
+test("text shapes don't affect counter numbering") {
+    var stack = AnnotationStack()
+    stack.append(makeShape(.text(string: "note", size: 16)))
+    checkEqual(stack.nextCounterNumber, 1)
+}
+
+// MARK: - KeymapEngine
+
+print("\nKeymapEngine")
+
+test("parse chord") {
+    checkEqual(KeyChord(string: "opt+shift+2"), KeyChord(key: "2", modifiers: [.option, .shift]))
+}
+
+test("parse aliases") {
+    checkEqual(KeyChord(string: "alt+SHIFT+R"), KeyChord(key: "r", modifiers: [.option, .shift]))
+    checkEqual(KeyChord(string: "command+z"), KeyChord(key: "z", modifiers: [.command]))
+    checkEqual(KeyChord(string: "ctrl+alt+space"), KeyChord(key: "space", modifiers: [.control, .option]))
+}
+
+test("parse rejects garbage") {
+    checkNil(KeyChord(string: ""))
+    checkNil(KeyChord(string: "opt+shift")) // no key
+    checkNil(KeyChord(string: "a+b"))       // two keys
+}
+
+test("string round trip") {
+    let chord = KeyChord(key: "2", modifiers: [.option, .shift])
+    checkEqual(KeyChord(string: chord.stringValue), chord)
+}
+
+test("display value") {
+    checkEqual(KeyChord(key: "2", modifiers: [.option, .shift]).displayValue, "⌥⇧2")
+    checkEqual(KeyChord(key: "z", modifiers: [.command, .shift]).displayValue, "⇧⌘Z")
+}
+
+test("defaults have no conflicts and avoid system shortcuts") {
+    let map = Keymap.defaults
+    let chords = Array(map.bindings.values)
+    checkEqual(Set(chords).count, chords.count)
+    for chord in chords {
+        check(!Keymap.isSystemReserved(chord), "\(chord.displayValue) collides with macOS")
+    }
+}
+
+test("conflict detection and stealing") {
+    var map = Keymap.defaults
+    let regionChord = map.chord(for: .captureRegion)!
+    checkEqual(map.conflict(for: regionChord), .captureRegion)
+    checkNil(map.conflict(for: regionChord, excluding: .captureRegion))
+
+    let stolen = map.set(regionChord, for: .captureWindow)
+    checkEqual(stolen, .captureRegion)
+    checkNil(map.chord(for: .captureRegion))
+    checkEqual(map.chord(for: .captureWindow), regionChord)
+}
+
+test("system reserved") {
+    check(Keymap.isSystemReserved(KeyChord(string: "cmd+shift+4")!))
+    check(!Keymap.isSystemReserved(KeyChord(string: "opt+shift+4")!))
+}
+
+// MARK: - Settings
+
+print("\nSettings")
+
+func withTempDir(_ body: (URL) throws -> Void) rethrows {
+    let dir = FileManager.default.temporaryDirectory
+        .appendingPathComponent("scrcap-tests-\(UUID().uuidString)", isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    try body(dir)
+}
+
+test("defaults when no file") {
+    withTempDir { dir in
+        let store = SettingsStore(directory: dir)
+        checkEqual(store.settings, .defaults)
+        checkEqual(store.settings.paletteHex.count, 7)
+        checkEqual(store.settings.paletteHex[0], "#FF3B30")
+    }
+}
+
+test("save and reload") {
+    withTempDir { dir in
+        let store = SettingsStore(directory: dir)
+        store.update { $0.strokeWidth = 5; $0.escBehavior = .closeOnly }
+        let reloaded = SettingsStore(directory: dir)
+        checkEqual(reloaded.settings.strokeWidth, 5)
+        checkEqual(reloaded.settings.escBehavior, .closeOnly)
+    }
+}
+
+test("keymap round trip through settings") {
+    withTempDir { dir in
+        let store = SettingsStore(directory: dir)
+        var map = store.settings.keymap
+        let newChord = KeyChord(string: "ctrl+opt+5")!
+        map.set(newChord, for: .captureRegion)
+        store.update { $0.apply(map) }
+        let reloaded = SettingsStore(directory: dir)
+        checkEqual(reloaded.settings.keymap.chord(for: .captureRegion), newChord)
+    }
+}
+
+test("corrupt file falls back to defaults") {
+    try withTempDir { dir in
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        try Data("not json".utf8).write(to: dir.appendingPathComponent("settings.json"))
+        let store = SettingsStore(directory: dir)
+        checkEqual(store.settings, .defaults)
+    }
+}
+
+test("missing schemaVersion falls back to defaults") {
+    try withTempDir { dir in
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        try Data("{\"strokeWidth\": 9}".utf8).write(to: dir.appendingPathComponent("settings.json"))
+        let store = SettingsStore(directory: dir)
+        checkEqual(store.settings, .defaults)
+    }
+}
+
+test("v1 settings migrate to v2 with default text size") {
+    try withTempDir { dir in
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        // Build a faithful v1 file: today's defaults minus the v2 field.
+        var json = try JSONSerialization.jsonObject(
+            with: JSONEncoder().encode(Settings.defaults)
+        ) as! [String: Any]
+        json["schemaVersion"] = 1
+        json.removeValue(forKey: "textSize")
+        json["strokeWidth"] = 5.0 // a non-default to prove the rest survives
+        try JSONSerialization.data(withJSONObject: json)
+            .write(to: dir.appendingPathComponent("settings.json"))
+
+        let store = SettingsStore(directory: dir)
+        checkEqual(store.settings.schemaVersion, Settings.currentSchemaVersion)
+        checkEqual(store.settings.textSize, 16)
+        checkEqual(store.settings.strokeWidth, 5)
+    }
+}
+
+test("behavior for mode defaults to editor") {
+    var s = Settings.defaults
+    checkEqual(s.behavior(for: .region), .openEditor)
+    s.afterCapture[CaptureMode.fullscreen.rawValue] = .copyOnly
+    checkEqual(s.behavior(for: .fullscreen), .copyOnly)
+    checkEqual(s.behavior(for: .region), .openEditor)
+}
+
+// MARK: - StitchEngine
+
+print("\nStitchEngine")
+
+func docRows(_ range: Range<Int>) -> [UInt64] {
+    range.map { UInt64($0) &* 0x9E3779B97F4A7C15 &+ 1 }
+}
+
+test("align finds overlap") {
+    let alignment = StitchEngine.align(accumulated: docRows(0..<100), frame: docRows(70..<170))
+    checkEqual(alignment, .init(newContentStart: 30))
+}
+
+test("identical frame yields no new rows") {
+    let alignment = StitchEngine.align(accumulated: docRows(0..<100), frame: docRows(0..<100))
+    checkEqual(alignment?.newContentStart, 100)
+}
+
+test("bottom reached: tail frame adds nothing") {
+    let alignment = StitchEngine.align(accumulated: docRows(0..<200), frame: docRows(100..<200))
+    checkEqual(alignment?.newContentStart, 100)
+}
+
+test("unrelated content fails to align") {
+    checkNil(StitchEngine.align(accumulated: docRows(0..<100), frame: docRows(5000..<5100)))
+}
+
+test("tolerance allows small noise") {
+    var frame = docRows(40..<140)
+    frame[10] = 0xDEAD // one noisy row inside the 60-row overlap (> 98% match)
+    let alignment = StitchEngine.align(accumulated: docRows(0..<100), frame: frame)
+    checkEqual(alignment, .init(newContentStart: 60))
+}
+
+test("fixedEdges detects sticky header") {
+    let header = docRows(9000..<9010)
+    let frames = [
+        header + docRows(0..<90),
+        header + docRows(60..<150),
+        header + docRows(120..<210),
+    ]
+    let edges = StitchEngine.fixedEdges(frames: frames)
+    checkEqual(edges.top, 10)
+    checkEqual(edges.bottom, 0)
+}
+
+test("fixedEdges single frame is zero") {
+    let edges = StitchEngine.fixedEdges(frames: [docRows(0..<50)])
+    checkEqual(edges.top, 0)
+    checkEqual(edges.bottom, 0)
+}
+
+test("rowHash differs on byte change") {
+    var a: [UInt8] = [1, 2, 3, 4, 5, 6, 7, 8]
+    let h1 = a.withUnsafeBytes { StitchEngine.rowHash($0) }
+    a[3] = 9
+    let h2 = a.withUnsafeBytes { StitchEngine.rowHash($0) }
+    check(h1 != h2)
+}
+
+TestRun.shared.finish()
