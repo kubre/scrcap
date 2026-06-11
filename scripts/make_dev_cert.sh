@@ -37,7 +37,8 @@ openssl req -x509 -newkey rsa:2048 -nodes -days 3650 \
     -config "$TMP/ext.cnf" -extensions ext 2>/dev/null
 
 openssl pkcs12 -export -inkey "$TMP/key.pem" -in "$TMP/cert.pem" \
-    -out "$TMP/$NAME.p12" -passout pass:scrcap -name "$NAME"
+    -out "$TMP/$NAME.p12" -passout pass:scrcap -name "$NAME" \
+    -keypbe PBE-SHA1-3DES -certpbe PBE-SHA1-3DES -macalg sha1
 
 echo "▸ importing into login keychain…"
 security import "$TMP/$NAME.p12" -k "$HOME/Library/Keychains/login.keychain-db" \

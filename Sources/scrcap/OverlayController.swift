@@ -107,9 +107,10 @@ final class OverlayController {
             guard cgRect.width >= 40, cgRect.height >= 40 else { return nil }
             let owner = entry[kCGWindowOwnerName as String] as? String ?? ""
             let name = entry[kCGWindowName as String] as? String ?? ""
+            let windowScreen = GeometryMapper.screen(containing: NSPoint(x: cgRect.midX, y: cgRect.midY))
             return PickableWindow(
                 windowID: id,
-                frame: GeometryMapper.cocoaRect(fromCG: cgRect),
+                frame: GeometryMapper.cocoaRect(fromCG: cgRect, on: windowScreen),
                 title: name.isEmpty ? owner : "\(owner) — \(name)"
             )
         }

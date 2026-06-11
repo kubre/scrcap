@@ -3,26 +3,33 @@
 # Usage: scripts/make_app.sh [output-dir]   (default: ./dist)
 #
 # Signing: uses $CODESIGN_IDENTITY if set; otherwise auto-detects the
-# "scrcap-dev" self-signed identity (create once with scripts/make_dev_cert.sh
-# so TCC permissions survive rebuilds); otherwise falls back to ad-hoc.
+# "scrcap-dev" self-signed identity. Stable signing is required so TCC
+# permissions survive rebuilds. Set SCRCAP_ALLOW_ADHOC=1 only for throwaway
+# builds that are expected to need fresh permissions.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
 OUT="${1:-dist}"
 APP="$OUT/scrcap.app"
 
-echo "▸ building release (-Osize, dead-strip)…"
-swift build -c release -Xswiftc -Osize -Xlinker -dead_strip 2>&1 | tail -1
+echo "▸ building release (-Osize, whole-module, dead-strip)…"
+swift build -c release \
+    -Xswiftc -Osize \
+    -Xswiftc -whole-module-optimization \
+    -Xlinker -dead_strip 2>&1 | tail -1
 
 echo "▸ assembling bundle…"
 rm -rf "$APP"
-# Minimal bundle: binary + Info.plist. No Resources, no PkgInfo — nothing
-# that isn't required.
-mkdir -p "$APP/Contents/MacOS"
+# Minimal bundle: binary + Info.plist + icons. No PkgInfo — nothing that isn't
+# required.
+mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 
 cp .build/release/scrcap "$APP/Contents/MacOS/scrcap"
-# Strip symbol table and debug info from the shipped binary.
-strip -Sx "$APP/Contents/MacOS/scrcap" 2>/dev/null || true
+cp Sources/scrcap/Resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
+cp Sources/scrcap/Resources/MenuBarIconTemplate.png "$APP/Contents/Resources/MenuBarIconTemplate.png"
+# Strip symbol/debug metadata from the shipped binary. This does not remove app
+# features; it only drops linker/debug information that is not executed.
+strip -ru "$APP/Contents/MacOS/scrcap" 2>/dev/null || strip -Sx "$APP/Contents/MacOS/scrcap" 2>/dev/null || true
 
 cat > "$APP/Contents/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
@@ -34,6 +41,7 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
     <key>CFBundleName</key>                <string>scrcap</string>
     <key>CFBundleDisplayName</key>         <string>scrcap</string>
     <key>CFBundlePackageType</key>         <string>APPL</string>
+    <key>CFBundleIconFile</key>            <string>AppIcon</string>
     <key>CFBundleShortVersionString</key>  <string>1.0</string>
     <key>CFBundleVersion</key>             <string>1</string>
     <key>LSMinimumSystemVersion</key>      <string>14.0</string>
@@ -53,10 +61,14 @@ fi
 if [ -n "$IDENTITY" ]; then
     echo "▸ signing with identity: $IDENTITY"
     codesign --force --sign "$IDENTITY" --identifier com.scrcap.app "$APP"
-else
-    echo "▸ signing ad-hoc (note: TCC permissions reset every rebuild —"
-    echo "  run scripts/make_dev_cert.sh once to fix that)"
+elif [ "${SCRCAP_ALLOW_ADHOC:-}" = "1" ]; then
+    echo "▸ signing ad-hoc (TCC permissions will reset on rebuild)"
     codesign --force --sign - --identifier com.scrcap.app "$APP"
+else
+    echo "✗ no stable code-signing identity found." >&2
+    echo "  Run scripts/make_dev_cert.sh once, or set CODESIGN_IDENTITY." >&2
+    echo "  For a throwaway build only: SCRCAP_ALLOW_ADHOC=1 scripts/make_app.sh" >&2
+    exit 1
 fi
 
 echo "▸ checking budgets (plan §08)…"

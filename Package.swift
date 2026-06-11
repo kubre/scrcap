@@ -13,6 +13,8 @@ let package = Package(
         .executableTarget(
             name: "scrcap",
             dependencies: ["ScrcapCore"],
+            exclude: ["Resources/AppIcon.icns"],
+            resources: [.copy("Resources/MenuBarIconTemplate.png")],
             swiftSettings: [.swiftLanguageMode(.v5)]
         ),
         // Plain-executable test runner: the toolchain here is CLT-only, which

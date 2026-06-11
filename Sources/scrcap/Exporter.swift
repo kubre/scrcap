@@ -15,9 +15,9 @@ enum Exporter {
         shapes: [Shape],
         palette: [String],
         strokeWidth: CGFloat,
-        scale: CGFloat
+        scale: CGFloat,
+        exportScale: Int = 2
     ) -> CGImage {
-        guard !shapes.isEmpty else { return bitmap }
         let pixelWidth = bitmap.width
         let pixelHeight = bitmap.height
         guard let ctx = CGContext(
@@ -28,22 +28,50 @@ enum Exporter {
             bytesPerRow: 0,
             space: CGColorSpace(name: CGColorSpace.sRGB)!,
             bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
-        ) else { return bitmap }
+        ) else {
+            return bitmap
+        }
 
         ctx.draw(bitmap, in: CGRect(x: 0, y: 0, width: pixelWidth, height: pixelHeight))
+        if !shapes.isEmpty {
+            // Flip to top-left origin in point units so the renderer draws with
+            // the exact same code path as the live canvas.
+            ctx.translateBy(x: 0, y: CGFloat(pixelHeight))
+            ctx.scaleBy(x: scale, y: -scale)
 
-        // Flip to top-left origin in point units so the renderer draws with
-        // the exact same code path as the live canvas.
-        ctx.translateBy(x: 0, y: CGFloat(pixelHeight))
-        ctx.scaleBy(x: scale, y: -scale)
+            let nsContext = NSGraphicsContext(cgContext: ctx, flipped: true)
+            NSGraphicsContext.saveGraphicsState()
+            NSGraphicsContext.current = nsContext
+            ShapeRenderer.draw(shapes, palette: palette, strokeWidth: strokeWidth)
+            NSGraphicsContext.restoreGraphicsState()
+        }
 
-        let nsContext = NSGraphicsContext(cgContext: ctx, flipped: true)
-        NSGraphicsContext.saveGraphicsState()
-        NSGraphicsContext.current = nsContext
-        ShapeRenderer.draw(shapes, palette: palette, strokeWidth: strokeWidth)
-        NSGraphicsContext.restoreGraphicsState()
+        return scaledOutput(image: ctx.makeImage() ?? bitmap, captureScale: scale, exportScale: exportScale)
+    }
 
-        return ctx.makeImage() ?? bitmap
+    private static func scaledOutput(image: CGImage, captureScale: CGFloat, exportScale: Int) -> CGImage {
+        let resolvedScale = exportScale == 1 ? 1.0 : 2.0
+        let ratio = resolvedScale / captureScale
+        if ratio == 1 { return image }
+
+        let targetWidth = max(1, Int((CGFloat(image.width) * ratio).rounded(.toNearestOrAwayFromZero)))
+        let targetHeight = max(1, Int((CGFloat(image.height) * ratio).rounded(.toNearestOrAwayFromZero)))
+
+        guard let context = CGContext(
+            data: nil,
+            width: targetWidth,
+            height: targetHeight,
+            bitsPerComponent: 8,
+            bytesPerRow: 0,
+            space: CGColorSpace(name: CGColorSpace.sRGB)!,
+            bitmapInfo: image.bitmapInfo.rawValue
+        ) else {
+            return image
+        }
+
+        context.interpolationQuality = .high
+        context.draw(image, in: CGRect(x: 0, y: 0, width: targetWidth, height: targetHeight))
+        return context.makeImage() ?? image
     }
 
     static func pngData(_ image: CGImage) -> Data? {
@@ -82,10 +110,22 @@ enum Exporter {
         date.dateFormat = "yyyy-MM-dd"
         let time = DateFormatter()
         time.dateFormat = "HH.mm.ss"
-        return pattern
+        let expanded = pattern
             .replacingOccurrences(of: "{date}", with: date.string(from: now))
             .replacingOccurrences(of: "{time}", with: time.string(from: now))
-            + ".png"
+        return safeFilenameStem(expanded) + ".png"
+    }
+
+    private static func safeFilenameStem(_ raw: String) -> String {
+        let invalid = CharacterSet(charactersIn: "/:\\")
+            .union(.controlCharacters)
+            .union(.newlines)
+        let parts = raw
+            .components(separatedBy: invalid)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        let stem = parts.joined(separator: "-")
+        return stem.isEmpty ? "scrcap" : stem
     }
 
     static func defaultSaveFolder(settings: Settings) -> URL {

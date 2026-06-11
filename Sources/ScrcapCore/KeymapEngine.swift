@@ -72,11 +72,15 @@ public struct KeyChord: Codable, Hashable, Sendable {
 /// Globally-hotkeyed actions. Editor-local keys (A/R/C, 1–7, Esc…) are
 /// handled by the editor against `Settings.editorKeys`.
 public enum AppAction: String, Codable, CaseIterable, Sendable {
-    case captureFullscreen
     case captureRegion
     case captureWindow
+    case captureFullscreen
     case captureScrolling
     case repeatLast
+
+    public static let shortcutOrder: [AppAction] = [
+        .captureRegion, .captureWindow, .captureFullscreen, .captureScrolling, .repeatLast,
+    ]
 
     public var title: String {
         switch self {
@@ -92,10 +96,11 @@ public enum AppAction: String, Codable, CaseIterable, Sendable {
 public struct Keymap: Codable, Equatable, Sendable {
     public private(set) var bindings: [AppAction: KeyChord]
 
+    /// Region is the daily-driver capture, so it gets the primary slot (⌥⇧1).
     public static let defaults = Keymap(bindings: [
-        .captureFullscreen: KeyChord(key: "1", modifiers: [.option, .shift]),
-        .captureRegion: KeyChord(key: "2", modifiers: [.option, .shift]),
-        .captureWindow: KeyChord(key: "3", modifiers: [.option, .shift]),
+        .captureRegion: KeyChord(key: "1", modifiers: [.option, .shift]),
+        .captureWindow: KeyChord(key: "2", modifiers: [.option, .shift]),
+        .captureFullscreen: KeyChord(key: "3", modifiers: [.option, .shift]),
         .captureScrolling: KeyChord(key: "4", modifiers: [.option, .shift]),
         .repeatLast: KeyChord(key: "r", modifiers: [.option, .shift]),
     ])

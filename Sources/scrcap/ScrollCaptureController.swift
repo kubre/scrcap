@@ -35,7 +35,7 @@ final class ScrollCaptureController {
         showProgress(on: screen)
 
         // Cursor must be over the region for scroll events to land there.
-        let cgCenter = GeometryMapper.cgRect(fromCocoa: rect)
+        let cgCenter = GeometryMapper.cgRect(fromCocoa: rect, on: screen)
         CGWarpMouseCursorPosition(CGPoint(x: cgCenter.midX, y: cgCenter.midY))
 
         escMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] event in
@@ -66,7 +66,10 @@ final class ScrollCaptureController {
         let width = first.width
         var consecutiveNoNewRows = 0
 
-        while !stopped, accumulatedHashes.count < maxRows {
+        while !stopped {
+            let remainingRows = maxRows - accumulatedHashes.count
+            guard remainingRows > 0 else { break }
+
             updateProgress(rows: accumulatedHashes.count, scale: scale)
             injectScroll(amount: scrollStepPoints)
             try await settle(rect: rect, screen: screen)
@@ -106,8 +109,18 @@ final class ScrollCaptureController {
                 continue
             }
             consecutiveNoNewRows = 0
-            accumulatedHashes.append(contentsOf: next.hashes[alignment.newContentStart...])
-            accumulatedRows.append(contentsOf: next.rows[alignment.newContentStart...])
+            let availableRows = next.hashes.count - alignment.newContentStart
+            guard availableRows > 0 else { continue }
+            let appendedCount = min(availableRows, remainingRows)
+            let end = alignment.newContentStart + appendedCount
+
+            accumulatedHashes.append(contentsOf: next.hashes[alignment.newContentStart..<end])
+            accumulatedRows.append(contentsOf: next.rows[alignment.newContentStart..<end])
+            precondition(accumulatedHashes.count == accumulatedRows.count, "Rows and hashes must stay aligned.")
+
+            if appendedCount < availableRows {
+                break
+            }
         }
 
         // A single frame's worth of rows means nothing scrolled: deliver a

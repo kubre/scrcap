@@ -1,0 +1,19 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Show Swift version
+        run: swift --version
+      - name: Build
+        run: swift build
+      - name: Core tests
+        run: swift run scrcap-core-tests
+      - name: Release bundle
+        run: SCRCAP_ALLOW_ADHOC=1 scripts/make_app.sh

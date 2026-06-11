@@ -12,6 +12,10 @@ typealias AppSettings = ScrcapCore.Settings
 
 extension Notification.Name {
     static let scrcapSettingsChanged = Notification.Name("scrcapSettingsChanged")
+    /// object: Bool — true while the shortcut recorder is armed. Global
+    /// hotkeys pause so pressing a currently-bound chord re-records it
+    /// instead of firing a capture.
+    static let scrcapShortcutRecording = Notification.Name("scrcapShortcutRecording")
 }
 
 private let scrcapRed = Color(red: 1.0, green: 0.23, blue: 0.19) // #FF3B30
@@ -63,6 +67,7 @@ private enum PrefTab: String, CaseIterable {
     case shortcuts = "Shortcuts"
     case editor = "Editor"
     case advanced = "Advanced"
+    case about = "About"
 
     var icon: String {
         switch self {
@@ -70,6 +75,7 @@ private enum PrefTab: String, CaseIterable {
         case .shortcuts: return "keyboard"
         case .editor: return "paintbrush"
         case .advanced: return "wrench.and.screwdriver"
+        case .about: return "info.circle"
         }
     }
 }
@@ -88,6 +94,7 @@ struct PreferencesView: View {
                     case .shortcuts: ShortcutsTab()
                     case .editor: EditorTab()
                     case .advanced: AdvancedTab()
+                    case .about: AboutTab()
                     }
                 }
                 .padding(20)
@@ -186,8 +193,8 @@ struct GeneralTab: View {
 
     var body: some View {
         PrefSection(title: "After capture") {
-            ForEach(Array(CaptureMode.allCases.enumerated()), id: \.element.rawValue) { index, mode in
-                PrefRow(label: label(for: mode), divider: index < CaptureMode.allCases.count - 1) {
+            ForEach(Array(CaptureMode.captureOrder.enumerated()), id: \.element.rawValue) { index, mode in
+                PrefRow(label: label(for: mode), divider: index < CaptureMode.captureOrder.count - 1) {
                     Picker("", selection: binding(for: mode)) {
                         Text("Open editor").tag(AfterCaptureBehavior.openEditor)
                         Text("Copy only").tag(AfterCaptureBehavior.copyOnly)
@@ -281,8 +288,8 @@ struct ShortcutsTab: View {
 
     var body: some View {
         PrefSection(title: "Global capture shortcuts") {
-            ForEach(Array(AppAction.allCases.enumerated()), id: \.element.rawValue) { index, action in
-                PrefRow(label: action.title, divider: index < AppAction.allCases.count - 1) {
+            ForEach(Array(AppAction.shortcutOrder.enumerated()), id: \.element.rawValue) { index, action in
+                PrefRow(label: action.title, divider: index < AppAction.shortcutOrder.count - 1) {
                     ShortcutRecorderButton(
                         chord: model.settings.keymap.chord(for: action),
                         isRecording: recordingAction == action,
@@ -350,6 +357,7 @@ struct ShortcutRecorderButton: View {
 
     private func startRecording() {
         onBeginRecording()
+        NotificationCenter.default.post(name: .scrcapShortcutRecording, object: true)
         monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
             if event.keyCode == 53 { // esc cancels
                 stopRecording(cancelled: true)
@@ -367,6 +375,7 @@ struct ShortcutRecorderButton: View {
     private func stopRecording(cancelled: Bool) {
         if let monitor { NSEvent.removeMonitor(monitor) }
         monitor = nil
+        NotificationCenter.default.post(name: .scrcapShortcutRecording, object: false)
         if cancelled { onCancel() }
     }
 }
@@ -430,6 +439,15 @@ struct EditorTab: View {
                         .frame(width: 44, alignment: .trailing)
                 }
             }
+            PrefRow(label: "Return key") {
+                Picker("", selection: textEnterBinding) {
+                    Text("New line").tag(TextEnterBehavior.newline)
+                    Text("Commit text").tag(TextEnterBehavior.commit)
+                }
+                .labelsHidden()
+                .controlSize(.small)
+                .fixedSize()
+            }
             PrefRow(label: "Window capture includes shadow", divider: false) {
                 Toggle("", isOn: shadowBinding).labelsHidden().toggleStyle(.switch).controlSize(.mini)
             }
@@ -463,6 +481,13 @@ struct EditorTab: View {
         Binding(
             get: { model.settings.textSize },
             set: { value in model.update { $0.textSize = value } }
+        )
+    }
+
+    private var textEnterBinding: Binding<TextEnterBehavior> {
+        Binding(
+            get: { model.settings.textEnterBehavior },
+            set: { value in model.update { $0.textEnterBehavior = value } }
         )
     }
 
@@ -529,5 +554,25 @@ struct AdvancedTab: View {
             get: { model.settings.scrollingMaxHeight },
             set: { value in model.update { $0.scrollingMaxHeight = max(1000, value) } }
         )
+    }
+}
+
+// MARK: - About
+
+struct AboutTab: View {
+    var body: some View {
+        PrefSection(title: "About scrcap") {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("scrcap is inspired by Shottr's fast, keyboard-first screenshot workflow.")
+                    .font(.system(size: 12.5))
+                Link("Visit Shottr", destination: URL(string: "https://shottr.cc")!)
+                    .font(.system(size: 12.5, weight: .medium))
+                Text("If you want a screenshot app with more configuration and advanced features, use Shottr instead.")
+                    .font(.system(size: 12.5))
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+        }
     }
 }

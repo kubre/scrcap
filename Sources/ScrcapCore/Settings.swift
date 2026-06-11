@@ -4,7 +4,9 @@
 import Foundation
 
 public enum CaptureMode: String, Codable, CaseIterable, Sendable {
-    case fullscreen, region, window, scrolling
+    case region, window, fullscreen, scrolling
+
+    public static let captureOrder: [CaptureMode] = [.region, .window, .fullscreen, .scrolling]
 }
 
 public enum AfterCaptureBehavior: String, Codable, CaseIterable, Sendable {
@@ -22,8 +24,15 @@ public enum EscBehavior: String, Codable, CaseIterable, Sendable {
     case closeOnly
 }
 
+public enum TextEnterBehavior: String, Codable, CaseIterable, Sendable {
+    /// Return inserts a new line; Shift-Return commits the text annotation.
+    case newline
+    /// Return commits the text annotation; Shift-Return inserts a new line.
+    case commit
+}
+
 public struct Settings: Codable, Equatable, Sendable {
-    public static let currentSchemaVersion = 2
+    public static let currentSchemaVersion = 3
 
     public var schemaVersion: Int
     /// AppAction.rawValue → chord string ("opt+shift+2").
@@ -36,6 +45,8 @@ public struct Settings: Codable, Equatable, Sendable {
     public var strokeWidth: Double
     /// Point size for the text tool (schema v2).
     public var textSize: Double
+    /// Return key behavior for the text tool (schema v3).
+    public var textEnterBehavior: TextEnterBehavior
     public var includeWindowShadow: Bool
     /// nil → ~/Desktop
     public var saveFolder: String?
@@ -45,6 +56,7 @@ public struct Settings: Codable, Equatable, Sendable {
     public var exportScale: Int
     public var scrollingMaxHeight: Int
     public var launchAtLogin: Bool
+    public var resolvedExportScale: Int { exportScale == 1 ? 1 : 2 }
 
     public static let defaultPalette = [
         "#FF3B30", "#FF9500", "#FFCC00", "#34C759", "#0A84FF", "#BF5AF2", "#F2F2F7",
@@ -54,11 +66,12 @@ public struct Settings: Codable, Equatable, Sendable {
         Settings(
             schemaVersion: currentSchemaVersion,
             hotkeys: Keymap.defaults.bindings.reduce(into: [:]) { $0[$1.key.rawValue] = $1.value.stringValue },
-            afterCapture: CaptureMode.allCases.reduce(into: [:]) { $0[$1.rawValue] = .openEditor },
+            afterCapture: CaptureMode.captureOrder.reduce(into: [:]) { $0[$1.rawValue] = .openEditor },
             paletteHex: defaultPalette,
             escBehavior: .copyAndClose,
             strokeWidth: 3,
             textSize: 16,
+            textEnterBehavior: .newline,
             includeWindowShadow: false,
             saveFolder: nil,
             filenamePattern: "scrcap-{date}-{time}",
@@ -85,6 +98,25 @@ public struct Settings: Codable, Equatable, Sendable {
     public func behavior(for mode: CaptureMode) -> AfterCaptureBehavior {
         afterCapture[mode.rawValue] ?? .openEditor
     }
+
+    public mutating func normalizeLegacyDefaultCaptureHotkeys() {
+        let region = hotkeys[AppAction.captureRegion.rawValue]
+        let window = hotkeys[AppAction.captureWindow.rawValue]
+        let fullscreen = hotkeys[AppAction.captureFullscreen.rawValue]
+        let scrolling = hotkeys[AppAction.captureScrolling.rawValue]
+
+        guard scrolling == "opt+shift+4" else { return }
+
+        switch (region, window, fullscreen) {
+        case ("opt+shift+1", "opt+shift+3", "opt+shift+2"),
+             ("opt+shift+2", "opt+shift+3", "opt+shift+1"):
+            hotkeys[AppAction.captureRegion.rawValue] = "opt+shift+1"
+            hotkeys[AppAction.captureWindow.rawValue] = "opt+shift+2"
+            hotkeys[AppAction.captureFullscreen.rawValue] = "opt+shift+3"
+        default:
+            break
+        }
+    }
 }
 
 public final class SettingsStore {
@@ -94,6 +126,7 @@ public final class SettingsStore {
     public init(directory: URL) {
         fileURL = directory.appendingPathComponent("settings.json")
         settings = SettingsStore.load(from: fileURL) ?? .defaults
+        settings.normalizeLegacyDefaultCaptureHotkeys()
     }
 
     public static func defaultDirectory() -> URL {
@@ -118,6 +151,8 @@ public final class SettingsStore {
             switch v {
             case 1: // v2 added the text tool's point size
                 json["textSize"] = 16.0
+            case 2: // v3 added configurable Return behavior for text entry
+                json["textEnterBehavior"] = TextEnterBehavior.newline.rawValue
             default:
                 break
             }
@@ -129,16 +164,28 @@ public final class SettingsStore {
 
     public func update(_ mutate: (inout Settings) -> Void) {
         mutate(&settings)
-        save()
+        if !save() {
+            NSLog("Scrcap: failed to persist settings update.")
+        }
     }
 
-    public func save() {
+    /// Persists settings to disk and returns whether the write succeeded.
+    /// The in-memory settings are updated immediately by callers; callers should
+    /// treat a false return as a signal to surface diagnostics.
+    @discardableResult
+    public func save() -> Bool {
         let dir = fileURL.deletingLastPathComponent()
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        guard let data = try? encoder.encode(settings) else { return }
-        // Atomic: temp file + rename.
-        try? data.write(to: fileURL, options: .atomic)
+        do {
+            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+            let data = try encoder.encode(settings)
+            // Atomic: temp file + rename.
+            try data.write(to: fileURL, options: .atomic)
+            return true
+        } catch {
+            NSLog("Scrcap: failed to save settings to %@: %@", fileURL.path, String(describing: error))
+            return false
+        }
     }
 }

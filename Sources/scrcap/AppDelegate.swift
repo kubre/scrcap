@@ -22,6 +22,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
     private var lastCapture: LastCapture?
     private var permissionPollTimer: Timer?
+    private var screenPermissionRequestInFlight = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         settingsStore = SettingsStore(directory: SettingsStore.defaultDirectory())
@@ -45,14 +46,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self.rebuildMenu()
         }
 
+        // While the shortcut recorder is armed, suspend global hotkeys so a
+        // currently-bound chord can be re-recorded instead of firing a capture.
+        NotificationCenter.default.addObserver(
+            forName: .scrcapShortcutRecording, object: nil, queue: .main
+        ) { [weak self] note in
+            guard let self else { return }
+            let recording = note.object as? Bool ?? false
+            self.hotkeyService.register(
+                keymap: recording ? Keymap(bindings: [:]) : self.settingsStore.settings.keymap
+            )
+        }
+
         if ProcessInfo.processInfo.environment["SCRCAP_SMOKE"] == "text" {
             runTextSmokeTest()
             return
         }
 
-        if !CGPreflightScreenCaptureAccess() {
-            requestScreenPermission()
-        }
+        // Screen Recording is requested lazily on the first capture. Asking on
+        // launch stacks macOS' permission prompt with scrcap's own startup UI.
     }
 
     /// Headless editor smoke test (no capture permission needed): opens the
@@ -91,11 +103,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func setupStatusItem() {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
-        statusItem.button?.image = NSImage(
+        statusItem.button?.image = statusItemImage() ?? NSImage(
             systemSymbolName: "camera.viewfinder",
             accessibilityDescription: "scrcap"
         )
         rebuildMenu()
+    }
+
+    private func statusItemImage() -> NSImage? {
+        let resourceURL = Bundle.main.url(forResource: "MenuBarIconTemplate", withExtension: "png")
+            ?? Bundle.module.url(forResource: "MenuBarIconTemplate", withExtension: "png")
+        guard let resourceURL, let image = NSImage(contentsOf: resourceURL) else { return nil }
+        image.size = NSSize(width: 18, height: 18)
+        image.isTemplate = true
+        image.accessibilityDescription = "scrcap"
+        return image
     }
 
     private func rebuildMenu() {
@@ -117,11 +139,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return item
         }
 
-        menu.addItem(item(.captureRegion, selector: #selector(menuCaptureRegion)))
-        menu.addItem(item(.captureWindow, selector: #selector(menuCaptureWindow)))
-        menu.addItem(item(.captureFullscreen, selector: #selector(menuCaptureFullscreen)))
-        menu.addItem(item(.captureScrolling, selector: #selector(menuCaptureScrolling)))
-        menu.addItem(item(.repeatLast, selector: #selector(menuRepeatLast)))
+        for action in AppAction.shortcutOrder {
+            switch action {
+            case .captureRegion:
+                menu.addItem(item(action, selector: #selector(menuCaptureRegion)))
+            case .captureWindow:
+                menu.addItem(item(action, selector: #selector(menuCaptureWindow)))
+            case .captureFullscreen:
+                menu.addItem(item(action, selector: #selector(menuCaptureFullscreen)))
+            case .captureScrolling:
+                menu.addItem(item(action, selector: #selector(menuCaptureScrolling)))
+            case .repeatLast:
+                menu.addItem(item(action, selector: #selector(menuRepeatLast)))
+            }
+        }
         menu.addItem(.separator())
 
         let prefs = NSMenuItem(title: "Preferences…", action: #selector(menuPreferences), keyEquivalent: ",")
@@ -245,31 +276,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @discardableResult
     private func ensureScreenPermission() -> Bool {
-        if CGPreflightScreenCaptureAccess() { return true }
+        if CGPreflightScreenCaptureAccess() {
+            screenPermissionRequestInFlight = false
+            return true
+        }
         requestScreenPermission()
         return false
     }
 
     private func requestScreenPermission() {
-        CGRequestScreenCaptureAccess()
+        guard !screenPermissionRequestInFlight else { return }
+        screenPermissionRequestInFlight = true
 
-        let alert = NSAlert()
-        alert.messageText = "scrcap needs Screen Recording permission"
-        alert.informativeText = "Grant access in System Settings → Privacy & Security → Screen Recording. scrcap will detect it automatically — no restart dance."
-        alert.addButton(withTitle: "Open System Settings")
-        alert.addButton(withTitle: "Later")
-        NSApp.activate(ignoringOtherApps: true)
-        if alert.runModal() == .alertFirstButtonReturn {
-            let pane = "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture"
-            if let url = URL(string: pane) { NSWorkspace.shared.open(url) }
-        }
+        CGRequestScreenCaptureAccess()
 
         // Live-detect when permission lands.
         permissionPollTimer?.invalidate()
+        let startedAt = Date()
         permissionPollTimer = Timer.scheduledTimer(withTimeInterval: 1.5, repeats: true) { [weak self] timer in
+            guard let self else {
+                timer.invalidate()
+                return
+            }
             if CGPreflightScreenCaptureAccess() {
                 timer.invalidate()
-                self?.permissionPollTimer = nil
+                self.permissionPollTimer = nil
+                self.screenPermissionRequestInFlight = false
+            } else if Date().timeIntervalSince(startedAt) > 300 {
+                timer.invalidate()
+                self.permissionPollTimer = nil
+                self.screenPermissionRequestInFlight = false
             }
         }
     }

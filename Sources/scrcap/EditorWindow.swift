@@ -45,7 +45,8 @@ final class EditorWindowController: NSObject, NSWindowDelegate {
         canvas = CanvasView(bitmap: bitmap, pointSize: pointSize)
         toolbar = EditorToolbar(
             palette: settingsStore.settings.paletteHex,
-            escCopies: settingsStore.settings.escBehavior == .copyAndClose
+            escCopies: settingsStore.settings.escBehavior == .copyAndClose,
+            textEnterBehavior: settingsStore.settings.textEnterBehavior
         )
         window = EditorWindow(canvas: canvas, toolbar: toolbar, imagePointSize: pointSize)
 
@@ -96,10 +97,10 @@ final class EditorWindowController: NSObject, NSWindowDelegate {
         }
 
         if event.keyCode == 53 { // Esc
-            // While typing, Esc only cancels the text entry — never the window.
+            // While typing, Esc exits text entry — never the window.
             // (Belt and braces: the text view normally swallows it first.)
             if canvas.isEditingText {
-                canvas.cancelTextEditing()
+                canvas.commitTextEditing()
                 return true
             }
             finish()
@@ -148,7 +149,8 @@ final class EditorWindowController: NSObject, NSWindowDelegate {
             shapes: Array(stack.visible),
             palette: settingsStore.settings.paletteHex,
             strokeWidth: settingsStore.settings.strokeWidth,
-            scale: scale
+            scale: scale,
+            exportScale: settingsStore.settings.resolvedExportScale
         )
     }
 
@@ -205,6 +207,7 @@ protocol CanvasDataSource: AnyObject {
     var palette: [String] { get }
     var strokeWidth: CGFloat { get }
     var textSize: CGFloat { get }
+    var textEnterBehavior: TextEnterBehavior { get }
     func commit(shape: Shape)
     func nextCounterNumber() -> Int
     func dragOutImage() -> (CGImage, String)
@@ -217,6 +220,7 @@ extension EditorWindowController: CanvasDataSource {
     var palette: [String] { settingsStore.settings.paletteHex }
     var strokeWidth: CGFloat { settingsStore.settings.strokeWidth }
     var textSize: CGFloat { settingsStore.settings.textSize }
+    var textEnterBehavior: TextEnterBehavior { settingsStore.settings.textEnterBehavior }
 
     func commit(shape: Shape) {
         stack.append(shape)
@@ -266,7 +270,7 @@ final class EditorWindow: NSWindow {
         let toolbarHeight = EditorStyle.height
         // Small screenshots must not clip the toolbar: the window is at least
         // as wide as the toolbar's content, and the canvas centers in the gap.
-        let minWidth = toolbar.fittingSize.width + 24
+        let minWidth = toolbar.minimumWidth
         let maxCanvas = (NSScreen.main?.visibleFrame.size ?? NSSize(width: 1440, height: 900))
         let visibleCanvas = NSSize(
             width: min(imagePointSize.width, maxCanvas.width * 0.92),
@@ -279,20 +283,27 @@ final class EditorWindow: NSWindow {
 
         super.init(
             contentRect: NSRect(origin: .zero, size: contentSize),
-            styleMask: [.borderless, .fullSizeContentView],
+            styleMask: [.titled, .fullSizeContentView, .resizable],
             backing: .buffered,
             defer: false
         )
         isOpaque = false
         backgroundColor = .clear
         hasShadow = true
+        titleVisibility = .hidden
+        titlebarAppearsTransparent = true
         // Drag anywhere that isn't a control or the canvas (i.e. the toolbar
         // background) to move the window.
         isMovableByWindowBackground = true
+        minSize = NSSize(width: minWidth, height: toolbarHeight + 160)
         level = .floating
         collectionBehavior = [.moveToActiveSpace, .fullScreenAuxiliary]
+        standardWindowButton(.closeButton)?.isHidden = true
+        standardWindowButton(.miniaturizeButton)?.isHidden = true
+        standardWindowButton(.zoomButton)?.isHidden = true
 
         let container = EditorContainerView(frame: NSRect(origin: .zero, size: contentSize))
+        container.autoresizingMask = [.width, .height]
 
         canvas.frame = NSRect(origin: .zero, size: imagePointSize)
         // Toolbar docked at the top (Cocoa coords: top = maxY).
@@ -313,8 +324,9 @@ final class EditorWindow: NSWindow {
         } else {
             scroll.documentView = canvas
         }
-        scroll.hasVerticalScroller = imagePointSize.height > visibleCanvas.height
-        scroll.hasHorizontalScroller = imagePointSize.width > visibleCanvas.width
+        scroll.hasVerticalScroller = true
+        scroll.hasHorizontalScroller = true
+        scroll.autohidesScrollers = true
         scroll.drawsBackground = false
         scroll.autoresizingMask = [.width, .height]
         // Canvas is flipped (top-left origin), so tall scrolling captures
@@ -469,7 +481,7 @@ final class CanvasView: NSView, NSDraggingSource {
         source.commit(shape: shape)
     }
 
-    // MARK: Text tool — type in place; ⏎ commits, ⇧⏎ newline, Esc cancels
+    // MARK: Text tool — type in place; Return behavior is configurable
 
     var isEditingText: Bool { textEditor != nil }
     var debugTextEditor: AnnotationTextView? { textEditor }
@@ -483,9 +495,15 @@ final class CanvasView: NSView, NSDraggingSource {
         let font = ShapeRenderer.textFont(size: source.textSize)
         let color = ShapeRenderer.color(at: source.currentColorIndex, palette: source.palette)
 
-        let editor = AnnotationTextView(origin: point, font: font, color: color, maxWidth: bounds.width - point.x)
+        let editor = AnnotationTextView(
+            origin: point,
+            font: font,
+            color: color,
+            maxWidth: bounds.width - point.x,
+            enterBehavior: source.textEnterBehavior
+        )
         editor.onCommit = { [weak self] in self?.commitTextEditing() }
-        editor.onCancel = { [weak self] in self?.cancelTextEditing() }
+        editor.onCancel = { [weak self] in self?.commitTextEditing() }
         addSubview(editor)
         textEditor = editor
         window?.makeFirstResponder(editor)
@@ -558,10 +576,11 @@ final class AnnotationTextView: NSTextView {
     var onCommit: (() -> Void)?
     var onCancel: (() -> Void)?
 
+    private let enterBehavior: TextEnterBehavior
     private let storage: NSTextStorage
     private let manualLayoutManager: NSLayoutManager
 
-    init(origin: NSPoint, font: NSFont, color: NSColor, maxWidth: CGFloat) {
+    init(origin: NSPoint, font: NSFont, color: NSColor, maxWidth: CGFloat, enterBehavior: TextEnterBehavior) {
         let width = max(maxWidth, 60)
         let storage = NSTextStorage()
         let layoutManager = NSLayoutManager()
@@ -572,6 +591,7 @@ final class AnnotationTextView: NSTextView {
         layoutManager.addTextContainer(container)
         self.storage = storage
         self.manualLayoutManager = layoutManager
+        self.enterBehavior = enterBehavior
 
         super.init(
             frame: NSRect(x: origin.x, y: origin.y, width: width, height: ceil(font.pointSize * 1.5)),
@@ -595,12 +615,22 @@ final class AnnotationTextView: NSTextView {
 
     override func keyDown(with event: NSEvent) {
         switch event.keyCode {
-        case 36 where !event.modifierFlags.contains(.shift): // ⏎ confirms
+        case 36 where shouldCommitOnReturn(event): // Return commits in the selected mode
             onCommit?()
-        case 53: // Esc cancels only the text entry
+        case 53: // Esc exits text entry without discarding typed text
             onCancel?()
-        default: // ⇧⏎ falls through to insert a newline
+        default:
             super.keyDown(with: event)
+        }
+    }
+
+    private func shouldCommitOnReturn(_ event: NSEvent) -> Bool {
+        let shift = event.modifierFlags.contains(.shift)
+        switch enterBehavior {
+        case .newline:
+            return shift
+        case .commit:
+            return !shift
         }
     }
 

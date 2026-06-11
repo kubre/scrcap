@@ -13,6 +13,7 @@ Package.resolved
 
 # macOS app/packaging outputs
 dist/
+dist-*/
 *.app
 *.dmg
 *.zip

@@ -14,26 +14,26 @@ swift run scrcap-core-tests   # run the portable-core test suite
 scripts/make_app.sh           # release build → dist/scrcap.app (+ size budget gate)
 ```
 
-First capture prompts for **Screen Recording** permission (System Settings →
-Privacy & Security); scrcap detects the grant live. Scrolling capture
-additionally asks for **Accessibility** the first time you use it — never up
-front.
+First capture prompts for **Screen Recording** permission; scrcap detects the
+grant live. Scrolling capture additionally asks for **Accessibility** the first
+time you use it — never up front.
 
 > When running via `swift run`, macOS attributes permissions to your terminal.
 > Use `dist/scrcap.app` for the real permission flow.
 
 **One-time:** run `scripts/make_dev_cert.sh` to create a stable self-signed
-signing identity. Without it the bundle is ad-hoc signed, and macOS treats
-every rebuild as a new app — forcing you to re-grant Screen Recording each
-time. With it, grant once and rebuilds keep the permission.
+signing identity. `scripts/make_app.sh` requires stable signing by default
+because ad-hoc signing makes macOS treat every rebuild as a new app, forcing
+you to re-grant Screen Recording. For a throwaway build only, run
+`SCRCAP_ALLOW_ADHOC=1 scripts/make_app.sh`.
 
 ## Default hotkeys (all remappable in Preferences → Shortcuts)
 
 | Mode | Hotkey | Notes |
 |---|---|---|
-| Fullscreen | ⌥⇧1 | display under cursor, zero UI |
-| Region | ⌥⇧2 | crosshair + live coords, Space moves selection mid-drag, Esc aborts |
-| Window | ⌥⇧3 | hover highlight, ⇥ cycles overlapping windows |
+| Region | ⌥⇧1 | crosshair + live coords, Space moves selection mid-drag, Esc aborts |
+| Window | ⌥⇧2 | hover highlight, ⇥ cycles overlapping windows |
+| Fullscreen | ⌥⇧3 | display under cursor, zero UI |
 | Scrolling | ⌥⇧4 | select a region, scrcap scrolls & stitches |
 | Repeat last | ⌥⇧R | re-captures the previous region/window/screen |
 
@@ -47,7 +47,7 @@ armed — no selection state; got it wrong → ⌘Z and draw again.
 | Q / W / E / R | arrow / rectangle / counter / text tool |
 | 1–7 | color (red default on every new shot) |
 | ⇧-drag | constrain rectangle to square |
-| text tool | click to type · ⏎ confirms · ⇧⏎ new line · Esc cancels entry |
+| text tool | click to type · ⏎ new line · ⇧⏎ confirms · Esc exits typing |
 | Esc | **copy to clipboard + close** (also a toolbar button, configurable) |
 | ⌘Z / ⇧⌘Z | undo / redo |
 | ⌘C | copy, keep editor open |
@@ -65,7 +65,7 @@ Drag the toolbar's empty background to move the editor window.
   overlay, editor, exporter, SwiftUI preferences.
 - `Sources/scrcap-core-tests/` — core test suite (plain executable; the
   CLT-only toolchain ships no XCTest).
-- `scripts/` — `make_app.sh` (bundle + ad-hoc sign), `check_budgets.sh`
+- `scripts/` — `make_app.sh` (bundle + stable sign), `check_budgets.sh`
   (size gate, < 5 MB).
 
 Settings live at `~/Library/Application Support/scrcap/settings.json` —

@@ -3,9 +3,10 @@
 // primary accent; chrome follows the system light/dark appearance.
 
 import AppKit
+import ScrcapCore
 
 enum EditorStyle {
-    static let height: CGFloat = 38
+    static let height: CGFloat = 42
     static let accent = NSColor(srgbRed: 1.0, green: 0.23, blue: 0.19, alpha: 1) // #FF3B30
     static let accentFill = NSColor(srgbRed: 1.0, green: 0.23, blue: 0.19, alpha: 0.14)
 
@@ -24,6 +25,12 @@ enum EditorStyle {
     static let swatchRing = NSColor(name: nil) { appearance in
         appearance.isDark ? .white : NSColor(srgbRed: 0.15, green: 0.15, blue: 0.15, alpha: 1)
     }
+
+    // One typographic scale for the whole editor chrome — every icon and
+    // label pulls from here so weights and sizes can't drift apart.
+    static let iconConfiguration = NSImage.SymbolConfiguration(pointSize: 12, weight: .medium, scale: .medium)
+    static let titleFont = NSFont.systemFont(ofSize: 11.5, weight: .medium)
+    static let hintFont = NSFont.monospacedSystemFont(ofSize: 11, weight: .medium)
 }
 
 extension NSAppearance {
@@ -40,11 +47,19 @@ final class EditorToolbar: NSView {
     private var toolButtons: [EditorTool: ToolbarButton] = [:]
     private var swatches: [SwatchButton] = []
     private var hairlines: [NSView] = []
+    private let stack = NSStackView()
 
     // The empty toolbar background is the window's drag handle.
     override var mouseDownCanMoveWindow: Bool { true }
 
-    init(palette: [String], escCopies: Bool) {
+    /// The window must be at least this wide or the controls clip. Measured
+    /// from the content stack itself — the toolbar view has no intrinsic
+    /// width (its stack is only center-pinned), so its own fittingSize lies.
+    var minimumWidth: CGFloat {
+        max(stack.fittingSize.width + 24, 480)
+    }
+
+    init(palette: [String], escCopies: Bool, textEnterBehavior: TextEnterBehavior) {
         super.init(frame: .zero)
         wantsLayer = true
 
@@ -54,9 +69,8 @@ final class EditorToolbar: NSView {
         hairlines.append(bottomBorder)
         addSubview(bottomBorder)
 
-        let stack = NSStackView()
         stack.orientation = .horizontal
-        stack.spacing = 2
+        stack.spacing = 4
         stack.alignment = .centerY
         stack.translatesAutoresizingMaskIntoConstraints = false
         addSubview(stack)
@@ -74,7 +88,7 @@ final class EditorToolbar: NSView {
             (.arrow, "arrow.up.left", "Q", "Arrow"),
             (.rectangle, "rectangle", "W", "Rectangle"),
             (.counter, "1.circle", "E", "Counter"),
-            (.text, "textformat", "R", "Text — ⏎ confirms, ⇧⏎ new line"),
+            (.text, "textformat", "R", Self.textToolTip(for: textEnterBehavior)),
         ]
         for (tool, symbol, hint, tip) in tools {
             let button = ToolbarButton(symbolName: symbol, hint: hint) { [weak self] in
@@ -126,6 +140,15 @@ final class EditorToolbar: NSView {
     }
 
     required init?(coder: NSCoder) { fatalError() }
+
+    private static func textToolTip(for behavior: TextEnterBehavior) -> String {
+        switch behavior {
+        case .newline:
+            return "Text - Return new line, Shift-Return confirms"
+        case .commit:
+            return "Text - Return confirms, Shift-Return new line"
+        }
+    }
 
     override func viewDidChangeEffectiveAppearance() {
         super.viewDidChangeEffectiveAppearance()
@@ -192,13 +215,17 @@ final class ToolbarButton: NSControl {
         layer?.cornerRadius = 5
         translatesAutoresizingMaskIntoConstraints = false
 
+        // One shared metric set for every control (EditorStyle.*Font /
+        // iconConfiguration) — per-symbol size variance is neutralized by
+        // pinning the icon view to a fixed box.
         iconView.image = NSImage(systemSymbolName: symbolName, accessibilityDescription: title ?? hint)?
-            .withSymbolConfiguration(.init(pointSize: 13, weight: .semibold))
+            .withSymbolConfiguration(EditorStyle.iconConfiguration)
+        iconView.imageScaling = .scaleProportionallyDown
         iconView.contentTintColor = .labelColor
         iconView.translatesAutoresizingMaskIntoConstraints = false
 
         hintLabel.stringValue = hint
-        hintLabel.font = NSFont.monospacedSystemFont(ofSize: 10, weight: .semibold)
+        hintLabel.font = EditorStyle.hintFont
         hintLabel.textColor = .secondaryLabelColor
         hintLabel.translatesAutoresizingMaskIntoConstraints = false
 
@@ -208,24 +235,26 @@ final class ToolbarButton: NSControl {
         var hintLeading = iconView.trailingAnchor
         if let title {
             let label = NSTextField(labelWithString: title)
-            label.font = NSFont.systemFont(ofSize: 11.5, weight: .semibold)
-            label.textColor = .secondaryLabelColor
+            label.font = EditorStyle.titleFont
+            label.textColor = .labelColor
             label.translatesAutoresizingMaskIntoConstraints = false
             addSubview(label)
             titleLabel = label
             NSLayoutConstraint.activate([
-                label.leadingAnchor.constraint(equalTo: iconView.trailingAnchor, constant: 5),
+                label.leadingAnchor.constraint(equalTo: iconView.trailingAnchor, constant: 4),
                 label.centerYAnchor.constraint(equalTo: centerYAnchor),
             ])
             hintLeading = label.trailingAnchor
         }
 
         NSLayoutConstraint.activate([
-            heightAnchor.constraint(equalToConstant: 28),
-            iconView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
+            heightAnchor.constraint(equalToConstant: 32),
+            iconView.widthAnchor.constraint(equalToConstant: 18),
+            iconView.heightAnchor.constraint(equalToConstant: 18),
+            iconView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 9),
             iconView.centerYAnchor.constraint(equalTo: centerYAnchor),
-            hintLabel.leadingAnchor.constraint(equalTo: hintLeading, constant: 5),
-            hintLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
+            hintLabel.leadingAnchor.constraint(equalTo: hintLeading, constant: 7),
+            hintLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -9),
             hintLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
         ])
         updateAppearance()
@@ -283,20 +312,20 @@ final class SwatchButton: NSControl {
         dot.layer?.cornerRadius = 7
         dot.translatesAutoresizingMaskIntoConstraints = false
 
-        hintLabel.font = NSFont.monospacedSystemFont(ofSize: 10, weight: .semibold)
+        hintLabel.font = EditorStyle.hintFont
         hintLabel.textColor = .secondaryLabelColor
         hintLabel.translatesAutoresizingMaskIntoConstraints = false
 
         addSubview(dot)
         addSubview(hintLabel)
         NSLayoutConstraint.activate([
-            heightAnchor.constraint(equalToConstant: 28),
+            heightAnchor.constraint(equalToConstant: 32),
             dot.widthAnchor.constraint(equalToConstant: 14),
             dot.heightAnchor.constraint(equalToConstant: 14),
-            dot.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 5),
+            dot.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 7),
             dot.centerYAnchor.constraint(equalTo: centerYAnchor),
-            hintLabel.leadingAnchor.constraint(equalTo: dot.trailingAnchor, constant: 3),
-            hintLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -5),
+            hintLabel.leadingAnchor.constraint(equalTo: dot.trailingAnchor, constant: 5),
+            hintLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -7),
             hintLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
         ])
         updateAppearance()

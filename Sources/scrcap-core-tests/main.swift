@@ -117,6 +117,22 @@ test("defaults have no conflicts and avoid system shortcuts") {
     }
 }
 
+test("capture options follow default shortcut order") {
+    checkEqual(CaptureMode.captureOrder, [.region, .window, .fullscreen, .scrolling])
+    checkEqual(
+        AppAction.shortcutOrder,
+        [.captureRegion, .captureWindow, .captureFullscreen, .captureScrolling, .repeatLast]
+    )
+}
+
+test("default capture shortcuts are ordered region window screen scrolling") {
+    let map = Keymap.defaults
+    checkEqual(map.chord(for: .captureRegion)?.displayValue, "⌥⇧1")
+    checkEqual(map.chord(for: .captureWindow)?.displayValue, "⌥⇧2")
+    checkEqual(map.chord(for: .captureFullscreen)?.displayValue, "⌥⇧3")
+    checkEqual(map.chord(for: .captureScrolling)?.displayValue, "⌥⇧4")
+}
+
 test("conflict detection and stealing") {
     var map = Keymap.defaults
     let regionChord = map.chord(for: .captureRegion)!
@@ -176,6 +192,31 @@ test("keymap round trip through settings") {
     }
 }
 
+test("legacy default capture hotkeys normalize to current order") {
+    var regionFirstLegacy = Settings.defaults
+    regionFirstLegacy.hotkeys[AppAction.captureRegion.rawValue] = "opt+shift+1"
+    regionFirstLegacy.hotkeys[AppAction.captureFullscreen.rawValue] = "opt+shift+2"
+    regionFirstLegacy.hotkeys[AppAction.captureWindow.rawValue] = "opt+shift+3"
+    regionFirstLegacy.normalizeLegacyDefaultCaptureHotkeys()
+    checkEqual(regionFirstLegacy.keymap.chord(for: .captureRegion)?.displayValue, "⌥⇧1")
+    checkEqual(regionFirstLegacy.keymap.chord(for: .captureWindow)?.displayValue, "⌥⇧2")
+    checkEqual(regionFirstLegacy.keymap.chord(for: .captureFullscreen)?.displayValue, "⌥⇧3")
+
+    var fullscreenFirstLegacy = Settings.defaults
+    fullscreenFirstLegacy.hotkeys[AppAction.captureFullscreen.rawValue] = "opt+shift+1"
+    fullscreenFirstLegacy.hotkeys[AppAction.captureRegion.rawValue] = "opt+shift+2"
+    fullscreenFirstLegacy.hotkeys[AppAction.captureWindow.rawValue] = "opt+shift+3"
+    fullscreenFirstLegacy.normalizeLegacyDefaultCaptureHotkeys()
+    checkEqual(fullscreenFirstLegacy.keymap.chord(for: .captureRegion)?.displayValue, "⌥⇧1")
+    checkEqual(fullscreenFirstLegacy.keymap.chord(for: .captureWindow)?.displayValue, "⌥⇧2")
+    checkEqual(fullscreenFirstLegacy.keymap.chord(for: .captureFullscreen)?.displayValue, "⌥⇧3")
+
+    var custom = Settings.defaults
+    custom.hotkeys[AppAction.captureRegion.rawValue] = "opt+shift+9"
+    custom.normalizeLegacyDefaultCaptureHotkeys()
+    checkEqual(custom.keymap.chord(for: .captureRegion)?.displayValue, "⌥⇧9")
+}
+
 test("corrupt file falls back to defaults") {
     try withTempDir { dir in
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
@@ -194,15 +235,16 @@ test("missing schemaVersion falls back to defaults") {
     }
 }
 
-test("v1 settings migrate to v2 with default text size") {
+test("v1 settings migrate to current schema with text defaults") {
     try withTempDir { dir in
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        // Build a faithful v1 file: today's defaults minus the v2 field.
+        // Build a faithful v1 file: today's defaults minus fields added later.
         var json = try JSONSerialization.jsonObject(
             with: JSONEncoder().encode(Settings.defaults)
         ) as! [String: Any]
         json["schemaVersion"] = 1
         json.removeValue(forKey: "textSize")
+        json.removeValue(forKey: "textEnterBehavior")
         json["strokeWidth"] = 5.0 // a non-default to prove the rest survives
         try JSONSerialization.data(withJSONObject: json)
             .write(to: dir.appendingPathComponent("settings.json"))
@@ -210,6 +252,26 @@ test("v1 settings migrate to v2 with default text size") {
         let store = SettingsStore(directory: dir)
         checkEqual(store.settings.schemaVersion, Settings.currentSchemaVersion)
         checkEqual(store.settings.textSize, 16)
+        checkEqual(store.settings.textEnterBehavior, .newline)
+        checkEqual(store.settings.strokeWidth, 5)
+    }
+}
+
+test("v2 settings migrate to current schema with new line Return default") {
+    try withTempDir { dir in
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        var json = try JSONSerialization.jsonObject(
+            with: JSONEncoder().encode(Settings.defaults)
+        ) as! [String: Any]
+        json["schemaVersion"] = 2
+        json.removeValue(forKey: "textEnterBehavior")
+        json["strokeWidth"] = 5.0
+        try JSONSerialization.data(withJSONObject: json)
+            .write(to: dir.appendingPathComponent("settings.json"))
+
+        let store = SettingsStore(directory: dir)
+        checkEqual(store.settings.schemaVersion, Settings.currentSchemaVersion)
+        checkEqual(store.settings.textEnterBehavior, .newline)
         checkEqual(store.settings.strokeWidth, 5)
     }
 }

@@ -38,7 +38,7 @@ document is the spec a port implements.
 - `Keymap` maps `AppAction → KeyChord` with conflict detection: binding an
   in-use chord *steals* it (the old action becomes unbound) and reports the
   victim so UI can warn. `systemReserved` lists OS-owned chords to reject.
-- Defaults: ⌥⇧1 fullscreen, ⌥⇧2 region, ⌥⇧3 window, ⌥⇧4 scrolling, ⌥⇧R
+- Defaults: ⌥⇧1 region, ⌥⇧2 window, ⌥⇧3 fullscreen, ⌥⇧4 scrolling, ⌥⇧R
   repeat-last — chosen to avoid macOS ⌘⇧3/4/5.
 
 ## 3. Settings schema (`Settings.swift`)
