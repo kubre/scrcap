@@ -4,6 +4,31 @@ Capture at the speed of thought. A Shottr-inspired screenshot tool that is
 tiny, instant, and keyboard-first. macOS native (Swift + AppKit, zero
 dependencies); portable core by design.
 
+## Install
+
+Requires macOS 14+.
+
+1. Download `scrcap-macos.dmg` from the latest GitHub Release.
+2. Open the DMG.
+3. Drag `scrcap.app` to `Applications`.
+4. Open `scrcap` from Applications.
+
+Because scrcap is not notarized by Apple yet, macOS may show **"scrcap" Not
+Opened** the first time. If that happens:
+
+1. Click **Done**.
+2. Open **System Settings**.
+3. Go to **Privacy & Security**.
+4. Scroll down to the **Security** section.
+5. Click **Open Anyway** next to the message that says `"scrcap" was blocked`.
+6. Confirm **Open** when macOS asks again.
+
+![Open Anyway in Privacy & Security](./docs/open-anyway.png)
+
+After the first successful open, scrcap launches normally. On first capture,
+macOS asks for **Screen Recording** permission. Scrolling capture asks for
+**Accessibility** permission the first time you use it.
+
 ## Build & run
 
 Requires macOS 14+ and a Swift 6 toolchain (Command Line Tools are enough).
@@ -36,6 +61,14 @@ The release script creates a fresh `dist/` containing only:
 The app bundle is stripped, optimized for size, and checked so development
 artifacts such as `.DS_Store`, Swift module files, object files, and dSYM
 bundles cannot slip into the release output.
+
+CI uploads the zip and DMG as workflow artifacts on every run. To publish a
+GitHub Release, push a version tag:
+
+```sh
+git tag v1.0.0
+git push origin v1.0.0
+```
 
 ## Default hotkeys (all remappable in Preferences → Shortcuts)
 

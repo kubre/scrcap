@@ -4,6 +4,9 @@ on:
   push:
   pull_request:
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: macos-latest
@@ -17,3 +20,21 @@ jobs:
         run: swift run scrcap-core-tests
       - name: Release bundle
         run: SCRCAP_ALLOW_ADHOC=1 scripts/make_app.sh
+      - name: Upload packaged app
+        uses: actions/upload-artifact@v4
+        with:
+          name: scrcap-macos
+          path: |
+            dist/scrcap-macos.zip
+            dist/scrcap-macos.dmg
+          if-no-files-found: error
+      - name: Publish GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            dist/scrcap-macos.zip \
+            dist/scrcap-macos.dmg \
+            --title "$GITHUB_REF_NAME" \
+            --generate-notes
