@@ -71,7 +71,7 @@ public struct KeyChord: Codable, Hashable, Sendable {
 
 /// Globally-hotkeyed actions. Editor-local keys (A/R/C, 1–7, Esc…) are
 /// handled by the editor against `Settings.editorKeys`.
-public enum AppAction: String, Codable, CaseIterable, Sendable {
+public enum AppAction: String, Codable, Sendable {
     case captureRegion
     case captureWindow
     case captureFullscreen

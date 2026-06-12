@@ -4,6 +4,9 @@
 
 import AppKit
 import ScrcapCore
+#if DEBUG
+import SwiftUI
+#endif
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var settingsStore: SettingsStore!
@@ -27,6 +30,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         settingsStore = SettingsStore(directory: SettingsStore.defaultDirectory())
 
+        applyTheme()
+
         // Hotkeys live before any UI work.
         hotkeyService = HotkeyService()
         hotkeyService.onAction = { [weak self] action in self?.perform(action) }
@@ -42,6 +47,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             forName: .scrcapSettingsChanged, object: nil, queue: .main
         ) { [weak self] _ in
             guard let self else { return }
+            self.applyTheme()
             self.hotkeyService.register(keymap: self.settingsStore.settings.keymap)
             self.rebuildMenu()
         }
@@ -58,15 +64,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             )
         }
 
+        NotificationCenter.default.addObserver(
+            forName: .scrcapCheckForUpdates, object: nil, queue: .main
+        ) { [weak self] _ in
+            self?.checkForUpdates()
+        }
+
         #if DEBUG
             if ProcessInfo.processInfo.environment["SCRCAP_SMOKE"] == "text" {
                 runTextSmokeTest()
+                return
+            }
+            if ProcessInfo.processInfo.environment["SCRCAP_SMOKE"] == "ui" {
+                runUISnapshotSmokeTest()
                 return
             }
         #endif
 
         // Screen Recording is requested lazily on the first capture. Asking on
         // launch stacks macOS' permission prompt with scrcap's own startup UI.
+    }
+
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
+        false
     }
 
     #if DEBUG
@@ -101,7 +121,88 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
     }
+
+    /// Renders every chrome surface to /tmp/scrcap-ui-*.png and exits — a
+    /// design review without Screen Recording permission. Run with:
+    /// SCRCAP_SMOKE=ui .build/debug/scrcap
+    private func runUISnapshotSmokeTest() {
+        func writePNG(_ view: NSView, _ name: String) {
+            view.layoutSubtreeIfNeeded()
+            guard let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { return }
+            view.cacheDisplay(in: view.bounds, to: rep)
+            guard let data = rep.representation(using: .png, properties: [:]) else { return }
+            try? data.write(to: URL(fileURLWithPath: "/tmp/scrcap-ui-\(name).png"))
+            print("wrote /tmp/scrcap-ui-\(name).png")
+        }
+
+        // Synthetic screenshot: soft gradient so annotations stay legible.
+        let width = 720, height = 420
+        let ctx = CGContext(
+            data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
+            space: CGColorSpace(name: CGColorSpace.sRGB)!,
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        )!
+        let colors = [CGColor(red: 0.22, green: 0.26, blue: 0.36, alpha: 1),
+                      CGColor(red: 0.46, green: 0.30, blue: 0.36, alpha: 1)]
+        let gradient = CGGradient(colorsSpace: ctx.colorSpace, colors: colors as CFArray, locations: nil)!
+        ctx.drawLinearGradient(gradient, start: .zero, end: CGPoint(x: width, y: height), options: [])
+        let image = ctx.makeImage()!
+
+        let editor = EditorWindowController(
+            capture: CaptureResult(image: image, scale: 1),
+            settingsStore: settingsStore
+        )
+        editor.show()
+
+        DispatchQueue.main.async {
+            for (appearance, suffix) in [(NSAppearance.Name.aqua, "light"), (.darkAqua, "dark")] {
+                NSApp.appearance = NSAppearance(named: appearance)
+                if let content = editor.debugContentView {
+                    writePNG(content, "editor-\(suffix)")
+                }
+            }
+            NSApp.appearance = nil
+
+            writePNG(ScrollCaptureController.debugHUDView(), "scroll-hud")
+
+            if let screen = NSScreen.main {
+                let overlay = OverlayView(frame: NSRect(x: 0, y: 0, width: 720, height: 420), screen: screen)
+                overlay.reset(mode: .region)
+                overlay.debugSetSelection(from: NSPoint(x: 180, y: 110), to: NSPoint(x: 540, y: 330))
+                writePNG(overlay, "overlay-region")
+                overlay.reset(mode: .window)
+                writePNG(overlay, "overlay-window")
+                overlay.stopAnimation()
+            }
+
+            let prefsHost = NSWindow(
+                contentRect: NSRect(x: 0, y: 0, width: 600, height: 440),
+                styleMask: .borderless, backing: .buffered, defer: false
+            )
+            prefsHost.contentView = NSHostingView(
+                rootView: PreferencesView().environmentObject(SettingsModel(store: self.settingsStore))
+            )
+            prefsHost.layoutIfNeeded()
+            if let view = prefsHost.contentView {
+                writePNG(view, "prefs")
+            }
+            exit(0)
+        }
+    }
     #endif
+
+    // MARK: Theme
+
+    private func applyTheme() {
+        switch settingsStore.settings.themeMode {
+        case .system:
+            NSApp.appearance = nil
+        case .light:
+            NSApp.appearance = NSAppearance(named: .aqua)
+        case .dark:
+            NSApp.appearance = NSAppearance(named: .darkAqua)
+        }
+    }
 
     // MARK: Status item
 
@@ -115,13 +216,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func statusItemImage() -> NSImage? {
-        let resourceURL = Bundle.main.url(forResource: "MenuBarIconTemplate", withExtension: "png")
-            ?? Bundle.module.url(forResource: "MenuBarIconTemplate", withExtension: "png")
-        guard let resourceURL, let image = NSImage(contentsOf: resourceURL) else { return nil }
-        image.size = NSSize(width: 18, height: 18)
-        image.isTemplate = true
-        image.accessibilityDescription = "scrcap"
-        return image
+        Theme.logoImage(size: 18)
     }
 
     private func rebuildMenu() {
@@ -159,6 +254,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         menu.addItem(.separator())
 
+        let updates = NSMenuItem(title: "Check for Updates…", action: #selector(menuCheckForUpdates), keyEquivalent: "")
+        updates.target = self
+        menu.addItem(updates)
+
         let prefs = NSMenuItem(title: "Preferences…", action: #selector(menuPreferences), keyEquivalent: ",")
         prefs.target = self
         menu.addItem(prefs)
@@ -175,6 +274,72 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func menuCaptureScrolling() { perform(.captureScrolling) }
     @objc private func menuRepeatLast() { perform(.repeatLast) }
     @objc private func menuPreferences() { preferences.show() }
+    @objc private func menuCheckForUpdates() { checkForUpdates() }
+
+    private var currentAppVersion: String {
+        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "dev"
+    }
+
+    private func checkForUpdates() {
+        let currentVersion = currentAppVersion
+        Task {
+            do {
+                let result = try await GitHubUpdateChecker().check(currentVersion: currentVersion)
+                await MainActor.run {
+                    self.presentUpdateResult(result)
+                }
+            } catch {
+                await MainActor.run {
+                    self.presentUpdateError(error)
+                }
+            }
+        }
+    }
+
+    private func presentUpdateResult(_ result: UpdateCheckResult) {
+        let alert = NSAlert()
+        alert.alertStyle = .informational
+
+        switch result {
+        case .updateAvailable(let currentVersion, let release):
+            alert.messageText = "Update Available"
+            alert.informativeText = "scrcap \(release.tagName) is available. You are running \(versionLabel(currentVersion))."
+            alert.addButton(withTitle: "Open GitHub Release")
+            alert.addButton(withTitle: "Later")
+            showUpdateAlert(alert, releaseURL: release.htmlURL)
+        case .upToDate(let currentVersion, let release):
+            alert.messageText = "scrcap is up to date"
+            alert.informativeText = "You are running \(versionLabel(currentVersion)). Latest release is \(release.tagName)."
+            alert.addButton(withTitle: "OK")
+            showUpdateAlert(alert)
+        case .cannotCompare(let currentVersion, let release):
+            alert.messageText = "Latest Release"
+            alert.informativeText = "Latest release is \(release.tagName). This build reports \(versionLabel(currentVersion)), so scrcap could not compare versions."
+            alert.addButton(withTitle: "Open GitHub Release")
+            alert.addButton(withTitle: "OK")
+            showUpdateAlert(alert, releaseURL: release.htmlURL)
+        }
+    }
+
+    private func presentUpdateError(_ error: Error) {
+        let alert = NSAlert()
+        alert.messageText = "Could not check for updates"
+        alert.informativeText = error.localizedDescription
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "OK")
+        showUpdateAlert(alert)
+    }
+
+    private func showUpdateAlert(_ alert: NSAlert, releaseURL: URL? = nil) {
+        NSApp.activate(ignoringOtherApps: true)
+        if alert.runModal() == .alertFirstButtonReturn, let releaseURL {
+            NSWorkspace.shared.open(releaseURL)
+        }
+    }
+
+    private func versionLabel(_ version: String) -> String {
+        version == "dev" ? "a dev build" : "v\(version)"
+    }
 
     // MARK: Actions
 
@@ -196,16 +361,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
 
         case .captureWindow:
-            overlay.beginWindowPick { [weak self] window in
-                guard let self else { return }
-                self.lastCapture = .window(window.windowID)
-                let includeShadow = self.settingsStore.settings.includeWindowShadow
-                self.runCapture(mode: .window) {
-                    try await self.captureEngine.captureWindow(
-                        windowID: window.windowID,
-                        includeShadow: includeShadow
-                    )
+            switch settingsStore.settings.windowCaptureTarget {
+            case .active:
+                if let window = OverlayController.listWindows().first {
+                    captureWindow(window)
+                } else {
+                    beginWindowPick()
                 }
+            case .selected:
+                beginWindowPick()
             }
 
         case .captureScrolling:
@@ -213,6 +377,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         case .repeatLast:
             repeatLastCapture()
+        }
+    }
+
+    private func beginWindowPick() {
+        overlay.beginWindowPick { [weak self] window in
+            self?.captureWindow(window)
+        }
+    }
+
+    private func captureWindow(_ window: PickableWindow) {
+        lastCapture = .window(window.windowID)
+        let includeShadow = settingsStore.settings.includeWindowShadow
+        runCapture(mode: .window) {
+            try await self.captureEngine.captureWindow(
+                windowID: window.windowID,
+                includeShadow: includeShadow
+            )
         }
     }
 
@@ -265,7 +446,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func deliver(_ capture: CaptureResult, mode: CaptureMode) {
         let behavior = settingsStore.settings.behavior(for: mode)
         if behavior == .copyOnly || behavior == .both {
-            Exporter.copyToClipboard(capture.image)
+            if !Exporter.copyToClipboard(capture.image, pointScale: capture.scale) {
+                presentError(ExportError.clipboardWriteFailed)
+            }
         }
         if behavior == .openEditor || behavior == .both {
             EditorWindowController(capture: capture, settingsStore: settingsStore).show()
@@ -274,6 +457,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func presentError(_ error: Error) {
         NSLog("scrcap: capture failed: \(error.localizedDescription)")
+        // A menu-bar app failing silently looks like it did nothing at all.
+        let alert = NSAlert()
+        alert.messageText = "Capture failed"
+        alert.informativeText = error.localizedDescription
+        alert.alertStyle = .warning
+        NSApp.activate(ignoringOtherApps: true)
+        alert.runModal()
     }
 
     // MARK: Screen Recording permission (TCC)

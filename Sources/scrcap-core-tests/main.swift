@@ -167,6 +167,9 @@ test("defaults when no file") {
         checkEqual(store.settings, .defaults)
         checkEqual(store.settings.paletteHex.count, 7)
         checkEqual(store.settings.paletteHex[0], "#FF3B30")
+        checkEqual(store.settings.windowCaptureTarget, .active)
+        check(store.settings.autoExpandCanvas)
+        checkEqual(store.settings.canvasExtensionBackgroundHex, "#FFFFFF")
     }
 }
 
@@ -235,7 +238,67 @@ test("missing schemaVersion falls back to defaults") {
     }
 }
 
-test("v1 settings migrate to current schema with text defaults") {
+test("future schemaVersion falls back to defaults") {
+    try withTempDir { dir in
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        var json = try JSONSerialization.jsonObject(
+            with: JSONEncoder().encode(Settings.defaults)
+        ) as! [String: Any]
+        json["schemaVersion"] = Settings.currentSchemaVersion + 1
+        json["strokeWidth"] = 5.0
+        try JSONSerialization.data(withJSONObject: json)
+            .write(to: dir.appendingPathComponent("settings.json"))
+
+        let store = SettingsStore(directory: dir)
+        checkEqual(store.settings, .defaults)
+    }
+}
+
+test("decodable settings are normalized on load") {
+    try withTempDir { dir in
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        var settings = Settings.defaults
+        settings.paletteHex = ["#abcdef", "not-a-color"]
+        settings.canvasExtensionBackgroundHex = "00ff00"
+        settings.strokeWidth = 99
+        settings.textSize = -4
+        settings.exportScale = 9
+        settings.scrollingMaxHeight = 999_999
+        try JSONEncoder().encode(settings).write(to: dir.appendingPathComponent("settings.json"))
+
+        let store = SettingsStore(directory: dir)
+        checkEqual(store.settings.paletteHex, [
+            "#ABCDEF", "#FF9500", "#FFCC00", "#34C759", "#0A84FF", "#BF5AF2", "#F2F2F7",
+        ])
+        checkEqual(store.settings.canvasExtensionBackgroundHex, "#00FF00")
+        checkEqual(store.settings.strokeWidth, Settings.maxStrokeWidth)
+        checkEqual(store.settings.textSize, Settings.minTextSize)
+        checkEqual(store.settings.exportScale, 2)
+        checkEqual(store.settings.scrollingMaxHeight, Settings.maxScrollingMaxHeight)
+    }
+}
+
+test("settings updates are normalized before saving") {
+    withTempDir { dir in
+        let store = SettingsStore(directory: dir)
+        store.update {
+            $0.paletteHex = []
+            $0.strokeWidth = -10
+            $0.textSize = 200
+            $0.exportScale = 0
+            $0.scrollingMaxHeight = 10
+        }
+
+        let reloaded = SettingsStore(directory: dir)
+        checkEqual(reloaded.settings.paletteHex, Settings.defaultPalette)
+        checkEqual(reloaded.settings.strokeWidth, Settings.minStrokeWidth)
+        checkEqual(reloaded.settings.textSize, Settings.maxTextSize)
+        checkEqual(reloaded.settings.exportScale, 2)
+        checkEqual(reloaded.settings.scrollingMaxHeight, Settings.minScrollingMaxHeight)
+    }
+}
+
+test("v1 settings migrate to current schema with text, window, and canvas defaults") {
     try withTempDir { dir in
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         // Build a faithful v1 file: today's defaults minus fields added later.
@@ -245,6 +308,9 @@ test("v1 settings migrate to current schema with text defaults") {
         json["schemaVersion"] = 1
         json.removeValue(forKey: "textSize")
         json.removeValue(forKey: "textEnterBehavior")
+        json.removeValue(forKey: "windowCaptureTarget")
+        json.removeValue(forKey: "autoExpandCanvas")
+        json.removeValue(forKey: "canvasExtensionBackgroundHex")
         json["strokeWidth"] = 5.0 // a non-default to prove the rest survives
         try JSONSerialization.data(withJSONObject: json)
             .write(to: dir.appendingPathComponent("settings.json"))
@@ -253,11 +319,14 @@ test("v1 settings migrate to current schema with text defaults") {
         checkEqual(store.settings.schemaVersion, Settings.currentSchemaVersion)
         checkEqual(store.settings.textSize, 16)
         checkEqual(store.settings.textEnterBehavior, .newline)
+        checkEqual(store.settings.windowCaptureTarget, .active)
+        check(store.settings.autoExpandCanvas)
+        checkEqual(store.settings.canvasExtensionBackgroundHex, "#FFFFFF")
         checkEqual(store.settings.strokeWidth, 5)
     }
 }
 
-test("v2 settings migrate to current schema with new line Return default") {
+test("v2 settings migrate to current schema with new line Return, active window, and canvas defaults") {
     try withTempDir { dir in
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         var json = try JSONSerialization.jsonObject(
@@ -265,6 +334,9 @@ test("v2 settings migrate to current schema with new line Return default") {
         ) as! [String: Any]
         json["schemaVersion"] = 2
         json.removeValue(forKey: "textEnterBehavior")
+        json.removeValue(forKey: "windowCaptureTarget")
+        json.removeValue(forKey: "autoExpandCanvas")
+        json.removeValue(forKey: "canvasExtensionBackgroundHex")
         json["strokeWidth"] = 5.0
         try JSONSerialization.data(withJSONObject: json)
             .write(to: dir.appendingPathComponent("settings.json"))
@@ -272,6 +344,53 @@ test("v2 settings migrate to current schema with new line Return default") {
         let store = SettingsStore(directory: dir)
         checkEqual(store.settings.schemaVersion, Settings.currentSchemaVersion)
         checkEqual(store.settings.textEnterBehavior, .newline)
+        checkEqual(store.settings.windowCaptureTarget, .active)
+        check(store.settings.autoExpandCanvas)
+        checkEqual(store.settings.canvasExtensionBackgroundHex, "#FFFFFF")
+        checkEqual(store.settings.strokeWidth, 5)
+    }
+}
+
+test("v3 settings migrate to current schema with active window and canvas defaults") {
+    try withTempDir { dir in
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        var json = try JSONSerialization.jsonObject(
+            with: JSONEncoder().encode(Settings.defaults)
+        ) as! [String: Any]
+        json["schemaVersion"] = 3
+        json.removeValue(forKey: "windowCaptureTarget")
+        json.removeValue(forKey: "autoExpandCanvas")
+        json.removeValue(forKey: "canvasExtensionBackgroundHex")
+        json["strokeWidth"] = 5.0
+        try JSONSerialization.data(withJSONObject: json)
+            .write(to: dir.appendingPathComponent("settings.json"))
+
+        let store = SettingsStore(directory: dir)
+        checkEqual(store.settings.schemaVersion, Settings.currentSchemaVersion)
+        checkEqual(store.settings.windowCaptureTarget, .active)
+        check(store.settings.autoExpandCanvas)
+        checkEqual(store.settings.canvasExtensionBackgroundHex, "#FFFFFF")
+        checkEqual(store.settings.strokeWidth, 5)
+    }
+}
+
+test("v4 settings migrate to current schema with canvas defaults") {
+    try withTempDir { dir in
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        var json = try JSONSerialization.jsonObject(
+            with: JSONEncoder().encode(Settings.defaults)
+        ) as! [String: Any]
+        json["schemaVersion"] = 4
+        json.removeValue(forKey: "autoExpandCanvas")
+        json.removeValue(forKey: "canvasExtensionBackgroundHex")
+        json["strokeWidth"] = 5.0
+        try JSONSerialization.data(withJSONObject: json)
+            .write(to: dir.appendingPathComponent("settings.json"))
+
+        let store = SettingsStore(directory: dir)
+        checkEqual(store.settings.schemaVersion, Settings.currentSchemaVersion)
+        check(store.settings.autoExpandCanvas)
+        checkEqual(store.settings.canvasExtensionBackgroundHex, "#FFFFFF")
         checkEqual(store.settings.strokeWidth, 5)
     }
 }
@@ -342,6 +461,86 @@ test("rowHash differs on byte change") {
     a[3] = 9
     let h2 = a.withUnsafeBytes { StitchEngine.rowHash($0) }
     check(h1 != h2)
+}
+
+// MARK: - ReleaseVersion
+
+print("\nReleaseVersion")
+
+test("release versions ignore leading v") {
+    checkEqual(ReleaseVersion("v1.2.3"), ReleaseVersion("1.2.3"))
+}
+
+test("release versions compare numeric components") {
+    check(ReleaseVersion("1.10.0")! > ReleaseVersion("1.9.9")!)
+    check(ReleaseVersion("2.0")! > ReleaseVersion("1.99.99")!)
+}
+
+test("release versions treat missing trailing zeroes as equal") {
+    checkEqual(ReleaseVersion("1.0"), ReleaseVersion("1.0.0"))
+}
+
+test("release versions strip metadata") {
+    checkEqual(ReleaseVersion("v1.2.3+4"), ReleaseVersion("1.2.3"))
+    checkEqual(ReleaseVersion("v1.2.3-beta"), ReleaseVersion("1.2.3"))
+}
+
+test("release versions reject non-numeric versions") {
+    checkNil(ReleaseVersion("dev"))
+    checkNil(ReleaseVersion("1.x"))
+    checkNil(ReleaseVersion("1..2"))
+}
+
+test("updateAvailable only when latest is newer") {
+    check(ReleaseVersion.updateAvailable(current: "1.0", latest: "v1.0.1"))
+    check(!ReleaseVersion.updateAvailable(current: "1.0.1", latest: "v1.0.1"))
+    check(!ReleaseVersion.updateAvailable(current: "dev", latest: "v1.0.1"))
+}
+
+// MARK: - FilenameGenerator
+
+print("\nFilenameGenerator")
+
+test("token expansion") {
+    var comps = DateComponents()
+    comps.year = 2026; comps.month = 6; comps.day = 12
+    comps.hour = 14; comps.minute = 32; comps.second = 5
+    let now = Calendar(identifier: .gregorian).date(from: comps)!
+    let result = FilenameGenerator.filename(pattern: "scrcap-{date}-{time}", now: now)
+    checkEqual(result, "scrcap-2026-06-12-14.32.05.png")
+}
+
+test("no tokens passes through unchanged") {
+    var comps = DateComponents()
+    comps.year = 2026; comps.month = 1; comps.day = 1
+    comps.hour = 0; comps.minute = 0; comps.second = 0
+    let now = Calendar(identifier: .gregorian).date(from: comps)!
+    let result = FilenameGenerator.filename(pattern: "my-screenshot", now: now)
+    checkEqual(result, "my-screenshot.png")
+}
+
+test("safeFilenameStem strips slashes") {
+    checkEqual(FilenameGenerator.safeFilenameStem("a/b/c"), "a-b-c")
+}
+
+test("safeFilenameStem strips backslash and colon") {
+    checkEqual(FilenameGenerator.safeFilenameStem("a\\b:c"), "a-b-c")
+}
+
+test("safeFilenameStem strips control characters") {
+    checkEqual(FilenameGenerator.safeFilenameStem("a\u{01}b"), "a-b")
+}
+
+test("safeFilenameStem empty input returns scrcap") {
+    checkEqual(FilenameGenerator.safeFilenameStem(""), "scrcap")
+}
+
+test("safeFilenameStem all-invalid input returns scrcap") {
+    checkEqual(FilenameGenerator.safeFilenameStem("///"), "scrcap")
+}
+
+test("safeFilenameStem trims interior whitespace segments") {
+    checkEqual(FilenameGenerator.safeFilenameStem("foo  /  bar"), "foo-bar")
 }
 
 TestRun.shared.finish()

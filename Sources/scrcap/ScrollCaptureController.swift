@@ -56,10 +56,11 @@ final class ScrollCaptureController {
     @MainActor
     private func stitchLoop(rect: NSRect, screen: NSScreen) async throws -> CaptureResult {
         let scale = screen.backingScaleFactor
-        let maxRows = Int(CGFloat(settingsStore.settings.scrollingMaxHeight) * scale)
+        let maxRows = settingsStore.settings.scrollingMaxHeight
         let scrollStepPoints = Int32(rect.height * 0.7)
 
-        let first = try await frame(rect: rect, screen: screen)
+        let firstCapture = try await capture.captureRegion(rect, on: screen)
+        let first = Self.extractRows(from: firstCapture.image)
         var accumulatedRows = first.rows
         var accumulatedHashes = first.hashes
         var previousFrameHashes = first.hashes
@@ -70,7 +71,7 @@ final class ScrollCaptureController {
             let remainingRows = maxRows - accumulatedHashes.count
             guard remainingRows > 0 else { break }
 
-            updateProgress(rows: accumulatedHashes.count, scale: scale)
+            updateProgress(rows: accumulatedHashes.count)
             injectScroll(amount: scrollStepPoints)
             try await settle(rect: rect, screen: screen)
             guard !stopped else { break }
@@ -116,15 +117,18 @@ final class ScrollCaptureController {
 
             accumulatedHashes.append(contentsOf: next.hashes[alignment.newContentStart..<end])
             accumulatedRows.append(contentsOf: next.rows[alignment.newContentStart..<end])
-            precondition(accumulatedHashes.count == accumulatedRows.count, "Rows and hashes must stay aligned.")
+            assert(accumulatedHashes.count == accumulatedRows.count, "Rows and hashes must stay aligned.")
 
             if appendedCount < availableRows {
                 break
             }
         }
 
-        // A single frame's worth of rows means nothing scrolled: deliver a
-        // normal region capture instead.
+        // Nothing scrolled → hand back the pristine first capture (native
+        // color space, no byte-buffer round trip) instead of compositing.
+        if accumulatedHashes.count == first.hashes.count {
+            return CaptureResult(image: firstCapture.image, scale: scale)
+        }
         let image = try composite(rows: accumulatedRows, width: width)
         return CaptureResult(image: image, scale: scale)
     }
@@ -143,7 +147,31 @@ final class ScrollCaptureController {
         return Self.extractRows(from: result.image)
     }
 
+    /// Hashes only — settle polling runs this several times per scroll step,
+    /// so it must not copy every pixel row the way extractRows does.
+    @MainActor
+    private func frameHashes(rect: NSRect, screen: NSScreen) async throws -> [UInt64] {
+        let result = try await capture.captureRegion(rect, on: screen)
+        return Self.renderRows(from: result.image) { _, rowBytes, hashes in
+            hashes.append(StitchEngine.rowHash(rowBytes))
+        }
+    }
+
     private static func extractRows(from image: CGImage) -> FrameData {
+        var rows: [[UInt8]] = []
+        rows.reserveCapacity(image.height)
+        let hashes = renderRows(from: image) { _, rowBytes, hashes in
+            rows.append([UInt8](rowBytes))
+            hashes.append(StitchEngine.rowHash(rowBytes))
+        }
+        return FrameData(rows: rows, hashes: hashes, width: image.width)
+    }
+
+    /// Draws the image once into an RGBA buffer and walks it row by row.
+    private static func renderRows(
+        from image: CGImage,
+        _ visit: (Int, UnsafeRawBufferPointer, inout [UInt64]) -> Void
+    ) -> [UInt64] {
         let width = image.width
         let height = image.height
         let bytesPerRow = width * 4
@@ -158,16 +186,15 @@ final class ScrollCaptureController {
             ) else { return }
             ctx.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
         }
-        var rows: [[UInt8]] = []
         var hashes: [UInt64] = []
-        rows.reserveCapacity(height)
         hashes.reserveCapacity(height)
-        for y in 0..<height {
-            let row = Array(buffer[(y * bytesPerRow)..<((y + 1) * bytesPerRow)])
-            rows.append(row)
-            hashes.append(row.withUnsafeBytes { StitchEngine.rowHash($0) })
+        buffer.withUnsafeBytes { raw in
+            for y in 0..<height {
+                let row = UnsafeRawBufferPointer(rebasing: raw[(y * bytesPerRow)..<((y + 1) * bytesPerRow)])
+                visit(y, row, &hashes)
+            }
         }
-        return FrameData(rows: rows, hashes: hashes, width: width)
+        return hashes
     }
 
     private func composite(rows: [[UInt8]], width: Int) throws -> CGImage {
@@ -213,7 +240,7 @@ final class ScrollCaptureController {
         var lastHashes: [UInt64]? = nil
         while Date() < deadline, !stopped {
             try await Task.sleep(nanoseconds: 120_000_000)
-            let current = try await frame(rect: rect, screen: screen).hashes
+            let current = try await frameHashes(rect: rect, screen: screen)
             if let last = lastHashes, last == current { return }
             lastHashes = current
         }
@@ -222,40 +249,49 @@ final class ScrollCaptureController {
     // MARK: Progress UI
 
     private func showProgress(on screen: NSScreen) {
+        let size = NSSize(width: 252, height: 64)
         let panel = NSPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 260, height: 64),
-            styleMask: [.nonactivatingPanel, .hudWindow, .titled],
+            contentRect: NSRect(origin: .zero, size: size),
+            styleMask: [.nonactivatingPanel, .borderless],
             backing: .buffered,
             defer: false
         )
-        panel.title = "Scrolling Capture"
         panel.level = .screenSaver
         panel.isFloatingPanel = true
+        panel.isOpaque = false
+        panel.backgroundColor = .clear
+        panel.hasShadow = true
 
-        let label = NSTextField(labelWithString: "Stitching… 0 px")
-        label.frame = NSRect(x: 16, y: 22, width: 140, height: 20)
-        let stop = NSButton(title: "Stop (Esc)", target: self, action: #selector(stopPressed))
-        stop.frame = NSRect(x: 160, y: 16, width: 90, height: 30)
-        stop.bezelStyle = .rounded
-        panel.contentView?.addSubview(label)
-        panel.contentView?.addSubview(stop)
+        let hud = ScrollProgressHUD(stopTarget: self, stopAction: #selector(stopPressed))
+        hud.frame = NSRect(origin: .zero, size: size)
+        panel.contentView = hud
 
         panel.setFrameOrigin(NSPoint(
-            x: screen.visibleFrame.maxX - 290,
-            y: screen.visibleFrame.maxY - 110
+            x: screen.visibleFrame.maxX - size.width - 20,
+            y: screen.visibleFrame.maxY - size.height - 20
         ))
         panel.orderFrontRegardless()
         progressPanel = panel
-        progressLabel = label
+        progressLabel = hud.countLabel
     }
 
-    private func updateProgress(rows: Int, scale: CGFloat) {
-        progressLabel?.stringValue = String(format: "Stitching… %d px", Int(CGFloat(rows) / scale))
+    private func updateProgress(rows: Int) {
+        progressLabel?.stringValue = String(format: "%d px", rows)
     }
 
     @objc private func stopPressed() {
         stopped = true
     }
+
+    #if DEBUG
+    /// Offscreen HUD instance for the UI snapshot smoke test.
+    static func debugHUDView() -> NSView {
+        let hud = ScrollProgressHUD(stopTarget: NSApp, stopAction: #selector(NSApplication.terminate(_:)))
+        hud.frame = NSRect(x: 0, y: 0, width: 252, height: 64)
+        hud.countLabel.stringValue = "1240 px"
+        return hud
+    }
+    #endif
 
     private func teardown() {
         if let escMonitor { NSEvent.removeMonitor(escMonitor) }
@@ -263,5 +299,84 @@ final class ScrollCaptureController {
         progressPanel?.orderOut(nil)
         progressPanel = nil
         progressLabel = nil
+    }
+}
+
+// MARK: - HUD view
+
+/// Fixed-carbon capture HUD (matches the overlay's tag styling): flat block,
+/// sharp corners, pulsing yellow dot, mono pixel count, yellow STOP cell.
+private final class ScrollProgressHUD: NSView {
+    let countLabel = NSTextField(labelWithString: "0 px")
+
+    private let dot = NSView()
+
+    init(stopTarget: AnyObject, stopAction: Selector) {
+        super.init(frame: .zero)
+        wantsLayer = true
+        layer?.backgroundColor = Theme.tagBackground.cgColor
+        layer?.borderWidth = 1
+        layer?.borderColor = Theme.tagRule.cgColor
+
+        dot.wantsLayer = true
+        dot.layer?.backgroundColor = Theme.yellow.cgColor
+        dot.translatesAutoresizingMaskIntoConstraints = false
+
+        let title = NSTextField(labelWithString: "SCROLLING CAPTURE")
+        title.font = NSFont.monospacedSystemFont(ofSize: 10, weight: .semibold)
+        title.textColor = Theme.tagDimText
+        title.translatesAutoresizingMaskIntoConstraints = false
+
+        countLabel.font = NSFont.monospacedSystemFont(ofSize: 16, weight: .medium)
+        countLabel.textColor = Theme.tagText
+        countLabel.translatesAutoresizingMaskIntoConstraints = false
+
+        let stop = NSButton(title: "", target: stopTarget, action: stopAction)
+        stop.isBordered = false
+        stop.wantsLayer = true
+        stop.layer?.backgroundColor = Theme.yellow.cgColor
+        let stopTitle = NSMutableAttributedString(string: "STOP ", attributes: [
+            .font: NSFont.monospacedSystemFont(ofSize: 11, weight: .semibold),
+            .foregroundColor: NSColor.black,
+        ])
+        stopTitle.append(NSAttributedString(string: "ESC", attributes: [
+            .font: NSFont.monospacedSystemFont(ofSize: 10, weight: .medium),
+            .foregroundColor: NSColor.black.withAlphaComponent(0.6),
+        ]))
+        stop.attributedTitle = stopTitle
+        stop.translatesAutoresizingMaskIntoConstraints = false
+
+        addSubview(dot)
+        addSubview(title)
+        addSubview(countLabel)
+        addSubview(stop)
+        NSLayoutConstraint.activate([
+            dot.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 14),
+            dot.centerYAnchor.constraint(equalTo: title.centerYAnchor),
+            dot.widthAnchor.constraint(equalToConstant: 8),
+            dot.heightAnchor.constraint(equalToConstant: 8),
+            title.leadingAnchor.constraint(equalTo: dot.trailingAnchor, constant: 7),
+            title.topAnchor.constraint(equalTo: topAnchor, constant: 12),
+            countLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 14),
+            countLabel.topAnchor.constraint(equalTo: title.bottomAnchor, constant: 3),
+            stop.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
+            stop.centerYAnchor.constraint(equalTo: centerYAnchor),
+            stop.widthAnchor.constraint(equalToConstant: 78),
+            stop.heightAnchor.constraint(equalToConstant: 26),
+        ])
+    }
+
+    required init?(coder: NSCoder) { fatalError() }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        guard window != nil, dot.layer?.animation(forKey: "pulse") == nil else { return }
+        let pulse = CABasicAnimation(keyPath: "opacity")
+        pulse.fromValue = 1.0
+        pulse.toValue = 0.3
+        pulse.duration = 0.8
+        pulse.autoreverses = true
+        pulse.repeatCount = .infinity
+        dot.layer?.add(pulse, forKey: "pulse")
     }
 }

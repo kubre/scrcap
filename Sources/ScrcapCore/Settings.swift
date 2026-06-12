@@ -3,13 +3,13 @@
 
 import Foundation
 
-public enum CaptureMode: String, Codable, CaseIterable, Sendable {
+public enum CaptureMode: String, Codable, Sendable {
     case region, window, fullscreen, scrolling
 
     public static let captureOrder: [CaptureMode] = [.region, .window, .fullscreen, .scrolling]
 }
 
-public enum AfterCaptureBehavior: String, Codable, CaseIterable, Sendable {
+public enum AfterCaptureBehavior: String, Codable, Sendable {
     /// Open the annotation editor (default).
     case openEditor
     /// Straight to clipboard, no editor.
@@ -18,21 +18,41 @@ public enum AfterCaptureBehavior: String, Codable, CaseIterable, Sendable {
     case both
 }
 
-public enum EscBehavior: String, Codable, CaseIterable, Sendable {
+public enum EscBehavior: String, Codable, Sendable {
     /// Flatten, copy PNG, close (default).
     case copyAndClose
     case closeOnly
 }
 
-public enum TextEnterBehavior: String, Codable, CaseIterable, Sendable {
+public enum TextEnterBehavior: String, Codable, Sendable {
     /// Return inserts a new line; Shift-Return commits the text annotation.
     case newline
     /// Return commits the text annotation; Shift-Return inserts a new line.
     case commit
 }
 
+public enum WindowCaptureTarget: String, Codable, Sendable {
+    /// Capture the frontmost usable app window.
+    case active
+    /// Show the overlay and let the user choose a window.
+    case selected
+}
+
+public enum ThemeMode: String, Codable, Sendable {
+    case system
+    case light
+    case dark
+}
+
 public struct Settings: Codable, Equatable, Sendable {
-    public static let currentSchemaVersion = 3
+    public static let currentSchemaVersion = 6
+    public static let paletteSlotCount = 7
+    public static let minStrokeWidth = 1.0
+    public static let maxStrokeWidth = 8.0
+    public static let minTextSize = 10.0
+    public static let maxTextSize = 36.0
+    public static let minScrollingMaxHeight = 1_000
+    public static let maxScrollingMaxHeight = 100_000
 
     public var schemaVersion: Int
     /// AppAction.rawValue → chord string ("opt+shift+2").
@@ -47,7 +67,13 @@ public struct Settings: Codable, Equatable, Sendable {
     public var textSize: Double
     /// Return key behavior for the text tool (schema v3).
     public var textEnterBehavior: TextEnterBehavior
+    /// Which window the Window capture action targets (schema v4).
+    public var windowCaptureTarget: WindowCaptureTarget
     public var includeWindowShadow: Bool
+    /// Automatically grow the editor canvas when drawing beyond an edge (schema v5).
+    public var autoExpandCanvas: Bool
+    /// Fill color for newly-created canvas area (schema v5).
+    public var canvasExtensionBackgroundHex: String
     /// nil → ~/Desktop
     public var saveFolder: String?
     /// Tokens: {date}, {time}
@@ -56,6 +82,8 @@ public struct Settings: Codable, Equatable, Sendable {
     public var exportScale: Int
     public var scrollingMaxHeight: Int
     public var launchAtLogin: Bool
+    /// Theme override: system follows macOS appearance, light/dark force it (schema v6).
+    public var themeMode: ThemeMode
     public var resolvedExportScale: Int { exportScale == 1 ? 1 : 2 }
 
     public static let defaultPalette = [
@@ -72,12 +100,16 @@ public struct Settings: Codable, Equatable, Sendable {
             strokeWidth: 3,
             textSize: 16,
             textEnterBehavior: .newline,
+            windowCaptureTarget: .active,
             includeWindowShadow: false,
+            autoExpandCanvas: true,
+            canvasExtensionBackgroundHex: "#FFFFFF",
             saveFolder: nil,
             filenamePattern: "scrcap-{date}-{time}",
             exportScale: 2,
             scrollingMaxHeight: 20_000,
-            launchAtLogin: false
+            launchAtLogin: false,
+            themeMode: .system
         )
     }
 
@@ -117,6 +149,38 @@ public struct Settings: Codable, Equatable, Sendable {
             break
         }
     }
+
+    /// Keeps the human-editable settings file from feeding invalid values into
+    /// AppKit controls, large bitmap allocations, or array-indexed palette UI.
+    public mutating func normalize() {
+        schemaVersion = Self.currentSchemaVersion
+        normalizeLegacyDefaultCaptureHotkeys()
+
+        paletteHex = (0..<Self.paletteSlotCount).map { index in
+            let candidate = paletteHex.indices.contains(index) ? paletteHex[index] : Self.defaultPalette[index]
+            return Self.normalizedHexColor(candidate) ?? Self.defaultPalette[index]
+        }
+        canvasExtensionBackgroundHex = Self.normalizedHexColor(canvasExtensionBackgroundHex) ?? "#FFFFFF"
+
+        strokeWidth = Self.clampFinite(strokeWidth, min: Self.minStrokeWidth, max: Self.maxStrokeWidth)
+        textSize = Self.clampFinite(textSize, min: Self.minTextSize, max: Self.maxTextSize)
+        exportScale = exportScale == 1 ? 1 : 2
+        scrollingMaxHeight = min(max(scrollingMaxHeight, Self.minScrollingMaxHeight), Self.maxScrollingMaxHeight)
+    }
+
+    private static func clampFinite(_ value: Double, min: Double, max: Double) -> Double {
+        guard value.isFinite else { return min }
+        return Swift.min(Swift.max(value, min), max)
+    }
+
+    private static func normalizedHexColor(_ raw: String) -> String? {
+        var value = raw.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        if value.hasPrefix("#") { value.removeFirst() }
+        guard value.count == 6,
+              value.unicodeScalars.allSatisfy({ CharacterSet(charactersIn: "0123456789ABCDEF").contains($0) })
+        else { return nil }
+        return "#\(value)"
+    }
 }
 
 public final class SettingsStore {
@@ -126,7 +190,7 @@ public final class SettingsStore {
     public init(directory: URL) {
         fileURL = directory.appendingPathComponent("settings.json")
         settings = SettingsStore.load(from: fileURL) ?? .defaults
-        settings.normalizeLegacyDefaultCaptureHotkeys()
+        settings.normalize()
     }
 
     public static func defaultDirectory() -> URL {
@@ -145,6 +209,7 @@ public final class SettingsStore {
     private static func migrate(data: Data) -> Data? {
         guard let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let version = obj["schemaVersion"] as? Int else { return nil }
+        guard version <= Settings.currentSchemaVersion else { return nil }
         var json = obj
         var v = version
         while v < Settings.currentSchemaVersion {
@@ -153,6 +218,13 @@ public final class SettingsStore {
                 json["textSize"] = 16.0
             case 2: // v3 added configurable Return behavior for text entry
                 json["textEnterBehavior"] = TextEnterBehavior.newline.rawValue
+            case 3: // v4 made Window capture target configurable
+                json["windowCaptureTarget"] = WindowCaptureTarget.active.rawValue
+            case 4: // v5 added live canvas auto-expansion
+                json["autoExpandCanvas"] = true
+                json["canvasExtensionBackgroundHex"] = "#FFFFFF"
+            case 5: // v6 added theme mode preference
+                json["themeMode"] = ThemeMode.system.rawValue
             default:
                 break
             }
@@ -164,6 +236,7 @@ public final class SettingsStore {
 
     public func update(_ mutate: (inout Settings) -> Void) {
         mutate(&settings)
+        settings.normalize()
         if !save() {
             NSLog("Scrcap: failed to persist settings update.")
         }

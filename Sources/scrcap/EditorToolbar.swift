@@ -1,41 +1,10 @@
-// EditorToolbar — dense strip docked at the top of the editor. Every control
-// wears its shortcut. Tools left, palette center, undo right. Red is the
-// primary accent; chrome follows the system light/dark appearance.
+// EditorToolbar — flat full-width cell bar docked under the canvas, styled
+// like kubre.in's nav: hairline-separated cells, mono labels, the active tool
+// is a solid yellow block with black content, and the primary exit is an
+// inverted carbon block flush right. No pills, no nesting, no shadows.
 
 import AppKit
 import ScrcapCore
-
-enum EditorStyle {
-    static let height: CGFloat = 42
-    static let accent = NSColor(srgbRed: 1.0, green: 0.23, blue: 0.19, alpha: 1) // #FF3B30
-    static let accentFill = NSColor(srgbRed: 1.0, green: 0.23, blue: 0.19, alpha: 0.14)
-
-    // Dynamic colors resolve against the appearance current at .cgColor time;
-    // layer-backed views reapply them in viewDidChangeEffectiveAppearance.
-    static let background = NSColor(name: nil) { appearance in
-        appearance.isDark
-            ? NSColor(srgbRed: 0.085, green: 0.09, blue: 0.10, alpha: 1)
-            : NSColor(srgbRed: 0.965, green: 0.96, blue: 0.955, alpha: 1)
-    }
-    static let border = NSColor(name: nil) { appearance in
-        appearance.isDark
-            ? NSColor(srgbRed: 0.18, green: 0.19, blue: 0.21, alpha: 1)
-            : NSColor(srgbRed: 0.80, green: 0.80, blue: 0.79, alpha: 1)
-    }
-    static let swatchRing = NSColor(name: nil) { appearance in
-        appearance.isDark ? .white : NSColor(srgbRed: 0.15, green: 0.15, blue: 0.15, alpha: 1)
-    }
-
-    // One typographic scale for the whole editor chrome — every icon and
-    // label pulls from here so weights and sizes can't drift apart.
-    static let iconConfiguration = NSImage.SymbolConfiguration(pointSize: 12, weight: .medium, scale: .medium)
-    static let titleFont = NSFont.systemFont(ofSize: 11.5, weight: .medium)
-    static let hintFont = NSFont.monospacedSystemFont(ofSize: 11, weight: .medium)
-}
-
-extension NSAppearance {
-    var isDark: Bool { bestMatch(from: [.darkAqua, .aqua]) == .darkAqua }
-}
 
 final class EditorToolbar: NSView {
     var onTool: ((EditorTool) -> Void)?
@@ -44,90 +13,98 @@ final class EditorToolbar: NSView {
     var onSave: (() -> Void)?
     var onDone: (() -> Void)?
 
-    private var toolButtons: [EditorTool: ToolbarButton] = [:]
-    private var swatches: [SwatchButton] = []
+    private var toolCells: [EditorTool: ToolbarCell] = [:]
+    private var swatchCells: [SwatchCell] = []
     private var hairlines: [NSView] = []
+    private let topRule = NSView()
     private let stack = NSStackView()
 
-    // The empty toolbar background is the window's drag handle.
+    // Gaps between cells are the window's drag handle.
     override var mouseDownCanMoveWindow: Bool { true }
 
-    /// The window must be at least this wide or the controls clip. Measured
-    /// from the content stack itself — the toolbar view has no intrinsic
-    /// width (its stack is only center-pinned), so its own fittingSize lies.
+    /// The window must be at least this wide or cells clip.
     var minimumWidth: CGFloat {
-        max(stack.fittingSize.width + 24, 480)
+        stack.fittingSize.width + 2
     }
 
     init(palette: [String], escCopies: Bool, textEnterBehavior: TextEnterBehavior) {
         super.init(frame: .zero)
         wantsLayer = true
 
-        let bottomBorder = NSView()
-        bottomBorder.wantsLayer = true
-        bottomBorder.translatesAutoresizingMaskIntoConstraints = false
-        hairlines.append(bottomBorder)
-        addSubview(bottomBorder)
+        topRule.wantsLayer = true
+        topRule.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(topRule)
 
         stack.orientation = .horizontal
-        stack.spacing = 4
+        stack.spacing = 0
         stack.alignment = .centerY
         stack.translatesAutoresizingMaskIntoConstraints = false
         addSubview(stack)
         NSLayoutConstraint.activate([
-            stack.centerXAnchor.constraint(equalTo: centerXAnchor),
-            stack.centerYAnchor.constraint(equalTo: centerYAnchor),
-            bottomBorder.leadingAnchor.constraint(equalTo: leadingAnchor),
-            bottomBorder.trailingAnchor.constraint(equalTo: trailingAnchor),
-            bottomBorder.bottomAnchor.constraint(equalTo: bottomAnchor),
-            bottomBorder.heightAnchor.constraint(equalToConstant: 1),
+            topRule.leadingAnchor.constraint(equalTo: leadingAnchor),
+            topRule.trailingAnchor.constraint(equalTo: trailingAnchor),
+            topRule.topAnchor.constraint(equalTo: topAnchor),
+            topRule.heightAnchor.constraint(equalToConstant: 1),
+            stack.leadingAnchor.constraint(equalTo: leadingAnchor),
+            stack.trailingAnchor.constraint(equalTo: trailingAnchor),
+            stack.topAnchor.constraint(equalTo: topAnchor, constant: 1),
+            stack.bottomAnchor.constraint(equalTo: bottomAnchor),
         ])
 
-        // Tool keys sit on the home-reach row: Q W E R.
+        // Tool keys sit on the home-reach row: Q W E R T.
         let tools: [(EditorTool, String, String, String)] = [
             (.arrow, "arrow.up.left", "Q", "Arrow"),
             (.rectangle, "rectangle", "W", "Rectangle"),
             (.counter, "1.circle", "E", "Counter"),
             (.text, "textformat", "R", Self.textToolTip(for: textEnterBehavior)),
+            (.crop, "crop", "T", Self.cropToolTip()),
         ]
-        for (tool, symbol, hint, tip) in tools {
-            let button = ToolbarButton(symbolName: symbol, hint: hint) { [weak self] in
+        for (tool, symbol, key, tip) in tools {
+            let cell = ToolbarCell(symbolName: symbol, key: key) { [weak self] in
                 self?.onTool?(tool)
             }
-            button.toolTip = tip
-            toolButtons[tool] = button
-            stack.addArrangedSubview(button)
+            cell.toolTip = tip
+            toolCells[tool] = cell
+            stack.addArrangedSubview(cell)
+            stack.addArrangedSubview(hairline())
         }
 
-        stack.addArrangedSubview(separator())
+        stack.addArrangedSubview(gap(4))
 
         for (index, hex) in palette.prefix(7).enumerated() {
-            let swatch = SwatchButton(color: NSColor(hex: hex) ?? .systemRed, hint: "\(index + 1)") { [weak self] in
+            let cell = SwatchCell(color: NSColor(hex: hex) ?? .systemRed, key: "\(index + 1)") { [weak self] in
                 self?.onColor?(index)
             }
-            swatches.append(swatch)
-            stack.addArrangedSubview(swatch)
+            swatchCells.append(cell)
+            stack.addArrangedSubview(cell)
         }
 
-        stack.addArrangedSubview(separator())
+        // Flexible gap: tools/palette left, actions flush right.
+        let spacer = NSView()
+        spacer.translatesAutoresizingMaskIntoConstraints = false
+        spacer.setContentHuggingPriority(.init(1), for: .horizontal)
+        spacer.widthAnchor.constraint(greaterThanOrEqualToConstant: 8).isActive = true
+        stack.addArrangedSubview(spacer)
 
-        let undo = ToolbarButton(symbolName: "arrow.uturn.backward", hint: "⌘Z") { [weak self] in
+        let undo = ToolbarCell(symbolName: "arrow.uturn.backward", key: "⌘Z") { [weak self] in
             self?.onUndo?()
         }
         undo.toolTip = "Undo"
         stack.addArrangedSubview(undo)
+        stack.addArrangedSubview(hairline())
 
-        let save = ToolbarButton(symbolName: "square.and.arrow.down", hint: "⌘S") { [weak self] in
+        let save = ToolbarCell(symbolName: "square.and.arrow.down", key: "⌘S") { [weak self] in
             self?.onSave?()
         }
         save.toolTip = "Save as PNG…"
         stack.addArrangedSubview(save)
+        stack.addArrangedSubview(hairline())
 
-        // Esc's behavior is visible, not just documented.
-        let done = ToolbarButton(
-            symbolName: escCopies ? "doc.on.clipboard" : "xmark.circle",
-            title: escCopies ? "Copy & Close" : "Close",
-            hint: "esc"
+        // Esc's behavior is visible, not just documented — the one inverted
+        // block in the strip, flush right like the site's "Resume →" link.
+        let done = PrimaryCell(
+            title: escCopies ? "COPY & CLOSE" : "CLOSE",
+            key: "ESC"
         ) { [weak self] in
             self?.onDone?()
         }
@@ -150,6 +127,8 @@ final class EditorToolbar: NSView {
         }
     }
 
+    private static func cropToolTip() -> String { "Crop" }
+
     override func viewDidChangeEffectiveAppearance() {
         super.viewDidChangeEffectiveAppearance()
         applyColors()
@@ -157,110 +136,104 @@ final class EditorToolbar: NSView {
 
     private func applyColors() {
         effectiveAppearance.performAsCurrentDrawingAppearance {
-            layer?.backgroundColor = EditorStyle.background.cgColor
+            layer?.backgroundColor = Theme.chrome.cgColor
+            topRule.layer?.backgroundColor = Theme.rule.cgColor
             for hairline in hairlines {
-                hairline.layer?.backgroundColor = EditorStyle.border.cgColor
+                hairline.layer?.backgroundColor = Theme.hairline.cgColor
             }
         }
     }
 
     func select(tool: EditorTool) {
-        for (t, button) in toolButtons { button.isActive = (t == tool) }
+        for (t, cell) in toolCells { cell.isActive = (t == tool) }
     }
 
     func select(color index: Int) {
-        for (i, swatch) in swatches.enumerated() { swatch.isActive = (i == index) }
+        for (i, cell) in swatchCells.enumerated() { cell.isActive = (i == index) }
     }
 
-    private func separator() -> NSView {
+    private func hairline() -> NSView {
         let view = NSView()
         view.wantsLayer = true
         view.translatesAutoresizingMaskIntoConstraints = false
         hairlines.append(view)
         NSLayoutConstraint.activate([
             view.widthAnchor.constraint(equalToConstant: 1),
-            view.heightAnchor.constraint(equalToConstant: 20),
+            view.heightAnchor.constraint(equalToConstant: Theme.toolbarHeight - 1),
         ])
-        // Breathing room around the hairline.
-        let wrapper = NSView()
-        wrapper.translatesAutoresizingMaskIntoConstraints = false
-        wrapper.addSubview(view)
-        NSLayoutConstraint.activate([
-            wrapper.widthAnchor.constraint(equalToConstant: 13),
-            wrapper.heightAnchor.constraint(equalToConstant: EditorStyle.height),
-            view.centerXAnchor.constraint(equalTo: wrapper.centerXAnchor),
-            view.centerYAnchor.constraint(equalTo: wrapper.centerYAnchor),
-        ])
-        return wrapper
+        return view
+    }
+
+    private func gap(_ width: CGFloat) -> NSView {
+        let view = NSView()
+        view.translatesAutoresizingMaskIntoConstraints = false
+        view.widthAnchor.constraint(equalToConstant: width).isActive = true
+        return view
     }
 }
 
-// MARK: - Buttons
+// MARK: - Cells
 
-final class ToolbarButton: NSControl {
+/// Flat full-height cell: SF icon + mono key, inline. Active = yellow block
+/// with black content (the site's selected-nav treatment).
+final class ToolbarCell: NSControl {
     var isActive = false {
         didSet { updateAppearance() }
     }
+    private var isHovered = false {
+        didSet { updateAppearance() }
+    }
     private let iconView = NSImageView()
-    private var titleLabel: NSTextField?
-    private let hintLabel = NSTextField(labelWithString: "")
+    private let keyLabel: NSTextField
+
     private let onClick: () -> Void
 
     override var mouseDownCanMoveWindow: Bool { false }
 
-    init(symbolName: String, title: String? = nil, hint: String, onClick: @escaping () -> Void) {
+    init(symbolName: String, key: String, onClick: @escaping () -> Void) {
         self.onClick = onClick
+        keyLabel = NSTextField(labelWithString: key)
         super.init(frame: .zero)
         wantsLayer = true
-        layer?.cornerRadius = 5
         translatesAutoresizingMaskIntoConstraints = false
 
-        // One shared metric set for every control (EditorStyle.*Font /
-        // iconConfiguration) — per-symbol size variance is neutralized by
-        // pinning the icon view to a fixed box.
-        iconView.image = NSImage(systemSymbolName: symbolName, accessibilityDescription: title ?? hint)?
-            .withSymbolConfiguration(EditorStyle.iconConfiguration)
+        iconView.image = NSImage(systemSymbolName: symbolName, accessibilityDescription: key)?
+            .withSymbolConfiguration(Theme.iconConfiguration)
         iconView.imageScaling = .scaleProportionallyDown
-        iconView.contentTintColor = .labelColor
         iconView.translatesAutoresizingMaskIntoConstraints = false
 
-        hintLabel.stringValue = hint
-        hintLabel.font = EditorStyle.hintFont
-        hintLabel.textColor = .secondaryLabelColor
-        hintLabel.translatesAutoresizingMaskIntoConstraints = false
+        keyLabel.font = Theme.cellKeyFont
+        keyLabel.translatesAutoresizingMaskIntoConstraints = false
 
         addSubview(iconView)
-        addSubview(hintLabel)
-
-        var hintLeading = iconView.trailingAnchor
-        if let title {
-            let label = NSTextField(labelWithString: title)
-            label.font = EditorStyle.titleFont
-            label.textColor = .labelColor
-            label.translatesAutoresizingMaskIntoConstraints = false
-            addSubview(label)
-            titleLabel = label
-            NSLayoutConstraint.activate([
-                label.leadingAnchor.constraint(equalTo: iconView.trailingAnchor, constant: 4),
-                label.centerYAnchor.constraint(equalTo: centerYAnchor),
-            ])
-            hintLeading = label.trailingAnchor
-        }
-
+        addSubview(keyLabel)
         NSLayoutConstraint.activate([
-            heightAnchor.constraint(equalToConstant: 32),
-            iconView.widthAnchor.constraint(equalToConstant: 18),
-            iconView.heightAnchor.constraint(equalToConstant: 18),
-            iconView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 9),
+            heightAnchor.constraint(equalToConstant: Theme.toolbarHeight - 1),
+            iconView.widthAnchor.constraint(equalToConstant: 16),
+            iconView.heightAnchor.constraint(equalToConstant: 16),
+            iconView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
             iconView.centerYAnchor.constraint(equalTo: centerYAnchor),
-            hintLabel.leadingAnchor.constraint(equalTo: hintLeading, constant: 7),
-            hintLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -9),
-            hintLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
+            keyLabel.leadingAnchor.constraint(equalTo: iconView.trailingAnchor, constant: 4),
+            keyLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
+            keyLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
         ])
         updateAppearance()
     }
 
     required init?(coder: NSCoder) { fatalError() }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        trackingAreas.forEach(removeTrackingArea)
+        addTrackingArea(NSTrackingArea(
+            rect: .zero,
+            options: [.mouseEnteredAndExited, .activeInActiveApp, .inVisibleRect],
+            owner: self
+        ))
+    }
+
+    override func mouseEntered(with event: NSEvent) { isHovered = true }
+    override func mouseExited(with event: NSEvent) { isHovered = false }
 
     override func mouseDown(with event: NSEvent) {
         onClick()
@@ -274,64 +247,76 @@ final class ToolbarButton: NSControl {
     private func updateAppearance() {
         effectiveAppearance.performAsCurrentDrawingAppearance {
             if isActive {
-                layer?.backgroundColor = EditorStyle.accentFill.cgColor
-                layer?.borderColor = EditorStyle.accent.withAlphaComponent(0.55).cgColor
-                layer?.borderWidth = 1
-                iconView.contentTintColor = EditorStyle.accent
-                titleLabel?.textColor = EditorStyle.accent
-                hintLabel.textColor = EditorStyle.accent.withAlphaComponent(0.8)
+                layer?.backgroundColor = Theme.yellow.cgColor
+                iconView.contentTintColor = Theme.onYellow
+                keyLabel.textColor = Theme.onYellow
             } else {
-                layer?.backgroundColor = NSColor.clear.cgColor
-                layer?.borderWidth = 0
-                iconView.contentTintColor = .labelColor
-                titleLabel?.textColor = .labelColor
-                hintLabel.textColor = .secondaryLabelColor
+                layer?.backgroundColor = isHovered ? Theme.hoverWash.cgColor : NSColor.clear.cgColor
+                iconView.contentTintColor = Theme.ink
+                keyLabel.textColor = Theme.inkDim
             }
         }
     }
 }
 
-final class SwatchButton: NSControl {
+/// Square color chip + number. Active = yellow block, black number.
+final class SwatchCell: NSControl {
     var isActive = false {
         didSet { updateAppearance() }
     }
-    private let dot = NSView()
-    private let hintLabel: NSTextField
+    private var isHovered = false {
+        didSet { updateAppearance() }
+    }
+    private let chip = NSView()
+    private let keyLabel: NSTextField
     private let onClick: () -> Void
 
     override var mouseDownCanMoveWindow: Bool { false }
 
-    init(color: NSColor, hint: String, onClick: @escaping () -> Void) {
+    init(color: NSColor, key: String, onClick: @escaping () -> Void) {
         self.onClick = onClick
-        hintLabel = NSTextField(labelWithString: hint)
+        keyLabel = NSTextField(labelWithString: key)
         super.init(frame: .zero)
+        wantsLayer = true
         translatesAutoresizingMaskIntoConstraints = false
 
-        dot.wantsLayer = true
-        dot.layer?.backgroundColor = color.cgColor
-        dot.layer?.cornerRadius = 7
-        dot.translatesAutoresizingMaskIntoConstraints = false
+        chip.wantsLayer = true
+        chip.layer?.backgroundColor = color.cgColor
+        chip.layer?.borderWidth = 1
+        chip.translatesAutoresizingMaskIntoConstraints = false
 
-        hintLabel.font = EditorStyle.hintFont
-        hintLabel.textColor = .secondaryLabelColor
-        hintLabel.translatesAutoresizingMaskIntoConstraints = false
+        keyLabel.font = Theme.cellKeyFont
+        keyLabel.translatesAutoresizingMaskIntoConstraints = false
 
-        addSubview(dot)
-        addSubview(hintLabel)
+        addSubview(chip)
+        addSubview(keyLabel)
         NSLayoutConstraint.activate([
-            heightAnchor.constraint(equalToConstant: 32),
-            dot.widthAnchor.constraint(equalToConstant: 14),
-            dot.heightAnchor.constraint(equalToConstant: 14),
-            dot.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 7),
-            dot.centerYAnchor.constraint(equalTo: centerYAnchor),
-            hintLabel.leadingAnchor.constraint(equalTo: dot.trailingAnchor, constant: 5),
-            hintLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -7),
-            hintLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
+            heightAnchor.constraint(equalToConstant: Theme.toolbarHeight - 1),
+            chip.widthAnchor.constraint(equalToConstant: 12),
+            chip.heightAnchor.constraint(equalToConstant: 12),
+            chip.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 7),
+            chip.centerYAnchor.constraint(equalTo: centerYAnchor),
+            keyLabel.leadingAnchor.constraint(equalTo: chip.trailingAnchor, constant: 4),
+            keyLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
+            keyLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -7),
         ])
         updateAppearance()
     }
 
     required init?(coder: NSCoder) { fatalError() }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        trackingAreas.forEach(removeTrackingArea)
+        addTrackingArea(NSTrackingArea(
+            rect: .zero,
+            options: [.mouseEnteredAndExited, .activeInActiveApp, .inVisibleRect],
+            owner: self
+        ))
+    }
+
+    override func mouseEntered(with event: NSEvent) { isHovered = true }
+    override func mouseExited(with event: NSEvent) { isHovered = false }
 
     override func mouseDown(with event: NSEvent) {
         onClick()
@@ -344,9 +329,94 @@ final class SwatchButton: NSControl {
 
     private func updateAppearance() {
         effectiveAppearance.performAsCurrentDrawingAppearance {
-            dot.layer?.borderColor = EditorStyle.swatchRing.cgColor
-            dot.layer?.borderWidth = isActive ? 2 : 0
-            hintLabel.textColor = isActive ? .labelColor : .secondaryLabelColor
+            if isActive {
+                layer?.backgroundColor = Theme.yellow.cgColor
+                chip.layer?.borderColor = Theme.onYellow.cgColor
+                keyLabel.textColor = Theme.onYellow
+                keyLabel.font = NSFont.monospacedSystemFont(ofSize: 10, weight: .bold)
+            } else {
+                layer?.backgroundColor = isHovered ? Theme.hoverWash.cgColor : NSColor.clear.cgColor
+                chip.layer?.borderColor = Theme.ink.withAlphaComponent(0.4).cgColor
+                keyLabel.textColor = Theme.inkDim
+                keyLabel.font = Theme.cellKeyFont
+            }
+        }
+    }
+}
+
+/// The inverted block: ink background, chrome-colored text. Hovering flips it
+/// to yellow/black, exactly like the site's links.
+final class PrimaryCell: NSControl {
+    private var isHovered = false {
+        didSet { updateAppearance() }
+    }
+    private let titleLabel: NSTextField
+    private let keyLabel: NSTextField
+    private let onClick: () -> Void
+
+    override var mouseDownCanMoveWindow: Bool { false }
+
+    init(title: String, key: String, onClick: @escaping () -> Void) {
+        self.onClick = onClick
+        titleLabel = NSTextField(labelWithString: title)
+        keyLabel = NSTextField(labelWithString: key)
+        super.init(frame: .zero)
+        wantsLayer = true
+        translatesAutoresizingMaskIntoConstraints = false
+
+        titleLabel.font = NSFont.monospacedSystemFont(ofSize: 11.5, weight: .semibold)
+        titleLabel.translatesAutoresizingMaskIntoConstraints = false
+        keyLabel.font = Theme.cellKeyFont
+        keyLabel.translatesAutoresizingMaskIntoConstraints = false
+
+        addSubview(titleLabel)
+        addSubview(keyLabel)
+        NSLayoutConstraint.activate([
+            heightAnchor.constraint(equalToConstant: Theme.toolbarHeight - 1),
+            titleLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
+            titleLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
+            keyLabel.leadingAnchor.constraint(equalTo: titleLabel.trailingAnchor, constant: 6),
+            keyLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
+            keyLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
+        ])
+        updateAppearance()
+    }
+
+    required init?(coder: NSCoder) { fatalError() }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        trackingAreas.forEach(removeTrackingArea)
+        addTrackingArea(NSTrackingArea(
+            rect: .zero,
+            options: [.mouseEnteredAndExited, .activeInActiveApp, .inVisibleRect],
+            owner: self
+        ))
+    }
+
+    override func mouseEntered(with event: NSEvent) { isHovered = true }
+    override func mouseExited(with event: NSEvent) { isHovered = false }
+
+    override func mouseDown(with event: NSEvent) {
+        onClick()
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        updateAppearance()
+    }
+
+    private func updateAppearance() {
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            if isHovered {
+                layer?.backgroundColor = Theme.yellow.cgColor
+                titleLabel.textColor = Theme.onYellow
+                keyLabel.textColor = Theme.onYellow.withAlphaComponent(0.65)
+            } else {
+                layer?.backgroundColor = Theme.inverse.cgColor
+                titleLabel.textColor = Theme.onInverse
+                keyLabel.textColor = Theme.onInverse.withAlphaComponent(0.65)
+            }
         }
     }
 }

@@ -77,7 +77,10 @@ final class OverlayController {
     }
 
     private func finish() {
-        for w in windows { w.orderOut(nil) }
+        for w in windows {
+            w.stopAnimation()
+            w.orderOut(nil)
+        }
         onRegion = nil
         onWindow = nil
         NSCursor.arrow.set()
@@ -201,6 +204,10 @@ final class OverlayWindow: NSWindow {
         overlayView.reset(mode: mode)
     }
 
+    func stopAnimation() {
+        overlayView.stopAnimation()
+    }
+
     override func keyDown(with event: NSEvent) {
         overlayView.handleKeyDown(event)
     }
@@ -248,6 +255,10 @@ final class OverlayView: NSView {
 
     required init?(coder: NSCoder) { fatalError() }
 
+    deinit {
+        stopAnimation()
+    }
+
     func reset(mode: OverlayController.Mode) {
         self.mode = mode
         dragAnchor = nil
@@ -255,15 +266,34 @@ final class OverlayView: NSView {
         spaceHeld = false
         hoverCandidates = []
         hoverIndex = 0
-        antsTimer?.invalidate()
+        stopAnimation()
+        if mode == .window { refreshHover() }
+        needsDisplay = true
+    }
+
+    /// Marching ants only animate while a selection drag is live — a 20 Hz
+    /// full-screen redraw on every display is too expensive to run idle.
+    private func startAnimationIfNeeded() {
+        guard antsTimer == nil else { return }
         antsTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 20, repeats: true) { [weak self] _ in
             guard let self, self.window?.isVisible == true else { return }
             self.antsPhase += 1.4
             self.needsDisplay = true
         }
-        if mode == .window { refreshHover() }
-        needsDisplay = true
     }
+
+    func stopAnimation() {
+        antsTimer?.invalidate()
+        antsTimer = nil
+    }
+
+    #if DEBUG
+    /// Injects a fake drag selection for the UI snapshot smoke test.
+    func debugSetSelection(from a: NSPoint, to b: NSPoint) {
+        dragAnchor = a
+        dragCurrent = b
+    }
+    #endif
 
     private var selectionRect: NSRect? {
         guard let a = dragAnchor, let c = dragCurrent else { return nil }
@@ -291,6 +321,7 @@ final class OverlayView: NSView {
             dragAnchor = convert(event.locationInWindow, from: nil)
             dragCurrent = dragAnchor
             lastDragPoint = dragAnchor
+            startAnimationIfNeeded()
         case .window:
             if hoverCandidates.indices.contains(hoverIndex) {
                 controllerDelegate?.overlayDidPickWindow(hoverCandidates[hoverIndex])
@@ -364,38 +395,37 @@ final class OverlayView: NSView {
 
     override func draw(_ dirtyRect: NSRect) {
         guard let ctx = NSGraphicsContext.current?.cgContext else { return }
-        let dim = NSColor.black.withAlphaComponent(0.35)
-
         switch mode {
         case .region:
-            drawRegionMode(ctx: ctx, dim: dim)
+            drawRegionMode(ctx: ctx)
         case .window:
-            drawWindowMode(ctx: ctx, dim: dim)
+            drawWindowMode(ctx: ctx)
         }
     }
 
-    private func drawRegionMode(ctx: CGContext, dim: NSColor) {
-        dim.setFill()
+    private func drawRegionMode(ctx: CGContext) {
+        Theme.overlayDim.setFill()
         if let rect = selectionRect {
             // Dim everything except the selection.
             let path = NSBezierPath(rect: bounds)
             path.append(NSBezierPath(rect: rect).reversed)
             path.fill()
 
-            // Marching ants.
-            ctx.saveGState()
-            ctx.setStrokeColor(NSColor.systemRed.cgColor)
-            ctx.setLineWidth(1.5)
-            ctx.setLineDash(phase: antsPhase, lengths: [7, 5])
-            ctx.stroke(rect.insetBy(dx: -0.75, dy: -0.75))
-            ctx.restoreGState()
+            // Hazard-tape marching ants: yellow dashes over a black base,
+            // readable on any background. Square corner handles.
+            Theme.strokeHazardAnts(rect.insetBy(dx: -1, dy: -1), phase: antsPhase, in: ctx)
+            Theme.drawHazardHandles(rect)
 
-            drawLabel(
-                String(format: "%.0f × %.0f", rect.width, rect.height),
-                near: NSPoint(x: rect.midX, y: rect.maxY + 8)
+            ThemeTag.draw(
+                [.text(String(format: "%.0f × %.0f", rect.width, rect.height))],
+                near: NSPoint(x: rect.midX, y: rect.maxY + 10),
+                in: bounds
             )
+            drawHintFooter([("⎵", "move"), ("esc", "cancel")])
         } else {
             bounds.fill()
+            // Footer last so the crosshair never slices through it.
+            defer { drawHintFooter([("drag", "select"), ("esc", "cancel")]) }
             // Crosshair with live coordinates.
             let mouse = convert(window?.mouseLocationOutsideOfEventStream ?? .zero, from: nil)
             guard bounds.contains(mouse) else { return }
@@ -406,13 +436,19 @@ final class OverlayView: NSView {
                 CGPoint(x: mouse.x, y: 0), CGPoint(x: mouse.x, y: bounds.height),
             ])
             // Coordinates in screen-local, top-left-origin points.
-            let coordText = String(format: "%.0f, %.0f", mouse.x, bounds.height - mouse.y)
-            drawLabel(coordText, near: NSPoint(x: mouse.x + 14, y: mouse.y + 14), centered: false)
+            ThemeTag.draw(
+                [.text(String(format: "%.0f, %.0f", mouse.x, bounds.height - mouse.y))],
+                near: NSPoint(x: mouse.x + 14, y: mouse.y + 14),
+                in: bounds,
+                centered: false
+            )
         }
     }
 
-    private func drawWindowMode(ctx: CGContext, dim: NSColor) {
-        dim.setFill()
+    private func drawWindowMode(ctx: CGContext) {
+        Theme.overlayDim.setFill()
+        // Footer last so the dim fills never wash it out.
+        defer { drawHintFooter([("click", "capture"), ("⇥", "cycle overlapped"), ("esc", "cancel")]) }
         guard hoverCandidates.indices.contains(hoverIndex) else {
             bounds.fill()
             return
@@ -433,37 +469,24 @@ final class OverlayView: NSView {
         path.append(NSBezierPath(rect: local).reversed)
         path.fill()
 
-        NSColor.systemBlue.withAlphaComponent(0.18).setFill()
+        Theme.yellow.withAlphaComponent(0.14).setFill()
         local.fill()
-        ctx.setStrokeColor(NSColor.systemBlue.cgColor)
-        ctx.setLineWidth(2)
-        ctx.stroke(local.insetBy(dx: 1, dy: 1))
+        Theme.strokeHazardAnts(local.insetBy(dx: 1, dy: 1), phase: antsPhase, in: ctx)
 
-        var label = target.title
+        var segments: [ThemeTag.Segment] = [.text(target.title)]
         if hoverCandidates.count > 1 {
-            label += "  (⇥ \(hoverIndex + 1)/\(hoverCandidates.count))"
+            segments.append(.dim("  ⇥ \(hoverIndex + 1)/\(hoverCandidates.count)"))
         }
-        drawLabel(label, near: NSPoint(x: local.midX, y: local.maxY - 28))
+        ThemeTag.draw(segments, near: NSPoint(x: local.midX, y: local.maxY - 40), in: bounds)
     }
 
-    private func drawLabel(_ text: String, near point: NSPoint, centered: Bool = true) {
-        let attrs: [NSAttributedString.Key: Any] = [
-            .font: NSFont.monospacedSystemFont(ofSize: 11.5, weight: .medium),
-            .foregroundColor: NSColor.white,
-        ]
-        let str = NSAttributedString(string: text, attributes: attrs)
-        var size = str.size()
-        size.width += 14
-        size.height += 6
-        var origin = centered
-            ? NSPoint(x: point.x - size.width / 2, y: point.y)
-            : point
-        origin.x = max(4, min(origin.x, bounds.width - size.width - 4))
-        origin.y = max(4, min(origin.y, bounds.height - size.height - 4))
-        let box = NSRect(origin: origin, size: size)
-        NSColor.black.withAlphaComponent(0.75).setFill()
-        NSBezierPath(roundedRect: box, xRadius: 5, yRadius: 5).fill()
-        str.draw(at: NSPoint(x: origin.x + 7, y: origin.y + 3))
+    /// Bottom-center key legend — the overlay teaches its own shortcuts.
+    private func drawHintFooter(_ hints: [(key: String, label: String)]) {
+        ThemeTag.draw(
+            ThemeTag.legend(hints),
+            near: NSPoint(x: bounds.midX, y: 28),
+            in: bounds
+        )
     }
 }
 

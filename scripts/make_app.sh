@@ -1,7 +1,7 @@
 #!/bin/bash
-# Builds scrcap in release mode and packages it as scrcap.app plus zip and DMG
-# release artifacts.
-# Usage: scripts/make_app.sh [output-dir]   (default: ./dist)
+# Builds scrcap in release mode and packages it as scrcap.app. Pass --prod to
+# also create release zip and DMG artifacts for manual publishing.
+# Usage: scripts/make_app.sh [--prod] [output-dir]   (default: ./dist)
 #
 # Signing: uses $CODESIGN_IDENTITY if set; otherwise auto-detects the
 # "scrcap-dev" self-signed identity. Stable signing is required so TCC
@@ -11,7 +11,61 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 ROOT="$(pwd -P)"
-OUT="${1:-dist}"
+PROD=0
+OUT="dist"
+
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --prod)
+            PROD=1
+            ;;
+        -h|--help)
+            echo "Usage: scripts/make_app.sh [--prod] [output-dir]"
+            exit 0
+            ;;
+        --*)
+            echo "✗ unknown option: $1" >&2
+            exit 1
+            ;;
+        *)
+            OUT="$1"
+            ;;
+    esac
+    shift
+done
+
+VERSION="${SCRCAP_VERSION:-}"
+if [ -z "$VERSION" ]; then
+    TAG="$(git describe --tags --exact-match 2>/dev/null || true)"
+    case "$TAG" in
+        v[0-9]*|[0-9]*)
+            VERSION="${TAG#v}"
+            ;;
+    esac
+fi
+
+if [ -z "$VERSION" ]; then
+    if [ "$PROD" -eq 1 ]; then
+        echo "✗ production builds need SCRCAP_VERSION or an exact version tag (for example v1.2.3)" >&2
+        exit 1
+    fi
+    VERSION="0.0.0"
+fi
+VERSION="${VERSION#v}"
+
+if [[ ! "$VERSION" =~ ^[0-9]+([.][0-9]+){0,2}$ ]]; then
+    echo "✗ invalid SCRCAP_VERSION: $VERSION" >&2
+    echo "  Use a numeric version such as 1.2.3." >&2
+    exit 1
+fi
+
+BUILD_NUMBER="${SCRCAP_BUILD:-$(git rev-list --count HEAD 2>/dev/null || echo 1)}"
+if [[ ! "$BUILD_NUMBER" =~ ^[0-9]+$ ]]; then
+    echo "✗ invalid SCRCAP_BUILD: $BUILD_NUMBER" >&2
+    echo "  Use an integer build number." >&2
+    exit 1
+fi
+
 APP="$OUT/scrcap.app"
 ZIP="$OUT/scrcap-macos.zip"
 DMG="$OUT/scrcap-macos.dmg"
@@ -34,7 +88,7 @@ swift build -c release \
     -Xswiftc -whole-module-optimization \
     -Xlinker -dead_strip 2>&1 | tail -1
 
-echo "▸ assembling bundle…"
+echo "▸ assembling bundle (version $VERSION, build $BUILD_NUMBER)…"
 rm -rf "$OUT"
 # Minimal bundle: binary + Info.plist + icons. No PkgInfo or SwiftPM build
 # metadata.
@@ -47,7 +101,7 @@ cp Sources/scrcap/Resources/MenuBarIconTemplate.png "$APP/Contents/Resources/Men
 # features; it only drops linker/debug information that is not executed.
 strip -ru "$APP/Contents/MacOS/scrcap" 2>/dev/null || strip -Sx "$APP/Contents/MacOS/scrcap" 2>/dev/null || true
 
-cat > "$APP/Contents/Info.plist" <<'PLIST'
+cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -58,8 +112,8 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
     <key>CFBundleDisplayName</key>         <string>scrcap</string>
     <key>CFBundlePackageType</key>         <string>APPL</string>
     <key>CFBundleIconFile</key>            <string>AppIcon</string>
-    <key>CFBundleShortVersionString</key>  <string>1.0</string>
-    <key>CFBundleVersion</key>             <string>1</string>
+    <key>CFBundleShortVersionString</key>  <string>$VERSION</string>
+    <key>CFBundleVersion</key>             <string>$BUILD_NUMBER</string>
     <key>LSMinimumSystemVersion</key>      <string>14.0</string>
     <key>LSUIElement</key>                 <true/>
     <key>NSHighResolutionCapable</key>     <true/>
@@ -89,6 +143,12 @@ fi
 
 echo "▸ checking release budgets…"
 scripts/check_budgets.sh "$APP"
+
+if [ "$PROD" -ne 1 ]; then
+    echo "✓ $APP"
+    echo "  skipped release zip and DMG (pass --prod to create them)"
+    exit 0
+fi
 
 echo "▸ creating compressed release zip…"
 rm -f "$ZIP"

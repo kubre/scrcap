@@ -52,13 +52,15 @@ enum GeometryMapper {
         let mouse = NSEvent.mouseLocation
         return NSScreen.screens.first { NSMouseInRect(mouse, $0.frame, false) }
             ?? NSScreen.main
-            ?? NSScreen.screens[0]
+            ?? NSScreen.screens.first
+            ?? { fatalError("scrcap: no connected display — cannot continue") }()
     }
 
     static func screen(containing point: NSPoint) -> NSScreen {
         NSScreen.screens.first { NSMouseInRect(point, $0.frame, false) }
             ?? NSScreen.main
-            ?? NSScreen.screens[0]
+            ?? NSScreen.screens.first
+            ?? { fatalError("scrcap: no connected display — cannot continue") }()
     }
 
     static func displayID(of screen: NSScreen) -> CGDirectDisplayID {

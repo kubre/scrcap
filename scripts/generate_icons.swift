@@ -43,15 +43,15 @@ func appIcon(size: Int, insetScale: CGFloat, cornerScale: CGFloat) -> NSImage {
     let path = CGPath(roundedRect: iconRect, cornerWidth: radius, cornerHeight: radius, transform: nil)
 
     context.saveGState()
-    context.setShadow(offset: CGSize(width: 0, height: -CGFloat(size) * 0.025), blur: CGFloat(size) * 0.055, color: color(0x4d050a, alpha: 0.24))
+    context.setShadow(offset: CGSize(width: 0, height: -CGFloat(size) * 0.025), blur: CGFloat(size) * 0.055, color: color(0x78350F, alpha: 0.28))
     context.addPath(path)
     context.clip()
 
     let gradient = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(), colors: [
-        color(0xf34850),
-        color(0xd82131),
-        color(0x99101b)
-    ] as CFArray, locations: [0, 0.55, 1])!
+        color(0xFDE047), // yellow-300
+        color(0xFACC15), // yellow-400 (#FACC15 — theme token)
+        color(0xEAB308), // yellow-500
+    ] as CFArray, locations: [0, 0.45, 1])!
     context.drawLinearGradient(
         gradient,
         start: CGPoint(x: iconRect.minX, y: iconRect.maxY),
@@ -60,7 +60,7 @@ func appIcon(size: Int, insetScale: CGFloat, cornerScale: CGFloat) -> NSImage {
     )
 
     context.addPath(path)
-    context.setStrokeColor(color(0xffffff, alpha: 0.16))
+    context.setStrokeColor(color(0x000000, alpha: 0.12))
     context.setLineWidth(max(1, CGFloat(size) * 0.018))
     context.strokePath()
     context.restoreGState()
@@ -88,13 +88,13 @@ func appIcon(size: Int, insetScale: CGFloat, cornerScale: CGFloat) -> NSImage {
         }
     }
 
-    context.setStrokeColor(color(0x65070f, alpha: 0.22))
+    context.setStrokeColor(color(0xFFFFFF, alpha: 0.30))
     context.setLineWidth(stroke)
     context.beginPath()
     dashedPlus(offsetY: -CGFloat(size) * 0.01)
     context.strokePath()
 
-    context.setStrokeColor(color(0xfff4f2))
+    context.setStrokeColor(color(0x1C1C1B)) // near-black (onYellow)
     context.setLineWidth(stroke)
     context.beginPath()
     dashedPlus(offsetY: 0)

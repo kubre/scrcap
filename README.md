@@ -36,7 +36,7 @@ Requires macOS 14+ and a Swift 6 toolchain (Command Line Tools are enough).
 ```sh
 swift run scrcap              # run directly (dev)
 swift run scrcap-core-tests   # run the portable-core test suite
-scripts/make_app.sh           # release build → dist/scrcap.app (+ size budget gate)
+scripts/make_app.sh           # app bundle → dist/scrcap.app (+ size budget gate)
 ```
 
 First capture prompts for **Screen Recording** permission; scrcap detects the
@@ -52,7 +52,14 @@ because ad-hoc signing makes macOS treat every rebuild as a new app, forcing
 you to re-grant Screen Recording. For a throwaway build only, run
 `SCRCAP_ALLOW_ADHOC=1 scripts/make_app.sh`.
 
-The release script creates a fresh `dist/` containing only:
+For manual release packaging, build from an exact version tag or pass
+`SCRCAP_VERSION`:
+
+```sh
+SCRCAP_VERSION=1.0.0 scripts/make_app.sh --prod
+```
+
+`--prod` creates a fresh `dist/` containing only:
 
 - `scrcap.app` — signed macOS app bundle
 - `scrcap-macos.zip` — compressed app bundle for GitHub Releases
@@ -62,12 +69,12 @@ The app bundle is stripped, optimized for size, and checked so development
 artifacts such as `.DS_Store`, Swift module files, object files, and dSYM
 bundles cannot slip into the release output.
 
-CI uploads the zip and DMG as workflow artifacts on every run. To publish a
-GitHub Release, push a version tag:
+To publish a GitHub Release manually, create a version tag and upload
+`dist/scrcap-macos.zip` and `dist/scrcap-macos.dmg`:
 
 ```sh
 git tag v1.0.0
-git push origin v1.0.0
+SCRCAP_VERSION=1.0.0 scripts/make_app.sh --prod
 ```
 
 ## Default hotkeys (all remappable in Preferences → Shortcuts)
@@ -87,7 +94,7 @@ armed — no selection state; got it wrong → ⌘Z and draw again.
 
 | Key | Action |
 |---|---|
-| Q / W / E / R | arrow / rectangle / counter / text tool |
+| Q / W / E / R / T | arrow / rectangle / counter / text / crop tool |
 | 1–7 | color (red default on every new shot) |
 | ⇧-drag | constrain rectangle to square |
 | text tool | click to type · ⏎ new line · ⇧⏎ confirms · Esc exits typing |
