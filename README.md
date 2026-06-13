@@ -1,13 +1,27 @@
 # scrcap
 
 Capture at the speed of thought. scrcap is a tiny, keyboard-first macOS
-screenshot app for region, window, fullscreen, and scrolling captures with fast
-annotation and PNG export.
+screenshot app for region, window, fullscreen, scrolling, delayed, and repeat
+captures with fast annotation and PNG export.
 
 Take a screenshot, mark it up, and drop it on your clipboard superfast. macOS
 native (Swift + AppKit, zero dependencies); portable core by design.
 
-![scrcap editor](./docs/editor-screenshot.png)
+![scrcap editor showing the configurable primary annotation color](./docs/scrcap-editor-primary-color.png)
+
+## Features
+
+- Global hotkeys for region, window, fullscreen, scrolling, delayed region, and
+  repeat-last capture.
+- Region picker with crosshair, live coordinates, and Space-to-move selection.
+- Window picker with hover highlight and Tab cycling for overlapping windows.
+- Fast editor with arrows, rectangles, numbered counters, text, pixelate, crop,
+  undo/redo, zoom, drag-out, and auto-expanding canvas.
+- Configurable capture behavior: open editor, copy only, or copy and open
+  editor per capture mode.
+- Preferences for shortcuts, palette colors, stroke width, text size, Return
+  behavior, pointer capture, window shadows/backgrounds, output folder,
+  filename pattern, PNG scale, theme, launch at login, and notifications.
 
 ## Install
 
@@ -91,7 +105,8 @@ SCRCAP_VERSION=1.0.0 scripts/make_app.sh --prod
 | Window | ⌥⇧2 | hover highlight, ⇥ cycles overlapping windows |
 | Fullscreen | ⌥⇧3 | display under cursor, zero UI |
 | Scrolling | ⌥⇧4 | select a region, scrcap scrolls & stitches |
-| Repeat last | ⌥⇧R | re-captures the previous region/window/screen |
+| Delayed region | ⌥⇧5 | countdown before region capture |
+| Repeat last | ⌥⇧R | re-captures the previous capture target |
 
 ## Editor
 
@@ -100,14 +115,17 @@ armed — no selection state; got it wrong → ⌘Z and draw again.
 
 | Key | Action |
 |---|---|
-| Q / W / E / R / T | arrow / rectangle / counter / text / crop tool |
-| 1–7 | color (red default on every new shot) |
+| Q / W / E / R / T / Y | arrow / rectangle / counter / text / pixelate / crop tool |
+| 1–5 | color (slot 1 is the default on every new shot) |
+| Z / X / C | small / medium / large annotation size |
 | ⇧-drag | constrain rectangle to square |
-| text tool | click to type · ⏎ new line · ⇧⏎ confirms · Esc exits typing |
-| Esc | **copy to clipboard + close** (also a toolbar button, configurable) |
+| text tool | click to type · Return behavior is configurable · Esc exits typing |
+| Esc | **copy to clipboard + close** by default (configurable) |
 | ⌘Z / ⇧⌘Z | undo / redo |
 | ⌘C | copy, keep editor open |
-| ⌘S | save as PNG… (also a toolbar button) |
+| ⌘S | save PNG to the configured folder |
+| ⇧⌘S | save as PNG… |
+| ⌘+ / ⌘- / ⌘0 | zoom in / zoom out / reset zoom |
 | ⌘W | discard & close |
 | ⌥-drag | drag flattened PNG out (Slack, Finder, mail…) |
 
