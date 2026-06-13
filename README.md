@@ -1,8 +1,13 @@
 # scrcap
 
-Capture at the speed of thought. A Shottr-inspired screenshot tool that is
-tiny, instant, and keyboard-first. macOS native (Swift + AppKit, zero
-dependencies); portable core by design.
+Capture at the speed of thought. scrcap is a tiny, keyboard-first macOS
+screenshot app for region, window, fullscreen, and scrolling captures with fast
+annotation and PNG export.
+
+Take a screenshot, mark it up, and drop it on your clipboard superfast. macOS
+native (Swift + AppKit, zero dependencies); portable core by design.
+
+![scrcap editor](./docs/editor-screenshot.png)
 
 ## Install
 

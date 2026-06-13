@@ -1,6 +1,6 @@
-// Preferences — SwiftUI is allowed here: latency is irrelevant and
-// the frameworks ship with macOS. Same design language as the editor: dense,
-// red primary, monospaced shortcut hints, follows the system theme.
+// Preferences — SwiftUI is allowed here: latency is irrelevant and the
+// frameworks ship with macOS. Same design language as the editor: compact,
+// red-accented, system text for labels, monospaced only for shortcuts/readouts.
 
 import AppKit
 import SwiftUI
@@ -19,10 +19,26 @@ extension Notification.Name {
     static let scrcapShortcutRecording = Notification.Name("scrcapShortcutRecording")
 }
 
-// kubre.in tokens: yellow-400 selection blocks, black-on-yellow, mono type.
-private let kubreYellow = Color(red: 0.980, green: 0.800, blue: 0.082) // #FACC15
-private let kubreYellowDeep = Color(red: 0.706, green: 0.549, blue: 0.0) // control tint
-private let warnRed = Color(red: 1.0, green: 0.23, blue: 0.19)
+private enum PrefColor {
+    static let accent = Color(nsColor: Theme.accent)
+    static let accentDeep = Color(nsColor: Theme.accentDeep)
+    static let onAccent = Color(nsColor: Theme.onAccent)
+    static let paper = Color(nsColor: Theme.well)
+    static let chrome = Color(nsColor: Theme.chrome)
+    static let ink = Color(nsColor: Theme.ink)
+    static let inkDim = Color(nsColor: Theme.inkDim)
+    static let hairline = Color(nsColor: Theme.hairline)
+    static let field = Color.primary.opacity(0.045)
+    static let warn = Color(red: 1.0, green: 0.23, blue: 0.19)
+}
+
+private enum PrefFont {
+    static let body = Font.system(size: 12)
+    static let label = Font.system(size: 12, weight: .medium)
+    static let section = Font.system(size: 10, weight: .bold)
+    static let mono = Font.system(size: 11, weight: .medium, design: .monospaced)
+    static let monoSmall = Font.system(size: 10, weight: .medium, design: .monospaced)
+}
 
 final class SettingsModel: ObservableObject {
     let store: SettingsStore
@@ -50,13 +66,18 @@ final class PreferencesWindowController {
 
     func show() {
         if window == nil {
-            let hosting = NSHostingController(rootView: PreferencesView().environmentObject(model))
-            let w = NSWindow(contentViewController: hosting)
+            let w = NSWindow(contentViewController: PreferencesViewController(model: model))
             w.title = "scrcap"
-            // Sidebar runs to the top edge; only the traffic light shows.
+            // Match the editor's frameless rounded chrome (see EditorWindow):
+            // transparent titlebar, content view draws its own rounded border,
+            // window background matches the chrome so the corner arc blends.
             w.styleMask = [.titled, .closable, .fullSizeContentView]
-            w.titleVisibility = .hidden
             w.titlebarAppearsTransparent = true
+            w.titleVisibility = .hidden
+            w.isOpaque = true
+            w.backgroundColor = Theme.chrome
+            w.hasShadow = true
+            w.isMovableByWindowBackground = true
             w.isReleasedWhenClosed = false
             window = w
         }
@@ -68,105 +89,384 @@ final class PreferencesWindowController {
 
 // MARK: - Root
 
-private enum PrefTab: String, CaseIterable {
-    case general = "GENERAL"
-    case shortcuts = "SHORTCUTS"
-    case editor = "EDITOR"
-    case advanced = "ADVANCED"
-    case about = "ABOUT"
+private enum PrefTab: String, CaseIterable, Hashable, Identifiable {
+    case general
+    case capture
+    case shortcuts
+    case editor
+    case output
+    case about
 
-    /// Unicode glyphs, like the site's nav (✦ ¶ ≥ ◈).
-    var glyph: String {
+    var id: String { rawValue }
+
+    var title: String {
         switch self {
-        case .general: return "✦"
-        case .shortcuts: return "⌘"
-        case .editor: return "✎"
-        case .advanced: return "≥"
-        case .about: return "◈"
+        case .general: return "General"
+        case .capture: return "Capture"
+        case .shortcuts: return "Shortcuts"
+        case .editor: return "Editor"
+        case .output: return "Output"
+        case .about: return "About"
+        }
+    }
+
+    var symbolName: String {
+        switch self {
+        case .general: return "gearshape"
+        case .capture: return "camera.viewfinder"
+        case .shortcuts: return "command"
+        case .editor: return "pencil.and.outline"
+        case .output: return "square.and.arrow.up"
+        case .about: return "info.circle"
         }
     }
 }
 
-struct PreferencesView: View {
-    @State private var tab: PrefTab = .general
+final class PreferencesViewController: NSViewController {
+    private let model: SettingsModel
+    private let contentView = NSView()
+    private var tabBar: PrefTabBar?
+    private var currentPane: NSViewController?
 
-    private var version: String {
-        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "dev"
+    init(model: SettingsModel) {
+        self.model = model
+        super.init(nibName: nil, bundle: nil)
     }
+
+    required init?(coder: NSCoder) {
+        nil
+    }
+
+    override func loadView() {
+        // Rounded chrome identical to the editor window's content view.
+        let root = EditorContainerView(frame: NSRect(x: 0, y: 0, width: 720, height: 540))
+        view = root
+
+        let header = PrefHeaderView()
+        header.translatesAutoresizingMaskIntoConstraints = false
+        root.addSubview(header)
+
+        let bar = PrefTabBar { [weak self] tab in self?.showPane(tab) }
+        bar.translatesAutoresizingMaskIntoConstraints = false
+        root.addSubview(bar)
+        tabBar = bar
+
+        contentView.wantsLayer = true
+        contentView.layer?.backgroundColor = Theme.well.cgColor
+        contentView.translatesAutoresizingMaskIntoConstraints = false
+        root.addSubview(contentView)
+
+        NSLayoutConstraint.activate([
+            header.leadingAnchor.constraint(equalTo: root.leadingAnchor),
+            header.trailingAnchor.constraint(equalTo: root.trailingAnchor),
+            header.topAnchor.constraint(equalTo: root.topAnchor),
+            header.heightAnchor.constraint(equalToConstant: Theme.headerHeight),
+
+            bar.leadingAnchor.constraint(equalTo: root.leadingAnchor),
+            bar.trailingAnchor.constraint(equalTo: root.trailingAnchor),
+            bar.topAnchor.constraint(equalTo: header.bottomAnchor),
+            bar.heightAnchor.constraint(equalToConstant: Theme.toolbarHeight),
+
+            contentView.leadingAnchor.constraint(equalTo: root.leadingAnchor),
+            contentView.trailingAnchor.constraint(equalTo: root.trailingAnchor),
+            contentView.topAnchor.constraint(equalTo: bar.bottomAnchor),
+            contentView.bottomAnchor.constraint(equalTo: root.bottomAnchor),
+        ])
+
+        tabBar?.select(.general)
+    }
+
+    private func showPane(_ tab: PrefTab) {
+        currentPane?.view.removeFromSuperview()
+        currentPane?.removeFromParent()
+
+        let pane = makePane(for: tab)
+        addChild(pane)
+        pane.view.translatesAutoresizingMaskIntoConstraints = false
+        contentView.addSubview(pane.view)
+        NSLayoutConstraint.activate([
+            pane.view.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
+            pane.view.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
+            pane.view.topAnchor.constraint(equalTo: contentView.topAnchor),
+            pane.view.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
+        ])
+        currentPane = pane
+    }
+
+    private func makePane(for tab: PrefTab) -> NSViewController {
+        switch tab {
+        case .general:
+            return NSHostingController(rootView: PreferencesPane { GeneralTab(model: model) })
+        case .capture:
+            return NSHostingController(rootView: PreferencesPane { CaptureTab(model: model) })
+        case .shortcuts:
+            return NSHostingController(rootView: PreferencesPane { ShortcutsTab(model: model) })
+        case .editor:
+            return NSHostingController(rootView: PreferencesPane { EditorTab(model: model) })
+        case .output:
+            return NSHostingController(rootView: PreferencesPane { OutputTab(model: model) })
+        case .about:
+            return NSHostingController(rootView: PreferencesPane { AboutTab() })
+        }
+    }
+}
+
+// MARK: - Chrome (brand header + editor-style tab strip)
+
+/// Brand strip mirroring the editor's EditorHeaderView: logo + wordmark on the
+/// left (offset to clear the floating traffic-light buttons), 1px rule below,
+/// draggable.
+private final class PrefHeaderView: NSView {
+    private let brandIcon = NSImageView(image: Theme.logoImage(size: 16, template: true) ?? NSImage())
+    private let brandLabel = NSTextField(labelWithString: Theme.brandName)
+    private let rule = NSView()
+
+    override var mouseDownCanMoveWindow: Bool { true }
+
+    init() {
+        super.init(frame: .zero)
+        wantsLayer = true
+
+        brandIcon.imageScaling = .scaleProportionallyDown
+        brandIcon.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(brandIcon)
+
+        brandLabel.font = Theme.brandFont
+        brandLabel.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(brandLabel)
+
+        rule.wantsLayer = true
+        rule.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(rule)
+
+        NSLayoutConstraint.activate([
+            brandIcon.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 92),
+            brandIcon.centerYAnchor.constraint(equalTo: centerYAnchor),
+            brandIcon.widthAnchor.constraint(equalToConstant: 16),
+            brandIcon.heightAnchor.constraint(equalToConstant: 16),
+            brandLabel.leadingAnchor.constraint(equalTo: brandIcon.trailingAnchor, constant: 7),
+            brandLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
+            rule.leadingAnchor.constraint(equalTo: leadingAnchor),
+            rule.trailingAnchor.constraint(equalTo: trailingAnchor),
+            rule.bottomAnchor.constraint(equalTo: bottomAnchor),
+            rule.heightAnchor.constraint(equalToConstant: 1),
+        ])
+        applyColors()
+    }
+
+    required init?(coder: NSCoder) { fatalError() }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        applyColors()
+    }
+
+    private func applyColors() {
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            layer?.backgroundColor = Theme.chrome.cgColor
+            brandIcon.contentTintColor = Theme.ink
+            brandLabel.textColor = Theme.ink
+            rule.layer?.backgroundColor = Theme.rule.cgColor
+        }
+    }
+}
+
+/// Horizontal strip of PrefTabCells with hairline dividers and a 1px top rule —
+/// built like EditorToolbar, but the cells persist a selection.
+private final class PrefTabBar: NSView {
+    private let onSelect: (PrefTab) -> Void
+    private var cells: [PrefTab: PrefTabCell] = [:]
+    private let rule = NSView()
+
+    init(onSelect: @escaping (PrefTab) -> Void) {
+        self.onSelect = onSelect
+        super.init(frame: .zero)
+        wantsLayer = true
+
+        let stack = NSStackView()
+        stack.orientation = .horizontal
+        stack.spacing = 0
+        stack.alignment = .centerY
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(stack)
+
+        for (index, tab) in PrefTab.allCases.enumerated() {
+            if index > 0 { stack.addArrangedSubview(makeDivider()) }
+            let cell = PrefTabCell(tab: tab) { [weak self] in self?.select(tab) }
+            cells[tab] = cell
+            stack.addArrangedSubview(cell)
+        }
+
+        rule.wantsLayer = true
+        rule.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(rule)
+
+        NSLayoutConstraint.activate([
+            stack.leadingAnchor.constraint(equalTo: leadingAnchor),
+            stack.centerYAnchor.constraint(equalTo: centerYAnchor),
+            rule.leadingAnchor.constraint(equalTo: leadingAnchor),
+            rule.trailingAnchor.constraint(equalTo: trailingAnchor),
+            rule.topAnchor.constraint(equalTo: topAnchor),
+            rule.heightAnchor.constraint(equalToConstant: 1),
+        ])
+        applyColors()
+    }
+
+    required init?(coder: NSCoder) { fatalError() }
+
+    func select(_ tab: PrefTab) {
+        for (key, cell) in cells { cell.isActive = (key == tab) }
+        onSelect(tab)
+    }
+
+    private func makeDivider() -> NSView {
+        let divider = HairlineDivider()
+        NSLayoutConstraint.activate([
+            divider.widthAnchor.constraint(equalToConstant: 1),
+            divider.heightAnchor.constraint(equalToConstant: Theme.toolbarHeight - 1),
+        ])
+        return divider
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        applyColors()
+    }
+
+    private func applyColors() {
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            layer?.backgroundColor = Theme.chrome.cgColor
+            rule.layer?.backgroundColor = Theme.rule.cgColor
+        }
+    }
+}
+
+/// 1px vertical divider that re-tints with the appearance.
+private final class HairlineDivider: NSView {
+    init() {
+        super.init(frame: .zero)
+        wantsLayer = true
+        translatesAutoresizingMaskIntoConstraints = false
+        applyColors()
+    }
+    required init?(coder: NSCoder) { fatalError() }
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        applyColors()
+    }
+    private func applyColors() {
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            layer?.backgroundColor = Theme.hairline.cgColor
+        }
+    }
+}
+
+/// Flat tab cell modeled on the editor's ToolbarCell: SF icon + label, with a
+/// solid red block when selected and a hover wash otherwise.
+private final class PrefTabCell: NSControl {
+    var isActive = false {
+        didSet { updateAppearance() }
+    }
+    private var isHovered = false {
+        didSet { updateAppearance() }
+    }
+    private let iconView = NSImageView()
+    private let titleLabel: NSTextField
+    private let onClick: () -> Void
+
+    override var mouseDownCanMoveWindow: Bool { false }
+
+    init(tab: PrefTab, onClick: @escaping () -> Void) {
+        self.onClick = onClick
+        titleLabel = NSTextField(labelWithString: tab.title)
+        super.init(frame: .zero)
+        wantsLayer = true
+        translatesAutoresizingMaskIntoConstraints = false
+
+        iconView.image = NSImage(systemSymbolName: tab.symbolName, accessibilityDescription: tab.title)?
+            .withSymbolConfiguration(Theme.iconConfiguration)
+        iconView.imageScaling = .scaleProportionallyDown
+        iconView.translatesAutoresizingMaskIntoConstraints = false
+
+        titleLabel.font = Theme.cellFont
+        titleLabel.translatesAutoresizingMaskIntoConstraints = false
+
+        addSubview(iconView)
+        addSubview(titleLabel)
+        NSLayoutConstraint.activate([
+            heightAnchor.constraint(equalToConstant: Theme.toolbarHeight - 1),
+            iconView.widthAnchor.constraint(equalToConstant: 15),
+            iconView.heightAnchor.constraint(equalToConstant: 15),
+            iconView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
+            iconView.centerYAnchor.constraint(equalTo: centerYAnchor),
+            titleLabel.leadingAnchor.constraint(equalTo: iconView.trailingAnchor, constant: 6),
+            titleLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
+            titleLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
+        ])
+        updateAppearance()
+    }
+
+    required init?(coder: NSCoder) { fatalError() }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        trackingAreas.forEach(removeTrackingArea)
+        addTrackingArea(NSTrackingArea(
+            rect: .zero,
+            options: [.mouseEnteredAndExited, .activeInActiveApp, .inVisibleRect],
+            owner: self
+        ))
+    }
+
+    override func mouseEntered(with event: NSEvent) { isHovered = true }
+    override func mouseExited(with event: NSEvent) { isHovered = false }
+    override func mouseDown(with event: NSEvent) { onClick() }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        updateAppearance()
+    }
+
+    private func updateAppearance() {
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            if isActive {
+                layer?.backgroundColor = Theme.accent.cgColor
+                iconView.contentTintColor = Theme.onAccent
+                titleLabel.textColor = Theme.onAccent
+            } else {
+                layer?.backgroundColor = isHovered ? Theme.hoverWash.cgColor : NSColor.clear.cgColor
+                iconView.contentTintColor = Theme.ink
+                titleLabel.textColor = Theme.inkDim
+            }
+        }
+    }
+}
+
+struct PreferencesView: NSViewControllerRepresentable {
+    let model: SettingsModel
+
+    func makeNSViewController(context: Context) -> PreferencesViewController {
+        PreferencesViewController(model: model)
+    }
+
+    func updateNSViewController(_ nsViewController: PreferencesViewController, context: Context) {}
+}
+
+private struct PreferencesPane<Content: View>: View {
+    @ViewBuilder let content: Content
 
     var body: some View {
-        HStack(spacing: 0) {
-            sidebar
-            Rectangle().fill(.primary.opacity(0.8)).frame(width: 1)
-            ScrollView {
-                VStack(alignment: .leading, spacing: 18) {
-                    switch tab {
-                    case .general: GeneralTab()
-                    case .shortcuts: ShortcutsTab()
-                    case .editor: EditorTab()
-                    case .advanced: AdvancedTab()
-                    case .about: AboutTab()
-                    }
-                }
-                .padding(20)
-                .frame(maxWidth: .infinity, alignment: .leading)
+        ScrollView {
+            VStack(alignment: .leading, spacing: 14) {
+                content
             }
-            .scrollIndicators(.hidden)
+            .padding(16)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .frame(width: 720, height: 500)
-        .font(.system(size: 12, design: .monospaced))
-        .tint(kubreYellowDeep)
-    }
-
-    private var sidebar: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            HStack(spacing: 7) {
-                if let logo = Theme.logoImage(size: 16) {
-                    Image(nsImage: logo)
-                        .resizable()
-                        .renderingMode(.template)
-                        .frame(width: 16, height: 16)
-                }
-                Text(Theme.brandName)
-                    .font(.system(size: 13, weight: .black, design: .monospaced))
-            }
-            .foregroundStyle(.primary)
-            .padding(.leading, 10)
-            .padding(.top, 36)
-            .padding(.bottom, 16)
-
-            ForEach(PrefTab.allCases, id: \.rawValue) { item in
-                Button {
-                    tab = item
-                } label: {
-                    HStack(spacing: 8) {
-                        Text(item.glyph)
-                            .font(.system(size: 11, design: .monospaced))
-                            .frame(width: 14)
-                        Text(item.rawValue)
-                            .font(.system(size: 11.5, weight: .medium, design: .monospaced))
-                        Spacer(minLength: 0)
-                    }
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
-                    .foregroundStyle(tab == item ? .black : Color.primary.opacity(0.75))
-                    .background(Rectangle().fill(tab == item ? kubreYellow : .clear))
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-            }
-
-            Spacer()
-
-            Text(version == "dev" ? "dev" : "v\(version)")
-                .font(.system(size: 10, design: .monospaced))
-                .foregroundStyle(.tertiary)
-                .padding(.leading, 10)
-                .padding(.bottom, 12)
-        }
-        .padding(.horizontal, 8)
-        .frame(width: 168)
-        .background(.quinary.opacity(0.4))
+        .font(PrefFont.body)
+        .background(PrefColor.paper)
+        .tint(PrefColor.accentDeep)
+        .scrollIndicators(.hidden)
     }
 }
 
@@ -177,14 +477,20 @@ private struct PrefSection<Content: View>: View {
     @ViewBuilder let content: Content
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Text("## " + title.uppercased())
-                .font(.system(size: 10, weight: .semibold, design: .monospaced))
-                .kerning(1.2)
-                .foregroundStyle(.secondary)
-                .padding(.bottom, 6)
+        VStack(alignment: .leading, spacing: 5) {
+            Text(title.uppercased())
+                .font(PrefFont.section)
+                .foregroundStyle(PrefColor.inkDim)
             VStack(spacing: 0) { content }
-                .overlay(Rectangle().strokeBorder(.primary.opacity(0.7), lineWidth: 1))
+                .background(
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .fill(PrefColor.chrome)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .stroke(PrefColor.hairline, lineWidth: 1)
+                )
+                .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
         }
     }
 }
@@ -197,13 +503,20 @@ private struct PrefRow<Trailing: View>: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack {
-                Text(label).font(.system(size: 12, design: .monospaced))
+                Text(label)
+                    .font(PrefFont.label)
+                    .foregroundStyle(PrefColor.ink)
                 Spacer()
                 trailing
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 7)
-            if divider { Rectangle().fill(.primary.opacity(0.25)).frame(height: 1) }
+            if divider {
+                Rectangle()
+                    .fill(PrefColor.hairline)
+                    .frame(height: 1)
+                    .padding(.leading, 12)
+            }
         }
     }
 }
@@ -214,16 +527,74 @@ private struct PrefCaption: View {
 
     var body: some View {
         Text(text)
-            .font(.system(size: 10.5, design: .monospaced))
+            .font(PrefFont.monoSmall)
             .foregroundStyle(.tertiary)
             .padding(.top, 4)
+    }
+}
+
+private struct PrefButtonStyle: ButtonStyle {
+    enum Tone: Equatable { case secondary, destructive }
+
+    var tone: Tone = .secondary
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.system(size: 11.5, weight: .semibold))
+            .lineLimit(1)
+            .fixedSize(horizontal: true, vertical: false)
+            .foregroundStyle(foreground)
+            .padding(.horizontal, 9)
+            .padding(.vertical, 4)
+            .background(
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .fill(background(configuration.isPressed))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .stroke(border, lineWidth: 1)
+            )
+    }
+
+    private var foreground: Color {
+        tone == .destructive ? PrefColor.accent : PrefColor.ink
+    }
+
+    private var border: Color {
+        tone == .destructive ? PrefColor.accent.opacity(0.45) : PrefColor.hairline
+    }
+
+    private func background(_ pressed: Bool) -> Color {
+        if tone == .destructive {
+            return PrefColor.accent.opacity(pressed ? 0.18 : 0.08)
+        }
+        return Color.primary.opacity(pressed ? 0.10 : 0.045)
+    }
+}
+
+private extension View {
+    func prefTextField(width: CGFloat) -> some View {
+        self
+            .textFieldStyle(.plain)
+            .font(PrefFont.mono)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .frame(width: width)
+            .background(
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .fill(PrefColor.field)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .stroke(PrefColor.hairline, lineWidth: 1)
+            )
     }
 }
 
 // MARK: - General
 
 struct GeneralTab: View {
-    @EnvironmentObject var model: SettingsModel
+    @ObservedObject var model: SettingsModel
 
     var body: some View {
         PrefSection(title: "Appearance") {
@@ -240,42 +611,18 @@ struct GeneralTab: View {
             }
         }
 
-        PrefSection(title: "After capture") {
-            ForEach(Array(CaptureMode.captureOrder.enumerated()), id: \.element.rawValue) { index, mode in
-                PrefRow(label: label(for: mode), divider: index < CaptureMode.captureOrder.count - 1) {
-                    Picker("", selection: binding(for: mode)) {
-                        Text("Open editor").tag(AfterCaptureBehavior.openEditor)
-                        Text("Copy only").tag(AfterCaptureBehavior.copyOnly)
-                        Text("Copy + editor").tag(AfterCaptureBehavior.both)
-                    }
-                    .labelsHidden()
-                    .controlSize(.small)
-                    .fixedSize()
-                }
-            }
-        }
-
-        PrefSection(title: "Saving") {
-            PrefRow(label: "Save folder") {
-                TextField("~/Desktop", text: saveFolderBinding)
-                    .textFieldStyle(.roundedBorder)
-                    .controlSize(.small)
-                    .font(.system(size: 11, design: .monospaced))
-                    .frame(width: 200)
-            }
-            PrefRow(label: "Filename pattern", divider: false) {
-                TextField("", text: patternBinding)
-                    .textFieldStyle(.roundedBorder)
-                    .controlSize(.small)
-                    .font(.system(size: 11, design: .monospaced))
-                    .frame(width: 200)
-            }
-        }
-        PrefCaption("tokens: {date} {time} — e.g. scrcap-2026-06-11-14.32.05.png")
-
         PrefSection(title: "Startup") {
             PrefRow(label: "Launch at login", divider: false) {
                 Toggle("", isOn: launchAtLoginBinding).labelsHidden().toggleStyle(.switch).controlSize(.mini)
+            }
+        }
+
+        PrefSection(title: "Reset") {
+            PrefRow(label: "Restore every setting to its default", divider: false) {
+                Button("Reset all", role: .destructive) {
+                    model.update { $0 = .defaults }
+                }
+                .buttonStyle(PrefButtonStyle(tone: .destructive))
             }
         }
     }
@@ -284,36 +631,6 @@ struct GeneralTab: View {
         Binding(
             get: { model.settings.themeMode },
             set: { value in model.update { $0.themeMode = value } }
-        )
-    }
-
-    private func label(for mode: CaptureMode) -> String {
-        switch mode {
-        case .fullscreen: return "Fullscreen"
-        case .region: return "Region"
-        case .window: return "Window"
-        case .scrolling: return "Scrolling"
-        }
-    }
-
-    private func binding(for mode: CaptureMode) -> Binding<AfterCaptureBehavior> {
-        Binding(
-            get: { model.settings.behavior(for: mode) },
-            set: { value in model.update { $0.afterCapture[mode.rawValue] = value } }
-        )
-    }
-
-    private var saveFolderBinding: Binding<String> {
-        Binding(
-            get: { model.settings.saveFolder ?? "" },
-            set: { value in model.update { $0.saveFolder = value.isEmpty ? nil : value } }
-        )
-    }
-
-    private var patternBinding: Binding<String> {
-        Binding(
-            get: { model.settings.filenamePattern },
-            set: { value in model.update { $0.filenamePattern = value } }
         )
     }
 
@@ -340,10 +657,105 @@ struct GeneralTab: View {
     }
 }
 
+// MARK: - Capture
+
+struct CaptureTab: View {
+    @ObservedObject var model: SettingsModel
+
+    var body: some View {
+        PrefSection(title: "After capture") {
+            ForEach(Array(CaptureMode.captureOrder.enumerated()), id: \.element.rawValue) { index, mode in
+                PrefRow(label: label(for: mode), divider: index < CaptureMode.captureOrder.count - 1) {
+                    Picker("", selection: binding(for: mode)) {
+                        Text("Open editor").tag(AfterCaptureBehavior.openEditor)
+                        Text("Copy only").tag(AfterCaptureBehavior.copyOnly)
+                        Text("Copy + editor").tag(AfterCaptureBehavior.both)
+                    }
+                    .labelsHidden()
+                    .controlSize(.small)
+                    .fixedSize()
+                }
+            }
+        }
+
+        PrefSection(title: "Window capture") {
+            PrefRow(label: "Target window") {
+                Picker("", selection: windowTargetBinding) {
+                    Text("Frontmost").tag(WindowCaptureTarget.active)
+                    Text("Pick on screen").tag(WindowCaptureTarget.selected)
+                }
+                .labelsHidden()
+                .controlSize(.small)
+                .fixedSize()
+            }
+            PrefRow(label: "Include window shadow", divider: false) {
+                Toggle("", isOn: shadowBinding).labelsHidden().toggleStyle(.switch).controlSize(.mini)
+            }
+        }
+
+        PrefSection(title: "Scrolling capture") {
+            PrefRow(label: "Maximum stitched height", divider: false) {
+                HStack(spacing: 4) {
+                    TextField("", value: maxHeightBinding, format: .number)
+                        .multilineTextAlignment(.trailing)
+                        .prefTextField(width: 68)
+                    Text("px")
+                        .font(PrefFont.mono)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+
+    private var windowTargetBinding: Binding<WindowCaptureTarget> {
+        Binding(
+            get: { model.settings.windowCaptureTarget },
+            set: { value in model.update { $0.windowCaptureTarget = value } }
+        )
+    }
+
+    private func label(for mode: CaptureMode) -> String {
+        switch mode {
+        case .fullscreen: return "Fullscreen"
+        case .region: return "Region"
+        case .window: return "Window"
+        case .scrolling: return "Scrolling"
+        }
+    }
+
+    private func binding(for mode: CaptureMode) -> Binding<AfterCaptureBehavior> {
+        Binding(
+            get: { model.settings.behavior(for: mode) },
+            set: { value in model.update { $0.afterCapture[mode.rawValue] = value } }
+        )
+    }
+
+    private var shadowBinding: Binding<Bool> {
+        Binding(
+            get: { model.settings.includeWindowShadow },
+            set: { value in model.update { $0.includeWindowShadow = value } }
+        )
+    }
+
+    private var maxHeightBinding: Binding<Int> {
+        Binding(
+            get: { model.settings.scrollingMaxHeight },
+            set: { value in
+                model.update {
+                    $0.scrollingMaxHeight = min(
+                        max(AppSettings.minScrollingMaxHeight, value),
+                        AppSettings.maxScrollingMaxHeight
+                    )
+                }
+            }
+        )
+    }
+}
+
 // MARK: - Shortcuts
 
 struct ShortcutsTab: View {
-    @EnvironmentObject var model: SettingsModel
+    @ObservedObject var model: SettingsModel
     @State private var recordingAction: AppAction?
     @State private var warning: String?
 
@@ -363,8 +775,8 @@ struct ShortcutsTab: View {
         }
         if let warning {
             Label(warning, systemImage: "exclamationmark.triangle.fill")
-                .font(.system(size: 11, design: .monospaced))
-                .foregroundStyle(warnRed)
+                .font(PrefFont.mono)
+                .foregroundStyle(PrefColor.warn)
         }
         PrefCaption("click a shortcut, press any combination · esc cancels")
     }
@@ -402,9 +814,15 @@ struct ShortcutRecorderButton: View {
                 .padding(.horizontal, 10)
                 .padding(.vertical, 3)
                 .frame(minWidth: 72)
-                .foregroundStyle(isRecording ? .black : .primary)
-                .background(Rectangle().fill(isRecording ? kubreYellow : Color.primary.opacity(0.06)))
-                .overlay(Rectangle().strokeBorder(.primary.opacity(isRecording ? 0.9 : 0.35), lineWidth: 1))
+                .foregroundStyle(isRecording ? PrefColor.onAccent : PrefColor.ink)
+                .background(
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .fill(isRecording ? PrefColor.accent : Color.primary.opacity(0.045))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .stroke(isRecording ? PrefColor.accentDeep : PrefColor.hairline, lineWidth: 1)
+                )
         }
         .buttonStyle(.plain)
         .onDisappear { stopRecording(cancelled: true) }
@@ -438,41 +856,33 @@ struct ShortcutRecorderButton: View {
 // MARK: - Editor
 
 struct EditorTab: View {
-    @EnvironmentObject var model: SettingsModel
+    @ObservedObject var model: SettingsModel
 
     var body: some View {
-        PrefSection(title: "Palette · keys 1–7 · slot 1 is the boot default") {
-            PrefRow(label: "", divider: false) {
-                HStack(spacing: 10) {
-                    ForEach(0..<7, id: \.self) { index in
-                        VStack(spacing: 2) {
-                            ColorPicker("", selection: paletteBinding(index), supportsOpacity: false)
-                                .labelsHidden()
-                            Text("\(index + 1)")
-                                .font(.system(size: 9, design: .monospaced))
-                                .foregroundStyle(.tertiary)
+        PrefSection(title: "Palette") {
+            PrefRow(label: "Tool colors", divider: false) {
+                VStack(alignment: .trailing, spacing: 6) {
+                    HStack(spacing: 8) {
+                        ForEach(0..<4, id: \.self) { index in
+                            paletteSlot(index)
                         }
                     }
-                    Spacer()
-                    Button("Reset") {
-                        model.update { $0.paletteHex = AppSettings.defaultPalette }
+                    HStack(spacing: 8) {
+                        ForEach(4..<7, id: \.self) { index in
+                            paletteSlot(index)
+                        }
+                        Button("Reset") {
+                            model.update { $0.paletteHex = AppSettings.defaultPalette }
+                        }
+                        .buttonStyle(PrefButtonStyle())
                     }
-                    .controlSize(.small)
                 }
             }
         }
+        PrefCaption("keys 1–7 select colors · slot 1 is the default for each new capture")
 
-        PrefSection(title: "Behavior") {
-            PrefRow(label: "Esc key") {
-                Picker("", selection: escBinding) {
-                    Text("Copy + close").tag(EscBehavior.copyAndClose)
-                    Text("Close only").tag(EscBehavior.closeOnly)
-                }
-                .labelsHidden()
-                .controlSize(.small)
-                .fixedSize()
-            }
-            PrefRow(label: "Stroke width") {
+        PrefSection(title: "Drawing") {
+            PrefRow(label: "Default stroke width", divider: false) {
                 HStack(spacing: 8) {
                     Slider(
                         value: strokeBinding,
@@ -480,14 +890,17 @@ struct EditorTab: View {
                         step: 0.5
                     )
                         .controlSize(.small)
-                        .frame(width: 140)
+                        .frame(width: 128)
                     Text(String(format: "%.1f pt", model.settings.strokeWidth))
-                        .font(.system(size: 11, design: .monospaced))
+                        .font(PrefFont.mono)
                         .foregroundStyle(.secondary)
                         .frame(width: 44, alignment: .trailing)
                 }
             }
-            PrefRow(label: "Text size") {
+        }
+
+        PrefSection(title: "Text") {
+            PrefRow(label: "Default text size") {
                 HStack(spacing: 8) {
                     Slider(
                         value: textSizeBinding,
@@ -495,14 +908,14 @@ struct EditorTab: View {
                         step: 1
                     )
                         .controlSize(.small)
-                        .frame(width: 140)
+                        .frame(width: 128)
                     Text(String(format: "%.0f pt", model.settings.textSize))
-                        .font(.system(size: 11, design: .monospaced))
+                        .font(PrefFont.mono)
                         .foregroundStyle(.secondary)
                         .frame(width: 44, alignment: .trailing)
                 }
             }
-            PrefRow(label: "Return key") {
+            PrefRow(label: "Return while typing", divider: false) {
                 Picker("", selection: textEnterBinding) {
                     Text("New line").tag(TextEnterBehavior.newline)
                     Text("Commit text").tag(TextEnterBehavior.commit)
@@ -511,28 +924,31 @@ struct EditorTab: View {
                 .controlSize(.small)
                 .fixedSize()
             }
-            PrefRow(label: "Auto-expand canvas") {
+        }
+
+        PrefSection(title: "Canvas") {
+            PrefRow(label: "Auto-expand while drawing") {
                 Toggle("", isOn: autoExpandCanvasBinding)
                     .labelsHidden()
                     .toggleStyle(.switch)
                     .controlSize(.mini)
             }
-            PrefRow(label: "Expanded area fill") {
+            PrefRow(label: "New area fill", divider: false) {
                 ColorPicker("", selection: canvasExtensionColorBinding, supportsOpacity: false)
                     .labelsHidden()
                     .disabled(!model.settings.autoExpandCanvas)
             }
-            PrefRow(label: "Window capture target") {
-                Picker("", selection: windowTargetBinding) {
-                    Text("Active window").tag(WindowCaptureTarget.active)
-                    Text("Selected window").tag(WindowCaptureTarget.selected)
+        }
+
+        PrefSection(title: "Close behavior") {
+            PrefRow(label: "Esc key", divider: false) {
+                Picker("", selection: escBinding) {
+                    Text("Copy + close").tag(EscBehavior.copyAndClose)
+                    Text("Close only").tag(EscBehavior.closeOnly)
                 }
                 .labelsHidden()
                 .controlSize(.small)
                 .fixedSize()
-            }
-            PrefRow(label: "Window capture includes shadow", divider: false) {
-                Toggle("", isOn: shadowBinding).labelsHidden().toggleStyle(.switch).controlSize(.mini)
             }
         }
     }
@@ -544,6 +960,16 @@ struct EditorTab: View {
                 model.update { $0.paletteHex[index] = NSColor(value).hexString }
             }
         )
+    }
+
+    private func paletteSlot(_ index: Int) -> some View {
+        VStack(spacing: 2) {
+            ColorPicker("", selection: paletteBinding(index), supportsOpacity: false)
+                .labelsHidden()
+            Text("\(index + 1)")
+                .font(PrefFont.monoSmall)
+                .foregroundStyle(.tertiary)
+        }
     }
 
     private var escBinding: Binding<EscBehavior> {
@@ -588,29 +1014,28 @@ struct EditorTab: View {
         )
     }
 
-    private var windowTargetBinding: Binding<WindowCaptureTarget> {
-        Binding(
-            get: { model.settings.windowCaptureTarget },
-            set: { value in model.update { $0.windowCaptureTarget = value } }
-        )
-    }
-
-    private var shadowBinding: Binding<Bool> {
-        Binding(
-            get: { model.settings.includeWindowShadow },
-            set: { value in model.update { $0.includeWindowShadow = value } }
-        )
-    }
 }
 
-// MARK: - Advanced
+// MARK: - Output
 
-struct AdvancedTab: View {
-    @EnvironmentObject var model: SettingsModel
+struct OutputTab: View {
+    @ObservedObject var model: SettingsModel
 
     var body: some View {
-        PrefSection(title: "Output") {
-            PrefRow(label: "Export scale") {
+        PrefSection(title: "Files") {
+            PrefRow(label: "Save folder") {
+                TextField("~/Desktop", text: saveFolderBinding)
+                    .prefTextField(width: 200)
+            }
+            PrefRow(label: "Filename pattern", divider: false) {
+                TextField("", text: patternBinding)
+                    .prefTextField(width: 200)
+            }
+        }
+        PrefCaption("tokens: {date} {time} · e.g. scrcap-2026-06-11-14.32.05.png")
+
+        PrefSection(title: "Image export") {
+            PrefRow(label: "PNG scale", divider: false) {
                 Picker("", selection: exportScaleBinding) {
                     Text("1× points").tag(1)
                     Text("2× Retina").tag(2)
@@ -620,50 +1045,28 @@ struct AdvancedTab: View {
                 .controlSize(.small)
                 .fixedSize()
             }
-            PrefRow(label: "Scrolling capture max height", divider: false) {
-                HStack(spacing: 4) {
-                    TextField("", value: maxHeightBinding, format: .number)
-                        .textFieldStyle(.roundedBorder)
-                        .controlSize(.small)
-                        .font(.system(size: 11, design: .monospaced))
-                        .frame(width: 70)
-                        .multilineTextAlignment(.trailing)
-                    Text("px")
-                        .font(.system(size: 11, design: .monospaced))
-                        .foregroundStyle(.secondary)
-                }
-            }
-        }
-
-        PrefSection(title: "Reset") {
-            PrefRow(label: "Restore every setting to its default", divider: false) {
-                Button("Reset all", role: .destructive) {
-                    model.update { $0 = .defaults }
-                }
-                .controlSize(.small)
-            }
         }
         PrefCaption("settings: ~/Library/Application Support/scrcap/settings.json — human-readable on purpose")
+    }
+
+    private var saveFolderBinding: Binding<String> {
+        Binding(
+            get: { model.settings.saveFolder ?? "" },
+            set: { value in model.update { $0.saveFolder = value.isEmpty ? nil : value } }
+        )
+    }
+
+    private var patternBinding: Binding<String> {
+        Binding(
+            get: { model.settings.filenamePattern },
+            set: { value in model.update { $0.filenamePattern = value } }
+        )
     }
 
     private var exportScaleBinding: Binding<Int> {
         Binding(
             get: { model.settings.exportScale },
             set: { value in model.update { $0.exportScale = value } }
-        )
-    }
-
-    private var maxHeightBinding: Binding<Int> {
-        Binding(
-            get: { model.settings.scrollingMaxHeight },
-            set: { value in
-                model.update {
-                    $0.scrollingMaxHeight = min(
-                        max(AppSettings.minScrollingMaxHeight, value),
-                        AppSettings.maxScrollingMaxHeight
-                    )
-                }
-            }
         )
     }
 }
@@ -677,10 +1080,19 @@ struct AboutTab: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text("█▓▒░ SCRCAP")
-                .font(.system(size: 18, weight: .black, design: .monospaced))
+            HStack(spacing: 8) {
+                if let logo = Theme.logoImage(size: 22) {
+                    Image(nsImage: logo)
+                        .resizable()
+                        .renderingMode(.template)
+                        .frame(width: 20, height: 20)
+                        .foregroundStyle(PrefColor.accent)
+                }
+                Text("SCRCAP")
+                    .font(.system(size: 20, weight: .black))
+            }
             Text("v\(version) — fast, keyboard-first screenshots")
-                .font(.system(size: 11, design: .monospaced))
+                .font(PrefFont.mono)
                 .foregroundStyle(.secondary)
         }
         .padding(.bottom, 2)
@@ -688,30 +1100,29 @@ struct AboutTab: View {
         PrefSection(title: "Links") {
             PrefRow(label: "Created by") {
                 Link("kubre.in ↗", destination: URL(string: "https://kubre.in")!)
-                    .font(.system(size: 12, weight: .medium, design: .monospaced))
+                    .font(PrefFont.label)
                     .underline()
             }
             PrefRow(label: "Source") {
                 Link("github.com/kubre/scrcap ↗", destination: URL(string: "https://github.com/kubre/scrcap")!)
-                    .font(.system(size: 12, weight: .medium, design: .monospaced))
+                    .font(PrefFont.label)
                     .underline()
             }
             PrefRow(label: "Updates") {
                 Button("Check for Updates…") {
                     NotificationCenter.default.post(name: .scrcapCheckForUpdates, object: nil)
                 }
-                .controlSize(.small)
+                .buttonStyle(PrefButtonStyle())
             }
         }
-        HStack(spacing: 6) {
-            Text("Inspired by")
+        VStack(alignment: .leading, spacing: 4) {
+            PrefCaption("this app is inspired by Shottr but has much more opinionated defaults. if you need an app with more features, use Shottr instead.")
             Link("shottr.cc ↗", destination: URL(string: "https://shottr.cc")!)
+                .font(PrefFont.mono)
                 .fontWeight(.medium)
                 .underline()
+                .foregroundStyle(Color.primary.opacity(0.7))
         }
-        .font(.system(size: 11, design: .monospaced))
-        .foregroundStyle(Color.primary.opacity(0.7))
         .padding(.top, -10)
-        PrefCaption("want more configuration and advanced features? use Shottr instead.")
     }
 }

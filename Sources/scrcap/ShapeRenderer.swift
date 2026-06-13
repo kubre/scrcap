@@ -35,16 +35,20 @@ enum ShapeRenderer {
     }
 
     static func textFont(size: CGFloat) -> NSFont {
-        .systemFont(ofSize: size, weight: .semibold)
+        .systemFont(ofSize: size + 1, weight: .bold)
+    }
+
+    static func textAttributes(size: CGFloat, color: NSColor) -> [NSAttributedString.Key: Any] {
+        [
+            .font: textFont(size: size),
+            .foregroundColor: color,
+        ]
     }
 
     /// Anchored at `origin` (top-left); newlines render as line breaks. Must
     /// stay metrics-identical to the live editing text view.
     private static func drawText(_ string: String, at origin: NSPoint, color: NSColor, size: Double) {
-        let attrs: [NSAttributedString.Key: Any] = [
-            .font: textFont(size: size),
-            .foregroundColor: color,
-        ]
+        let attrs = textAttributes(size: size, color: color)
         NSAttributedString(string: string, attributes: attrs).draw(at: origin)
     }
 

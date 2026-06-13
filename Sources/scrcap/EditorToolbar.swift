@@ -1,7 +1,6 @@
-// EditorToolbar — flat full-width cell bar docked under the canvas, styled
-// like kubre.in's nav: hairline-separated cells, mono labels, the active tool
-// is a solid yellow block with black content, and the primary exit is an
-// inverted carbon block flush right. No pills, no nesting, no shadows.
+// EditorToolbar — compact full-width cell bar docked under the canvas.
+// Tools, swatches, and the exit action share one red active language; shortcut
+// labels stay monospaced so the editor remains fast to scan.
 
 import AppKit
 import ScrcapCore
@@ -174,8 +173,7 @@ final class EditorToolbar: NSView {
 
 // MARK: - Cells
 
-/// Flat full-height cell: SF icon + mono key, inline. Active = yellow block
-/// with black content (the site's selected-nav treatment).
+/// Flat full-height cell: SF icon + mono key, inline. Active = red block.
 final class ToolbarCell: NSControl {
     var isActive = false {
         didSet { updateAppearance() }
@@ -209,13 +207,13 @@ final class ToolbarCell: NSControl {
         addSubview(keyLabel)
         NSLayoutConstraint.activate([
             heightAnchor.constraint(equalToConstant: Theme.toolbarHeight - 1),
-            iconView.widthAnchor.constraint(equalToConstant: 16),
-            iconView.heightAnchor.constraint(equalToConstant: 16),
-            iconView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
+            iconView.widthAnchor.constraint(equalToConstant: 15),
+            iconView.heightAnchor.constraint(equalToConstant: 15),
+            iconView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 7),
             iconView.centerYAnchor.constraint(equalTo: centerYAnchor),
             keyLabel.leadingAnchor.constraint(equalTo: iconView.trailingAnchor, constant: 4),
             keyLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
-            keyLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
+            keyLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -7),
         ])
         updateAppearance()
     }
@@ -247,9 +245,9 @@ final class ToolbarCell: NSControl {
     private func updateAppearance() {
         effectiveAppearance.performAsCurrentDrawingAppearance {
             if isActive {
-                layer?.backgroundColor = Theme.yellow.cgColor
-                iconView.contentTintColor = Theme.onYellow
-                keyLabel.textColor = Theme.onYellow
+                layer?.backgroundColor = Theme.accent.cgColor
+                iconView.contentTintColor = Theme.onAccent
+                keyLabel.textColor = Theme.onAccent.withAlphaComponent(0.76)
             } else {
                 layer?.backgroundColor = isHovered ? Theme.hoverWash.cgColor : NSColor.clear.cgColor
                 iconView.contentTintColor = Theme.ink
@@ -259,7 +257,7 @@ final class ToolbarCell: NSControl {
     }
 }
 
-/// Square color chip + number. Active = yellow block, black number.
+/// Square color chip + number. Active = soft red outline so the chip stays visible.
 final class SwatchCell: NSControl {
     var isActive = false {
         didSet { updateAppearance() }
@@ -278,6 +276,7 @@ final class SwatchCell: NSControl {
         keyLabel = NSTextField(labelWithString: key)
         super.init(frame: .zero)
         wantsLayer = true
+        layer?.borderWidth = 1
         translatesAutoresizingMaskIntoConstraints = false
 
         chip.wantsLayer = true
@@ -292,8 +291,8 @@ final class SwatchCell: NSControl {
         addSubview(keyLabel)
         NSLayoutConstraint.activate([
             heightAnchor.constraint(equalToConstant: Theme.toolbarHeight - 1),
-            chip.widthAnchor.constraint(equalToConstant: 12),
-            chip.heightAnchor.constraint(equalToConstant: 12),
+            chip.widthAnchor.constraint(equalToConstant: 11),
+            chip.heightAnchor.constraint(equalToConstant: 11),
             chip.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 7),
             chip.centerYAnchor.constraint(equalTo: centerYAnchor),
             keyLabel.leadingAnchor.constraint(equalTo: chip.trailingAnchor, constant: 4),
@@ -330,12 +329,14 @@ final class SwatchCell: NSControl {
     private func updateAppearance() {
         effectiveAppearance.performAsCurrentDrawingAppearance {
             if isActive {
-                layer?.backgroundColor = Theme.yellow.cgColor
-                chip.layer?.borderColor = Theme.onYellow.cgColor
-                keyLabel.textColor = Theme.onYellow
+                layer?.backgroundColor = Theme.hoverWash.cgColor
+                layer?.borderColor = Theme.accent.withAlphaComponent(0.35).cgColor
+                chip.layer?.borderColor = Theme.accent.cgColor
+                keyLabel.textColor = Theme.accent
                 keyLabel.font = NSFont.monospacedSystemFont(ofSize: 10, weight: .bold)
             } else {
                 layer?.backgroundColor = isHovered ? Theme.hoverWash.cgColor : NSColor.clear.cgColor
+                layer?.borderColor = NSColor.clear.cgColor
                 chip.layer?.borderColor = Theme.ink.withAlphaComponent(0.4).cgColor
                 keyLabel.textColor = Theme.inkDim
                 keyLabel.font = Theme.cellKeyFont
@@ -344,8 +345,7 @@ final class SwatchCell: NSControl {
     }
 }
 
-/// The inverted block: ink background, chrome-colored text. Hovering flips it
-/// to yellow/black, exactly like the site's links.
+/// Primary block: red background with the same shortcut treatment as cells.
 final class PrimaryCell: NSControl {
     private var isHovered = false {
         didSet { updateAppearance() }
@@ -373,11 +373,11 @@ final class PrimaryCell: NSControl {
         addSubview(keyLabel)
         NSLayoutConstraint.activate([
             heightAnchor.constraint(equalToConstant: Theme.toolbarHeight - 1),
-            titleLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
+            titleLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 10),
             titleLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
             keyLabel.leadingAnchor.constraint(equalTo: titleLabel.trailingAnchor, constant: 6),
             keyLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
-            keyLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
+            keyLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -10),
         ])
         updateAppearance()
     }
@@ -409,13 +409,13 @@ final class PrimaryCell: NSControl {
     private func updateAppearance() {
         effectiveAppearance.performAsCurrentDrawingAppearance {
             if isHovered {
-                layer?.backgroundColor = Theme.yellow.cgColor
-                titleLabel.textColor = Theme.onYellow
-                keyLabel.textColor = Theme.onYellow.withAlphaComponent(0.65)
+                layer?.backgroundColor = Theme.accentDeep.cgColor
+                titleLabel.textColor = Theme.onAccent
+                keyLabel.textColor = Theme.onAccent.withAlphaComponent(0.70)
             } else {
-                layer?.backgroundColor = Theme.inverse.cgColor
-                titleLabel.textColor = Theme.onInverse
-                keyLabel.textColor = Theme.onInverse.withAlphaComponent(0.65)
+                layer?.backgroundColor = Theme.accent.cgColor
+                titleLabel.textColor = Theme.onAccent
+                keyLabel.textColor = Theme.onAccent.withAlphaComponent(0.70)
             }
         }
     }

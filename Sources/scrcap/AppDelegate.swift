@@ -16,6 +16,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var preferences: PreferencesWindowController!
     private var statusItem: NSStatusItem!
     private var scrollCapture: ScrollCaptureController?
+    private let firstLaunchNoticeShownKey = "hasShownFirstLaunchMenuBarNotice"
 
     /// For repeat-last (⌥⇧R): the previous region, or the previous mode.
     private enum LastCapture {
@@ -83,6 +84,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Screen Recording is requested lazily on the first capture. Asking on
         // launch stacks macOS' permission prompt with scrcap's own startup UI.
+        presentFirstLaunchNoticeIfNeeded()
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
@@ -176,11 +178,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
 
             let prefsHost = NSWindow(
-                contentRect: NSRect(x: 0, y: 0, width: 600, height: 440),
+                contentRect: NSRect(x: 0, y: 0, width: 720, height: 500),
                 styleMask: .borderless, backing: .buffered, defer: false
             )
             prefsHost.contentView = NSHostingView(
-                rootView: PreferencesView().environmentObject(SettingsModel(store: self.settingsStore))
+                rootView: PreferencesView(model: SettingsModel(store: self.settingsStore))
             )
             prefsHost.layoutIfNeeded()
             if let view = prefsHost.contentView {
@@ -189,6 +191,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             exit(0)
         }
     }
+
     #endif
 
     // MARK: Theme
@@ -216,7 +219,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func statusItemImage() -> NSImage? {
-        Theme.logoImage(size: 18)
+        Theme.logoImage(size: 18, template: true)
+    }
+
+    private func presentFirstLaunchNoticeIfNeeded() {
+        let defaults = UserDefaults.standard
+        guard !defaults.bool(forKey: firstLaunchNoticeShownKey) else { return }
+
+        defaults.set(true, forKey: firstLaunchNoticeShownKey)
+        DispatchQueue.main.async { [weak self] in
+            self?.presentFirstLaunchNotice()
+        }
+    }
+
+    private func presentFirstLaunchNotice() {
+        let alert = NSAlert()
+        alert.alertStyle = .informational
+        alert.messageText = "scrcap is running"
+        alert.informativeText = "scrcap lives in the menu bar at the top of your screen. Click the camera icon there for captures, preferences, or quit."
+        alert.addButton(withTitle: "OK")
+
+        NSApp.activate(ignoringOtherApps: true)
+        alert.runModal()
     }
 
     private func rebuildMenu() {

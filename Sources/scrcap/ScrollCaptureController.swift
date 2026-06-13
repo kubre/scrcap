@@ -305,7 +305,7 @@ final class ScrollCaptureController {
 // MARK: - HUD view
 
 /// Fixed-carbon capture HUD (matches the overlay's tag styling): flat block,
-/// sharp corners, pulsing yellow dot, mono pixel count, yellow STOP cell.
+/// sharp corners, pulsing red dot, mono pixel count, red STOP cell.
 private final class ScrollProgressHUD: NSView {
     let countLabel = NSTextField(labelWithString: "0 px")
 
@@ -319,7 +319,7 @@ private final class ScrollProgressHUD: NSView {
         layer?.borderColor = Theme.tagRule.cgColor
 
         dot.wantsLayer = true
-        dot.layer?.backgroundColor = Theme.yellow.cgColor
+        dot.layer?.backgroundColor = Theme.accent.cgColor
         dot.translatesAutoresizingMaskIntoConstraints = false
 
         let title = NSTextField(labelWithString: "SCROLLING CAPTURE")
@@ -334,14 +334,14 @@ private final class ScrollProgressHUD: NSView {
         let stop = NSButton(title: "", target: stopTarget, action: stopAction)
         stop.isBordered = false
         stop.wantsLayer = true
-        stop.layer?.backgroundColor = Theme.yellow.cgColor
+        stop.layer?.backgroundColor = Theme.accent.cgColor
         let stopTitle = NSMutableAttributedString(string: "STOP ", attributes: [
             .font: NSFont.monospacedSystemFont(ofSize: 11, weight: .semibold),
-            .foregroundColor: NSColor.black,
+            .foregroundColor: Theme.onAccent,
         ])
         stopTitle.append(NSAttributedString(string: "ESC", attributes: [
             .font: NSFont.monospacedSystemFont(ofSize: 10, weight: .medium),
-            .foregroundColor: NSColor.black.withAlphaComponent(0.6),
+            .foregroundColor: Theme.onAccent.withAlphaComponent(0.70),
         ]))
         stop.attributedTitle = stopTitle
         stop.translatesAutoresizingMaskIntoConstraints = false

@@ -43,14 +43,14 @@ func appIcon(size: Int, insetScale: CGFloat, cornerScale: CGFloat) -> NSImage {
     let path = CGPath(roundedRect: iconRect, cornerWidth: radius, cornerHeight: radius, transform: nil)
 
     context.saveGState()
-    context.setShadow(offset: CGSize(width: 0, height: -CGFloat(size) * 0.025), blur: CGFloat(size) * 0.055, color: color(0x78350F, alpha: 0.28))
+    context.setShadow(offset: CGSize(width: 0, height: -CGFloat(size) * 0.025), blur: CGFloat(size) * 0.055, color: color(0x660214, alpha: 0.30))
     context.addPath(path)
     context.clip()
 
     let gradient = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(), colors: [
-        color(0xFDE047), // yellow-300
-        color(0xFACC15), // yellow-400 (#FACC15 — theme token)
-        color(0xEAB308), // yellow-500
+        color(0xFF4D57), // red highlight
+        color(0xE30E20), // theme accent
+        color(0xA80513), // deep red
     ] as CFArray, locations: [0, 0.45, 1])!
     context.drawLinearGradient(
         gradient,
@@ -94,7 +94,7 @@ func appIcon(size: Int, insetScale: CGFloat, cornerScale: CGFloat) -> NSImage {
     dashedPlus(offsetY: -CGFloat(size) * 0.01)
     context.strokePath()
 
-    context.setStrokeColor(color(0x1C1C1B)) // near-black (onYellow)
+    context.setStrokeColor(color(0xFFFFFF))
     context.setLineWidth(stroke)
     context.beginPath()
     dashedPlus(offsetY: 0)
@@ -126,8 +126,6 @@ let iconFiles: [(String, Int)] = [
     ("icon_32x32.png", 32),
     ("icon_32x32@2x.png", 64),
     ("icon_128x128.png", 128),
-    ("icon_128x128@2x.png", 256),
-    ("icon_256x256.png", 256),
 ]
 
 for (name, size) in iconFiles {

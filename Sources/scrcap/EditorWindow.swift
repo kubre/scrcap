@@ -81,6 +81,7 @@ final class EditorWindowController: NSObject, NSWindowDelegate {
 
     func show() {
         EditorWindowController.open.insert(self)
+        NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
         window.center()
         window.makeKeyAndOrderFront(nil)
@@ -256,7 +257,19 @@ final class EditorWindowController: NSObject, NSWindowDelegate {
         let callback = onClose
         onClose = nil
         EditorWindowController.open.remove(self)
+        restoreAccessoryActivationIfNoUserWindowsRemain()
         callback?()
+    }
+
+    private func restoreAccessoryActivationIfNoUserWindowsRemain() {
+        DispatchQueue.main.async {
+            let hasVisibleUserWindow = NSApp.windows.contains { window in
+                window.isVisible && window.level == .normal && window.canBecomeKey
+            }
+            if !hasVisibleUserWindow {
+                NSApp.setActivationPolicy(.accessory)
+            }
+        }
     }
 
     #if DEBUG
@@ -360,23 +373,20 @@ extension EditorWindowController: CanvasDataSource {
     }
 
     private struct CanvasExpansion {
-        static let margin: CGFloat = 48
-        static let reserve: CGFloat = 160
-
         var left: CGFloat = 0
         var top: CGFloat = 0
         var right: CGFloat = 0
         var bottom: CGFloat = 0
 
         init(fitting rect: NSRect, in bounds: NSRect) {
-            left = Self.growth(for: Self.margin - rect.minX)
-            top = Self.growth(for: Self.margin - rect.minY)
-            right = Self.growth(for: rect.maxX + Self.margin - bounds.maxX)
-            bottom = Self.growth(for: rect.maxY + Self.margin - bounds.maxY)
+            left = Self.growth(for: bounds.minX - rect.minX)
+            top = Self.growth(for: bounds.minY - rect.minY)
+            right = Self.growth(for: rect.maxX - bounds.maxX)
+            bottom = Self.growth(for: rect.maxY - bounds.maxY)
         }
 
         private static func growth(for missing: CGFloat) -> CGFloat {
-            missing > 0 ? ceil(missing + reserve) : 0
+            missing > 0 ? ceil(missing) : 0
         }
 
         var hasWork: Bool {
@@ -518,7 +528,7 @@ private extension Shape {
 
 /// Editor chrome that re-resolves its dynamic colors when the system theme
 /// flips (CGColor assignments don't auto-adapt the way semantic NSColors do).
-/// Sharp corners and a full-contrast 1px rule — the window is a flat card.
+/// Rounded compact chrome with a single balanced outline.
 ///
 /// layer.borderWidth is NOT used: with cornerRadius+masksToBounds the outer
 /// half of the stroke is clipped away, leaving nothing visible at corners.
@@ -577,7 +587,7 @@ final class EditorHeaderView: NSView {
     var onZoomOut: (() -> Void)?
     var onZoomReset: (() -> Void)?
 
-    private let brandIcon = NSImageView(image: Theme.logoImage(size: 16) ?? NSImage())
+    private let brandIcon = NSImageView(image: Theme.logoImage(size: 16, template: true) ?? NSImage())
     private let brandLabel = NSTextField(labelWithString: Theme.brandName)
     private let zoomOutButton = HeaderIconButton(symbolName: "minus.magnifyingglass")
     private let zoomResetButton = HeaderTextButton(title: "100%")
@@ -618,7 +628,7 @@ final class EditorHeaderView: NSView {
         addSubview(rule)
 
         NSLayoutConstraint.activate([
-            brandIcon.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 80),
+            brandIcon.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 92),
             brandIcon.centerYAnchor.constraint(equalTo: centerYAnchor),
             brandIcon.widthAnchor.constraint(equalToConstant: 16),
             brandIcon.heightAnchor.constraint(equalToConstant: 16),
@@ -1011,7 +1021,7 @@ final class CanvasScrollView: NSScrollView {
 /// Top-left-origin container that keeps a little breathing room around the
 /// screenshot and recenters it whenever the editor window is resized.
 final class CanvasHostView: NSView {
-    static let padding: CGFloat = 24
+    static let padding: CGFloat = 36
 
     private let canvas: CanvasView
     private var imagePointSize: NSSize
@@ -1155,17 +1165,19 @@ final class CanvasView: NSView, NSDraggingSource {
 
     override func draw(_ dirtyRect: NSRect) {
         bitmapImage.draw(in: bounds)
-        // Flat 1px frame instead of a soft shadow — the screenshot is a
-        // figure on the sheet, like the site's bordered images.
-        Theme.ink.withAlphaComponent(0.5).setStroke()
+        // Flat 1px frame so screenshots remain measurable and unornamented.
+        Theme.rule.withAlphaComponent(0.70).setStroke()
         let frame = NSBezierPath(rect: bounds.insetBy(dx: 0.5, dy: 0.5))
         frame.lineWidth = 1
         frame.stroke()
         guard let source = dataSource else { return }
+        NSGraphicsContext.saveGraphicsState()
+        NSBezierPath(rect: bounds).addClip()
         ShapeRenderer.draw(source.visibleShapes, palette: source.palette, strokeWidth: source.strokeWidth)
         if let liveShape {
             ShapeRenderer.draw(liveShape, palette: source.palette, strokeWidth: source.strokeWidth)
         }
+        NSGraphicsContext.restoreGraphicsState()
         if let liveCropRect {
             drawCropPreview(liveCropRect)
         }
@@ -1291,7 +1303,17 @@ final class CanvasView: NSView, NSDraggingSource {
         let minY = min(shape.start.y, shape.end.y)
         let maxX = max(shape.start.x, shape.end.x)
         let maxY = max(shape.start.y, shape.end.y)
-        let drawingPad = max(28, strokeWidth * 8)
+        let drawingPad: CGFloat
+        switch shape.kind {
+        case .rectangle:
+            drawingPad = ceil(max(strokeWidth, 1) / 2) + 1
+        case .arrow:
+            drawingPad = max(28, strokeWidth * 8)
+        case .counter:
+            drawingPad = ShapeRenderer.counterRadius
+        case .text:
+            drawingPad = 0
+        }
         return NSRect(
             x: minX - drawingPad,
             y: minY - drawingPad,
@@ -1321,12 +1343,17 @@ final class CanvasView: NSView, NSDraggingSource {
 
         if source.currentTool == .counter, !isDragOut {
             let point = corePoint(event)
-            source.commit(shape: Shape(
+            var shape = Shape(
                 kind: .counter(number: source.nextCounterNumber()),
                 colorIndex: source.currentColorIndex,
                 start: point,
                 end: point
-            ))
+            )
+            let offset = source.expandCanvasIfNeeded(toFit: expansionRect(for: shape, strokeWidth: source.strokeWidth))
+            if offset != .zero {
+                shape = shape.offsetBy(x: offset.x, y: offset.y)
+            }
+            source.commit(shape: shape)
             return
         }
 
@@ -1459,6 +1486,8 @@ private final class HeaderIconButton: NSControl {
     init(symbolName: String) {
         super.init(frame: .zero)
         wantsLayer = true
+        layer?.cornerRadius = 6
+        layer?.borderWidth = 1
         translatesAutoresizingMaskIntoConstraints = false
         iconView.image = NSImage(systemSymbolName: symbolName, accessibilityDescription: nil)?
             .withSymbolConfiguration(Theme.iconConfiguration)
@@ -1466,10 +1495,10 @@ private final class HeaderIconButton: NSControl {
         iconView.translatesAutoresizingMaskIntoConstraints = false
         addSubview(iconView)
         NSLayoutConstraint.activate([
-            widthAnchor.constraint(equalToConstant: 28),
-            heightAnchor.constraint(equalToConstant: 24),
-            iconView.widthAnchor.constraint(equalToConstant: 15),
-            iconView.heightAnchor.constraint(equalToConstant: 15),
+            widthAnchor.constraint(equalToConstant: 26),
+            heightAnchor.constraint(equalToConstant: 22),
+            iconView.widthAnchor.constraint(equalToConstant: 14),
+            iconView.heightAnchor.constraint(equalToConstant: 14),
             iconView.centerXAnchor.constraint(equalTo: centerXAnchor),
             iconView.centerYAnchor.constraint(equalTo: centerYAnchor),
         ])
@@ -1499,6 +1528,7 @@ private final class HeaderIconButton: NSControl {
     private func updateAppearance() {
         effectiveAppearance.performAsCurrentDrawingAppearance {
             layer?.backgroundColor = isHovered ? Theme.hoverWash.cgColor : NSColor.clear.cgColor
+            layer?.borderColor = (isHovered ? Theme.accent.withAlphaComponent(0.45) : Theme.hairline).cgColor
             iconView.contentTintColor = Theme.ink
         }
     }
@@ -1521,14 +1551,16 @@ private final class HeaderTextButton: NSControl {
         label = NSTextField(labelWithString: title)
         super.init(frame: .zero)
         wantsLayer = true
+        layer?.cornerRadius = 6
+        layer?.borderWidth = 1
         translatesAutoresizingMaskIntoConstraints = false
         label.font = Theme.headerFont
         label.alignment = .center
         label.translatesAutoresizingMaskIntoConstraints = false
         addSubview(label)
         NSLayoutConstraint.activate([
-            widthAnchor.constraint(equalToConstant: 44),
-            heightAnchor.constraint(equalToConstant: 24),
+            widthAnchor.constraint(equalToConstant: 42),
+            heightAnchor.constraint(equalToConstant: 22),
             label.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 4),
             label.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -4),
             label.centerYAnchor.constraint(equalTo: centerYAnchor),
@@ -1559,6 +1591,7 @@ private final class HeaderTextButton: NSControl {
     private func updateAppearance() {
         effectiveAppearance.performAsCurrentDrawingAppearance {
             layer?.backgroundColor = isHovered ? Theme.hoverWash.cgColor : NSColor.clear.cgColor
+            layer?.borderColor = (isHovered ? Theme.accent.withAlphaComponent(0.45) : Theme.hairline).cgColor
             label.textColor = Theme.inkDim
         }
     }
@@ -1601,7 +1634,7 @@ final class AnnotationTextView: NSTextView {
         self.font = font
         textColor = color
         insertionPointColor = color
-        typingAttributes = [.font: font, .foregroundColor: color]
+        typingAttributes = ShapeRenderer.textAttributes(size: font.pointSize, color: color)
         isRichText = false
         drawsBackground = false
         allowsUndo = true

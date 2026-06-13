@@ -411,8 +411,8 @@ final class OverlayView: NSView {
             path.append(NSBezierPath(rect: rect).reversed)
             path.fill()
 
-            // Hazard-tape marching ants: yellow dashes over a black base,
-            // readable on any background. Square corner handles.
+            // Capture marching ants: red dashes over a contrasting base.
+            // Square corner handles.
             Theme.strokeHazardAnts(rect.insetBy(dx: -1, dy: -1), phase: antsPhase, in: ctx)
             Theme.drawHazardHandles(rect)
 
@@ -421,11 +421,11 @@ final class OverlayView: NSView {
                 near: NSPoint(x: rect.midX, y: rect.maxY + 10),
                 in: bounds
             )
-            drawHintFooter([("⎵", "move"), ("esc", "cancel")])
+            drawHintBelowSelection(rect, [("⎵", "move"), ("esc", "cancel")])
         } else {
             bounds.fill()
             // Footer last so the crosshair never slices through it.
-            defer { drawHintFooter([("drag", "select"), ("esc", "cancel")]) }
+            defer { drawHintFooter([("drag", "select"), ("⎵", "move"), ("esc", "cancel")]) }
             // Crosshair with live coordinates.
             let mouse = convert(window?.mouseLocationOutsideOfEventStream ?? .zero, from: nil)
             guard bounds.contains(mouse) else { return }
@@ -469,7 +469,7 @@ final class OverlayView: NSView {
         path.append(NSBezierPath(rect: local).reversed)
         path.fill()
 
-        Theme.yellow.withAlphaComponent(0.14).setFill()
+        Theme.accent.withAlphaComponent(0.16).setFill()
         local.fill()
         Theme.strokeHazardAnts(local.insetBy(dx: 1, dy: 1), phase: antsPhase, in: ctx)
 
@@ -485,6 +485,14 @@ final class OverlayView: NSView {
         ThemeTag.draw(
             ThemeTag.legend(hints),
             near: NSPoint(x: bounds.midX, y: 28),
+            in: bounds
+        )
+    }
+
+    private func drawHintBelowSelection(_ rect: NSRect, _ hints: [(key: String, label: String)]) {
+        ThemeTag.draw(
+            ThemeTag.legend(hints),
+            near: NSPoint(x: rect.midX, y: rect.minY - 38),
             in: bounds
         )
     }
