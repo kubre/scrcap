@@ -42,17 +42,34 @@ private enum PrefFont {
 
 final class SettingsModel: ObservableObject {
     let store: SettingsStore
+    /// A @Published mirror of the store's settings. Using real published state
+    /// (rather than a manual objectWillChange on a computed pass-through) is
+    /// what makes SwiftUI controls reliably reflect changes: @Published emits
+    /// objectWillChange *before* the value changes, as SwiftUI requires.
+    @Published private(set) var settings: AppSettings
 
     init(store: SettingsStore) {
         self.store = store
+        self.settings = store.settings
     }
 
-    var settings: AppSettings { store.settings }
-
     func update(_ mutate: (inout AppSettings) -> Void) {
-        objectWillChange.send()
-        store.update(mutate)
+        let saved = store.update(mutate) // persist + normalize (source of truth)
+        settings = store.settings        // re-sync the published mirror → notifies SwiftUI
+        guard saved else {
+            presentSaveFailure()
+            return
+        }
         NotificationCenter.default.post(name: .scrcapSettingsChanged, object: nil)
+    }
+
+    private func presentSaveFailure() {
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "Preferences were not saved"
+        alert.informativeText = "scrcap could not write settings.json. Check the Application Support folder permissions and try again."
+        alert.addButton(withTitle: "OK")
+        alert.runModal()
     }
 }
 
@@ -209,7 +226,71 @@ final class PreferencesViewController: NSViewController {
             return NSHostingController(rootView: PreferencesPane { AboutTab() })
         }
     }
+
+    #if DEBUG
+    func debugExerciseTabs() -> Bool {
+        tabBar?.debugClickAllTabs() == true && currentPane != nil
+    }
+
+    func debugExerciseDropdowns() -> Bool {
+        tabBar?.select(.capture)
+        view.layoutSubtreeIfNeeded()
+        guard let capturePopups = currentPane?.view.debugDescendants(of: NSPopUpButton.self),
+              let regionPopup = capturePopups.first,
+              let windowPopup = capturePopups.last
+        else { return false }
+
+        regionPopup.selectItem(at: 1)
+        regionPopup.sendAction(regionPopup.action, to: regionPopup.target)
+        windowPopup.selectItem(at: 1)
+        windowPopup.sendAction(windowPopup.action, to: windowPopup.target)
+        view.layoutSubtreeIfNeeded()
+        guard model.settings.behavior(for: .region) == .copyOnly,
+              regionPopup.indexOfSelectedItem == 1,
+              regionPopup.titleOfSelectedItem == "Copy only",
+              model.settings.windowCaptureTarget == .selected,
+              windowPopup.indexOfSelectedItem == 1,
+              windowPopup.titleOfSelectedItem == "Pick on screen"
+        else { return false }
+
+        tabBar?.select(.editor)
+        view.layoutSubtreeIfNeeded()
+        guard let editorPopups = currentPane?.view.debugDescendants(of: NSPopUpButton.self),
+              editorPopups.count == 2
+        else { return false }
+
+        let returnPopup = editorPopups[0]
+        let escPopup = editorPopups[1]
+        returnPopup.selectItem(at: 1)
+        returnPopup.sendAction(returnPopup.action, to: returnPopup.target)
+        escPopup.selectItem(at: 1)
+        escPopup.sendAction(escPopup.action, to: escPopup.target)
+        view.layoutSubtreeIfNeeded()
+
+        return model.settings.textEnterBehavior == .commit
+            && returnPopup.indexOfSelectedItem == 1
+            && returnPopup.titleOfSelectedItem == "Commit text"
+            && model.settings.escBehavior == .closeOnly
+            && escPopup.indexOfSelectedItem == 1
+            && escPopup.titleOfSelectedItem == "Close only"
+    }
+    #endif
 }
+
+#if DEBUG
+private extension NSView {
+    func debugDescendants<T: NSView>(of type: T.Type) -> [T] {
+        var matches: [T] = []
+        for subview in subviews {
+            if let typed = subview as? T {
+                matches.append(typed)
+            }
+            matches.append(contentsOf: subview.debugDescendants(of: type))
+        }
+        return matches
+    }
+}
+#endif
 
 // MARK: - Chrome (brand header + editor-style tab strip)
 
@@ -318,6 +399,17 @@ private final class PrefTabBar: NSView {
         for (key, cell) in cells { cell.isActive = (key == tab) }
         onSelect(tab)
     }
+
+    #if DEBUG
+    func debugClickAllTabs() -> Bool {
+        for tab in PrefTab.allCases {
+            guard let cell = cells[tab] else { return false }
+            cell.mouseDown(with: NSEvent())
+            guard cell.isActive else { return false }
+        }
+        return true
+    }
+    #endif
 
     private func makeDivider() -> NSView {
         let divider = HairlineDivider()
@@ -438,6 +530,8 @@ private final class PrefTabCell: NSControl {
                 iconView.contentTintColor = Theme.ink
                 titleLabel.textColor = Theme.inkDim
             }
+            needsDisplay = true
+            layer?.setNeedsDisplay()
         }
     }
 }
@@ -572,6 +666,59 @@ private struct PrefButtonStyle: ButtonStyle {
     }
 }
 
+private struct PrefPopupOption<Value: Hashable> {
+    let title: String
+    let value: Value
+
+    init(_ title: String, _ value: Value) {
+        self.title = title
+        self.value = value
+    }
+}
+
+private struct PrefPopupPicker<Value: Hashable>: NSViewRepresentable {
+    @Binding var selection: Value
+    let options: [PrefPopupOption<Value>]
+
+    func makeNSView(context: Context) -> NSPopUpButton {
+        let button = NSPopUpButton(frame: .zero, pullsDown: false)
+        button.controlSize = .small
+        button.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+        button.target = context.coordinator
+        button.action = #selector(Coordinator.changed(_:))
+        return button
+    }
+
+    func updateNSView(_ button: NSPopUpButton, context: Context) {
+        context.coordinator.parent = self
+        if button.numberOfItems != options.count || zip(button.itemTitles, options).contains(where: { $0 != $1.title }) {
+            button.removeAllItems()
+            button.addItems(withTitles: options.map(\.title))
+        }
+        if let index = options.firstIndex(where: { $0.value == selection }) {
+            button.selectItem(at: index)
+        }
+    }
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(parent: self)
+    }
+
+    final class Coordinator: NSObject {
+        var parent: PrefPopupPicker
+
+        init(parent: PrefPopupPicker) {
+            self.parent = parent
+        }
+
+        @objc func changed(_ sender: NSPopUpButton) {
+            let index = sender.indexOfSelectedItem
+            guard parent.options.indices.contains(index) else { return }
+            parent.selection = parent.options[index].value
+        }
+    }
+}
+
 private extension View {
     func prefTextField(width: CGFloat) -> some View {
         self
@@ -666,30 +813,50 @@ struct CaptureTab: View {
         PrefSection(title: "After capture") {
             ForEach(Array(CaptureMode.captureOrder.enumerated()), id: \.element.rawValue) { index, mode in
                 PrefRow(label: label(for: mode), divider: index < CaptureMode.captureOrder.count - 1) {
-                    Picker("", selection: binding(for: mode)) {
-                        Text("Open editor").tag(AfterCaptureBehavior.openEditor)
-                        Text("Copy only").tag(AfterCaptureBehavior.copyOnly)
-                        Text("Copy + editor").tag(AfterCaptureBehavior.both)
-                    }
-                    .labelsHidden()
-                    .controlSize(.small)
+                    PrefPopupPicker(selection: binding(for: mode), options: [
+                        PrefPopupOption("Open editor", .openEditor),
+                        PrefPopupOption("Copy only", .copyOnly),
+                        PrefPopupOption("Copy + editor", .both),
+                    ])
                     .fixedSize()
+                }
+            }
+        }
+
+        PrefSection(title: "Capture options") {
+            PrefRow(label: "Include pointer") {
+                Toggle("", isOn: includeCursorBinding).labelsHidden().toggleStyle(.switch).controlSize(.mini)
+            }
+            PrefRow(label: "Delayed capture countdown", divider: false) {
+                HStack(spacing: 4) {
+                    TextField("", value: captureDelayBinding, format: .number)
+                        .multilineTextAlignment(.trailing)
+                        .prefTextField(width: 44)
+                    Stepper("", value: captureDelayBinding, in: AppSettings.minCaptureDelay...AppSettings.maxCaptureDelay)
+                        .labelsHidden()
+                    Text("s").font(PrefFont.mono).foregroundStyle(.secondary)
                 }
             }
         }
 
         PrefSection(title: "Window capture") {
             PrefRow(label: "Target window") {
-                Picker("", selection: windowTargetBinding) {
-                    Text("Frontmost").tag(WindowCaptureTarget.active)
-                    Text("Pick on screen").tag(WindowCaptureTarget.selected)
-                }
-                .labelsHidden()
-                .controlSize(.small)
+                PrefPopupPicker(selection: windowTargetBinding, options: [
+                    PrefPopupOption("Frontmost", .active),
+                    PrefPopupOption("Pick on screen", .selected),
+                ])
                 .fixedSize()
             }
-            PrefRow(label: "Include window shadow", divider: false) {
+            PrefRow(label: "Include window shadow") {
                 Toggle("", isOn: shadowBinding).labelsHidden().toggleStyle(.switch).controlSize(.mini)
+            }
+            PrefRow(label: "Transparent background") {
+                Toggle("", isOn: windowTransparentBinding).labelsHidden().toggleStyle(.switch).controlSize(.mini)
+            }
+            PrefRow(label: "Background color", divider: false) {
+                ColorPicker("", selection: windowBackgroundBinding, supportsOpacity: false)
+                    .labelsHidden()
+                    .disabled(model.settings.windowBackgroundTransparent)
             }
         }
 
@@ -714,6 +881,20 @@ struct CaptureTab: View {
         )
     }
 
+    private var includeCursorBinding: Binding<Bool> {
+        Binding(
+            get: { model.settings.includeCursor },
+            set: { value in model.update { $0.includeCursor = value } }
+        )
+    }
+
+    private var captureDelayBinding: Binding<Int> {
+        Binding(
+            get: { model.settings.captureDelaySeconds },
+            set: { value in model.update { $0.captureDelaySeconds = value } }
+        )
+    }
+
     private func label(for mode: CaptureMode) -> String {
         switch mode {
         case .fullscreen: return "Fullscreen"
@@ -734,6 +915,20 @@ struct CaptureTab: View {
         Binding(
             get: { model.settings.includeWindowShadow },
             set: { value in model.update { $0.includeWindowShadow = value } }
+        )
+    }
+
+    private var windowTransparentBinding: Binding<Bool> {
+        Binding(
+            get: { model.settings.windowBackgroundTransparent },
+            set: { value in model.update { $0.windowBackgroundTransparent = value } }
+        )
+    }
+
+    private var windowBackgroundBinding: Binding<Color> {
+        Binding(
+            get: { Color(nsColor: NSColor(hex: model.settings.windowBackgroundHex) ?? .white) },
+            set: { value in model.update { $0.windowBackgroundHex = NSColor(value).hexString } }
         )
     }
 
@@ -861,25 +1056,18 @@ struct EditorTab: View {
     var body: some View {
         PrefSection(title: "Palette") {
             PrefRow(label: "Tool colors", divider: false) {
-                VStack(alignment: .trailing, spacing: 6) {
-                    HStack(spacing: 8) {
-                        ForEach(0..<4, id: \.self) { index in
-                            paletteSlot(index)
-                        }
+                HStack(spacing: 8) {
+                    ForEach(0..<AppSettings.paletteSlotCount, id: \.self) { index in
+                        paletteSlot(index)
                     }
-                    HStack(spacing: 8) {
-                        ForEach(4..<7, id: \.self) { index in
-                            paletteSlot(index)
-                        }
-                        Button("Reset") {
-                            model.update { $0.paletteHex = AppSettings.defaultPalette }
-                        }
-                        .buttonStyle(PrefButtonStyle())
+                    Button("Reset") {
+                        model.update { $0.paletteHex = AppSettings.defaultPalette }
                     }
+                    .buttonStyle(PrefButtonStyle())
                 }
             }
         }
-        PrefCaption("keys 1–7 select colors · slot 1 is the default for each new capture")
+        PrefCaption("keys 1–5 select colors · slot 1 is the default for each new capture")
 
         PrefSection(title: "Drawing") {
             PrefRow(label: "Default stroke width", divider: false) {
@@ -916,12 +1104,10 @@ struct EditorTab: View {
                 }
             }
             PrefRow(label: "Return while typing", divider: false) {
-                Picker("", selection: textEnterBinding) {
-                    Text("New line").tag(TextEnterBehavior.newline)
-                    Text("Commit text").tag(TextEnterBehavior.commit)
-                }
-                .labelsHidden()
-                .controlSize(.small)
+                PrefPopupPicker(selection: textEnterBinding, options: [
+                    PrefPopupOption("New line", .newline),
+                    PrefPopupOption("Commit text", .commit),
+                ])
                 .fixedSize()
             }
         }
@@ -942,12 +1128,10 @@ struct EditorTab: View {
 
         PrefSection(title: "Close behavior") {
             PrefRow(label: "Esc key", divider: false) {
-                Picker("", selection: escBinding) {
-                    Text("Copy + close").tag(EscBehavior.copyAndClose)
-                    Text("Close only").tag(EscBehavior.closeOnly)
-                }
-                .labelsHidden()
-                .controlSize(.small)
+                PrefPopupPicker(selection: escBinding, options: [
+                    PrefPopupOption("Copy + close", .copyAndClose),
+                    PrefPopupOption("Close only", .closeOnly),
+                ])
                 .fixedSize()
             }
         }
@@ -1024,15 +1208,19 @@ struct OutputTab: View {
     var body: some View {
         PrefSection(title: "Files") {
             PrefRow(label: "Save folder") {
-                TextField("~/Desktop", text: saveFolderBinding)
-                    .prefTextField(width: 200)
+                HStack(spacing: 6) {
+                    TextField("~/Desktop", text: saveFolderBinding)
+                        .prefTextField(width: 150)
+                    Button("Choose…") { chooseSaveFolder() }
+                        .buttonStyle(PrefButtonStyle())
+                }
             }
             PrefRow(label: "Filename pattern", divider: false) {
                 TextField("", text: patternBinding)
                     .prefTextField(width: 200)
             }
         }
-        PrefCaption("tokens: {date} {time} · e.g. scrcap-2026-06-11-14.32.05.png")
+        PrefCaption("tokens: {date} {time} · ⌘S saves here · ⇧⌘S to choose each time")
 
         PrefSection(title: "Image export") {
             PrefRow(label: "PNG scale", divider: false) {
@@ -1046,7 +1234,33 @@ struct OutputTab: View {
                 .fixedSize()
             }
         }
+
+        PrefSection(title: "Feedback") {
+            PrefRow(label: "Notify when copied to clipboard", divider: false) {
+                Toggle("", isOn: copyNotificationBinding).labelsHidden().toggleStyle(.switch).controlSize(.mini)
+            }
+        }
         PrefCaption("settings: ~/Library/Application Support/scrcap/settings.json — human-readable on purpose")
+    }
+
+    // Stored inverted (suppress…) so the default of all-zero settings = notifications on.
+    private var copyNotificationBinding: Binding<Bool> {
+        Binding(
+            get: { !model.settings.suppressCopyNotification },
+            set: { value in model.update { $0.suppressCopyNotification = !value } }
+        )
+    }
+
+    private func chooseSaveFolder() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.canCreateDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.directoryURL = Exporter.defaultSaveFolder(settings: model.settings)
+        if panel.runModal() == .OK, let url = panel.url {
+            model.update { $0.saveFolder = url.path }
+        }
     }
 
     private var saveFolderBinding: Binding<String> {

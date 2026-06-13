@@ -76,10 +76,11 @@ public enum AppAction: String, Codable, Sendable {
     case captureWindow
     case captureFullscreen
     case captureScrolling
+    case captureDelayed
     case repeatLast
 
     public static let shortcutOrder: [AppAction] = [
-        .captureRegion, .captureWindow, .captureFullscreen, .captureScrolling, .repeatLast,
+        .captureRegion, .captureWindow, .captureFullscreen, .captureScrolling, .captureDelayed, .repeatLast,
     ]
 
     public var title: String {
@@ -88,6 +89,7 @@ public enum AppAction: String, Codable, Sendable {
         case .captureRegion: return "Capture Region"
         case .captureWindow: return "Capture Window"
         case .captureScrolling: return "Scrolling Capture"
+        case .captureDelayed: return "Delayed Region Capture"
         case .repeatLast: return "Repeat Last Capture"
         }
     }
@@ -102,6 +104,7 @@ public struct Keymap: Codable, Equatable, Sendable {
         .captureWindow: KeyChord(key: "2", modifiers: [.option, .shift]),
         .captureFullscreen: KeyChord(key: "3", modifiers: [.option, .shift]),
         .captureScrolling: KeyChord(key: "4", modifiers: [.option, .shift]),
+        .captureDelayed: KeyChord(key: "5", modifiers: [.option, .shift]),
         .repeatLast: KeyChord(key: "r", modifiers: [.option, .shift]),
     ])
 

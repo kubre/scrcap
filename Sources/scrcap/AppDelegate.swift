@@ -16,12 +16,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var preferences: PreferencesWindowController!
     private var statusItem: NSStatusItem!
     private var scrollCapture: ScrollCaptureController?
+    private var onboarding: OnboardingWindowController?
+    private let countdown = CountdownController()
     private let firstLaunchNoticeShownKey = "hasShownFirstLaunchMenuBarNotice"
 
     /// For repeat-last (⌥⇧R): the previous region, or the previous mode.
     private enum LastCapture {
         case region(NSRect, NSScreen)
-        case window(CGWindowID)
+        case window(PickableWindow)
         case fullscreen(NSScreen)
     }
     private var lastCapture: LastCapture?
@@ -181,10 +183,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 contentRect: NSRect(x: 0, y: 0, width: 720, height: 500),
                 styleMask: .borderless, backing: .buffered, defer: false
             )
-            prefsHost.contentView = NSHostingView(
-                rootView: PreferencesView(model: SettingsModel(store: self.settingsStore))
+            let prefsStore = SettingsStore(
+                directory: FileManager.default.temporaryDirectory
+                    .appendingPathComponent("scrcap-ui-smoke-\(UUID().uuidString)", isDirectory: true)
             )
+            let prefsController = PreferencesViewController(model: SettingsModel(store: prefsStore))
+            prefsHost.contentViewController = prefsController
             prefsHost.layoutIfNeeded()
+            guard prefsController.debugExerciseTabs() else {
+                print("SMOKE FAIL: preferences tab clicks")
+                exit(1)
+            }
+            guard prefsController.debugExerciseDropdowns() else {
+                print("SMOKE FAIL: preferences dropdowns")
+                exit(1)
+            }
             if let view = prefsHost.contentView {
                 writePNG(view, "prefs")
             }
@@ -233,14 +246,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func presentFirstLaunchNotice() {
-        let alert = NSAlert()
-        alert.alertStyle = .informational
-        alert.messageText = "scrcap is running"
-        alert.informativeText = "scrcap lives in the menu bar at the top of your screen. Click the camera icon there for captures, preferences, or quit."
-        alert.addButton(withTitle: "OK")
-
-        NSApp.activate(ignoringOtherApps: true)
-        alert.runModal()
+        let regionShortcut = settingsStore.settings.keymap
+            .chord(for: .captureRegion)?.displayValue ?? "⌥⇧1"
+        let controller = OnboardingWindowController(
+            regionShortcut: regionShortcut,
+            onEnablePermission: { [weak self] in _ = self?.ensureScreenPermission() },
+            onOpenPreferences: { [weak self] in self?.preferences.show() }
+        )
+        onboarding = controller
+        controller.show()
     }
 
     private func rebuildMenu() {
@@ -272,6 +286,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 menu.addItem(item(action, selector: #selector(menuCaptureFullscreen)))
             case .captureScrolling:
                 menu.addItem(item(action, selector: #selector(menuCaptureScrolling)))
+            case .captureDelayed:
+                menu.addItem(item(action, selector: #selector(menuCaptureDelayed)))
             case .repeatLast:
                 menu.addItem(item(action, selector: #selector(menuRepeatLast)))
             }
@@ -296,6 +312,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func menuCaptureWindow() { perform(.captureWindow) }
     @objc private func menuCaptureFullscreen() { perform(.captureFullscreen) }
     @objc private func menuCaptureScrolling() { perform(.captureScrolling) }
+    @objc private func menuCaptureDelayed() { perform(.captureDelayed) }
     @objc private func menuRepeatLast() { perform(.repeatLast) }
     @objc private func menuPreferences() { preferences.show() }
     @objc private func menuCheckForUpdates() { checkForUpdates() }
@@ -370,18 +387,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func perform(_ action: AppAction) {
         guard ensureScreenPermission() else { return }
         guard !overlay.isActive else { return }
+        captureEngine.includeCursor = settingsStore.settings.includeCursor
+        captureEngine.windowBackground = settingsStore.settings.windowBackgroundTransparent
+            ? nil
+            : (NSColor(hex: settingsStore.settings.windowBackgroundHex) ?? .white)
 
         switch action {
         case .captureFullscreen:
             let screen = GeometryMapper.screenUnderMouse()
             lastCapture = .fullscreen(screen)
-            runCapture(mode: .fullscreen) { try await self.captureEngine.captureDisplay(screen: screen) }
+            runCapture(mode: .fullscreen, metadata: { .fullscreen(on: screen) }) {
+                try await self.captureEngine.captureDisplay(screen: screen)
+            }
 
         case .captureRegion:
             overlay.beginRegionSelection { [weak self] rect, screen in
                 guard let self else { return }
                 self.lastCapture = .region(rect, screen)
-                self.runCapture(mode: .region) { try await self.captureEngine.captureRegion(rect, on: screen) }
+                self.runCapture(mode: .region, metadata: { .region(rect, on: screen) }) {
+                    try await self.captureEngine.captureRegion(rect, on: screen)
+                }
             }
 
         case .captureWindow:
@@ -399,8 +424,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case .captureScrolling:
             startScrollingCapture()
 
+        case .captureDelayed:
+            startDelayedCapture()
+
         case .repeatLast:
             repeatLastCapture()
+        }
+    }
+
+    private func startDelayedCapture() {
+        overlay.beginRegionSelection { [weak self] rect, screen in
+            guard let self else { return }
+            self.lastCapture = .region(rect, screen)
+            let seconds = self.settingsStore.settings.captureDelaySeconds
+            self.countdown.start(seconds: seconds, on: screen) { [weak self] in
+                guard let self else { return }
+                self.runCapture(mode: .region, metadata: { .region(rect, on: screen) }) {
+                    try await self.captureEngine.captureRegion(rect, on: screen)
+                }
+            }
         }
     }
 
@@ -411,9 +453,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func captureWindow(_ window: PickableWindow) {
-        lastCapture = .window(window.windowID)
+        lastCapture = .window(window)
         let includeShadow = settingsStore.settings.includeWindowShadow
-        runCapture(mode: .window) {
+        runCapture(mode: .window, metadata: { .window(window) }) {
             try await self.captureEngine.captureWindow(
                 windowID: window.windowID,
                 includeShadow: includeShadow
@@ -424,14 +466,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func repeatLastCapture() {
         switch lastCapture {
         case .region(let rect, let screen):
-            runCapture(mode: .region) { try await self.captureEngine.captureRegion(rect, on: screen) }
-        case .window(let id):
+            runCapture(mode: .region, metadata: { .region(rect, on: screen) }) {
+                try await self.captureEngine.captureRegion(rect, on: screen)
+            }
+        case .window(let window):
             let includeShadow = settingsStore.settings.includeWindowShadow
-            runCapture(mode: .window) {
-                try await self.captureEngine.captureWindow(windowID: id, includeShadow: includeShadow)
+            runCapture(mode: .window, metadata: { .window(window) }) {
+                try await self.captureEngine.captureWindow(windowID: window.windowID, includeShadow: includeShadow)
             }
         case .fullscreen(let screen):
-            runCapture(mode: .fullscreen) { try await self.captureEngine.captureDisplay(screen: screen) }
+            runCapture(mode: .fullscreen, metadata: { .fullscreen(on: screen) }) {
+                try await self.captureEngine.captureDisplay(screen: screen)
+            }
         case nil:
             break // nothing captured yet this session
         }
@@ -441,6 +487,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard ScrollCaptureController.ensureAccessibility() else { return }
         overlay.beginRegionSelection { [weak self] rect, screen in
             guard let self else { return }
+            let metadata = CaptureMetadata.region(rect, on: screen, mode: .scrolling)
             let controller = ScrollCaptureController(capture: self.captureEngine, settingsStore: self.settingsStore)
             self.scrollCapture = controller
             controller.run(rect: rect, screen: screen) { [weak self] result in
@@ -448,7 +495,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self.scrollCapture = nil
                 switch result {
                 case .success(let capture):
-                    self.deliver(capture, mode: .scrolling)
+                    self.deliver(capture.withMetadata(metadata), mode: .scrolling)
                 case .failure(let error):
                     self.presentError(error)
                 }
@@ -456,11 +503,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    private func runCapture(mode: CaptureMode, _ body: @escaping () async throws -> CaptureResult) {
+    private func runCapture(
+        mode: CaptureMode,
+        metadata: @escaping () -> CaptureMetadata? = { nil },
+        _ body: @escaping () async throws -> CaptureResult
+    ) {
         Task { @MainActor in
             do {
                 let result = try await body()
-                self.deliver(result, mode: mode)
+                self.deliver(result.withMetadata(metadata()), mode: mode)
             } catch {
                 self.presentError(error)
             }
@@ -470,7 +521,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func deliver(_ capture: CaptureResult, mode: CaptureMode) {
         let behavior = settingsStore.settings.behavior(for: mode)
         if behavior == .copyOnly || behavior == .both {
-            if !Exporter.copyToClipboard(capture.image, pointScale: capture.scale) {
+            if Exporter.copyToClipboard(capture.image, pointScale: capture.scale, metadata: capture.metadata) {
+                if !settingsStore.settings.suppressCopyNotification {
+                    Notifier.copiedToClipboard()
+                }
+            } else {
                 presentError(ExportError.clipboardWriteFailed)
             }
         }

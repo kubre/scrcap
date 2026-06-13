@@ -9,6 +9,9 @@ struct PickableWindow {
     let windowID: CGWindowID
     /// Cocoa global coordinates.
     let frame: NSRect
+    let ownerName: String
+    let ownerPID: Int?
+    let name: String
     let title: String
 }
 
@@ -23,16 +26,23 @@ final class OverlayController {
     private var onRegion: ((NSRect, NSScreen) -> Void)?
     private var onWindow: ((PickableWindow) -> Void)?
     private var pickableWindows: [PickableWindow] = []
+    private var screenParametersObserver: NSObjectProtocol?
 
     var isActive: Bool { windows.contains { $0.isVisible } }
 
     init() {
         rebuildWindows()
-        NotificationCenter.default.addObserver(
+        screenParametersObserver = NotificationCenter.default.addObserver(
             forName: NSApplication.didChangeScreenParametersNotification,
             object: nil, queue: .main
         ) { [weak self] _ in
             self?.rebuildWindows()
+        }
+    }
+
+    deinit {
+        if let screenParametersObserver {
+            NotificationCenter.default.removeObserver(screenParametersObserver)
         }
     }
 
@@ -117,6 +127,9 @@ final class OverlayController {
             return PickableWindow(
                 windowID: id,
                 frame: frame,
+                ownerName: owner,
+                ownerPID: pid,
+                name: name,
                 title: name.isEmpty ? owner : "\(owner) — \(name)"
             )
         }

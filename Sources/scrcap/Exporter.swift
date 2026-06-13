@@ -8,14 +8,14 @@ import ScrcapCore
 
 enum ExportError: LocalizedError {
     case clipboardWriteFailed
-    case pngWriteFailed(URL)
+    case pngEncodeFailed
 
     var errorDescription: String? {
         switch self {
         case .clipboardWriteFailed:
             return "Could not write the screenshot to the clipboard."
-        case .pngWriteFailed(let url):
-            return "Could not save the PNG to \(url.path)."
+        case .pngEncodeFailed:
+            return "Could not encode the screenshot as PNG."
         }
     }
 }
@@ -63,7 +63,7 @@ enum Exporter {
             let nsContext = NSGraphicsContext(cgContext: ctx, flipped: true)
             NSGraphicsContext.saveGraphicsState()
             NSGraphicsContext.current = nsContext
-            ShapeRenderer.draw(shapes, palette: palette, strokeWidth: strokeWidth)
+            ShapeRenderer.draw(shapes, palette: palette, strokeWidth: strokeWidth, sourceImage: bitmap, sourceScale: scale)
             NSGraphicsContext.restoreGraphicsState()
         }
 
@@ -122,7 +122,11 @@ enum Exporter {
     }
 
     @discardableResult
-    static func copyToClipboard(_ image: CGImage, pointScale: CGFloat) -> Bool {
+    static func copyToClipboard(
+        _ image: CGImage,
+        pointScale: CGFloat,
+        metadata: CaptureMetadata? = nil
+    ) -> Bool {
         guard let png = pngData(image, pointScale: pointScale) else { return false }
         let rep = NSBitmapImageRep(cgImage: image)
         // Point size ≠ pixel size on Retina; the TIFF must say so too or
@@ -133,18 +137,29 @@ enum Exporter {
         )
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
-        pasteboard.declareTypes([.png, .tiff], owner: nil)
+
+        let metadataJSON = metadata?.privacyScopedClipboardData(image: image, pointScale: pointScale)
+
+        var types: [NSPasteboard.PasteboardType] = [.png, .tiff]
+        if metadataJSON != nil {
+            types.append(CaptureMetadata.pasteboardType)
+        }
+        pasteboard.declareTypes(types, owner: nil)
+
         let wrotePNG = pasteboard.setData(png, forType: .png)
         if let tiff = rep.tiffRepresentation {
             pasteboard.setData(tiff, forType: .tiff)
         }
+        if let data = metadataJSON {
+            pasteboard.setData(data, forType: CaptureMetadata.pasteboardType)
+        }
         return wrotePNG
     }
 
-    @discardableResult
-    static func writePNG(_ image: CGImage, pointScale: CGFloat, to url: URL) -> Bool {
-        guard let png = pngData(image, pointScale: pointScale) else { return false }
-        return (try? png.write(to: url, options: .atomic)) != nil
+    /// Throws so callers can surface the real OS reason (permission, disk full…).
+    static func writePNG(_ image: CGImage, pointScale: CGFloat, to url: URL) throws {
+        guard let png = pngData(image, pointScale: pointScale) else { throw ExportError.pngEncodeFailed }
+        try png.write(to: url, options: .atomic)
     }
 
     /// Expands {date} and {time} tokens, e.g. "scrcap-2026-06-11-14.32.05".
@@ -163,8 +178,29 @@ enum Exporter {
 
     /// Temp PNG used as the payload for drag-out.
     static func tempFileForDrag(_ image: CGImage, pattern: String, pointScale: CGFloat) -> URL? {
-        let url = FileManager.default.temporaryDirectory
-            .appendingPathComponent(filename(pattern: pattern))
-        return writePNG(image, pointScale: pointScale, to: url) ? url : nil
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("scrcap-drag", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        cleanOldDragFiles(in: dir)
+
+        let stem = (filename(pattern: pattern) as NSString).deletingPathExtension
+        let url = dir.appendingPathComponent("\(stem)-\(UUID().uuidString).png")
+        return (try? writePNG(image, pointScale: pointScale, to: url)) != nil ? url : nil
+    }
+
+    private static func cleanOldDragFiles(in dir: URL) {
+        guard let files = try? FileManager.default.contentsOfDirectory(
+            at: dir,
+            includingPropertiesForKeys: [.contentModificationDateKey],
+            options: [.skipsHiddenFiles]
+        ) else { return }
+
+        let cutoff = Date().addingTimeInterval(-24 * 60 * 60)
+        for file in files {
+            let values = try? file.resourceValues(forKeys: [.contentModificationDateKey])
+            if (values?.contentModificationDate ?? .distantPast) < cutoff {
+                try? FileManager.default.removeItem(at: file)
+            }
+        }
     }
 }

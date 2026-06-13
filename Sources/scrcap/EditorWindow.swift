@@ -6,7 +6,7 @@ import AppKit
 import ScrcapCore
 
 enum EditorTool: CaseIterable {
-    case arrow, rectangle, counter, text, crop
+    case arrow, rectangle, counter, text, pixelate, crop
 }
 
 final class EditorWindowController: NSObject, NSWindowDelegate {
@@ -16,13 +16,27 @@ final class EditorWindowController: NSObject, NSWindowDelegate {
     private let settingsStore: SettingsStore
     private var bitmap: CGImage
     private let scale: CGFloat
+    private let captureMetadata: CaptureMetadata?
     private var stack = AnnotationStack()
+    /// Editor-level undo history. Snapshots the whole document (base bitmap +
+    /// annotations) so undo can reverse bitmap-level operations — crop and
+    /// canvas extend — which replace `bitmap` outside the AnnotationStack
+    /// cursor and so were previously unreachable by undo.
+    private var undoStack: [DocumentSnapshot] = []
+    private var redoStack: [DocumentSnapshot] = []
+    /// State captured at the first mutation of the current interaction. Canvas
+    /// auto-expand fires before the shape commit within a single drag, so
+    /// grouping from the first mutation keeps "draw past the edge" one undo step.
+    private var pendingUndoBase: DocumentSnapshot?
     private var onClose: (() -> Void)?
     private var pendingZoomWindowPoint: NSPoint?
+    /// When true, mutating `zoomScale` won't push an incremental zoom update —
+    /// used by resetZoom so only the clean "fit & center" pass runs.
+    private var suppressZoomUpdate = false
     private var zoomScale: CGFloat = 1 {
         didSet {
             zoomScale = min(max(zoomScale, 0.25), 4)
-            guard zoomScale != oldValue else { return }
+            guard !suppressZoomUpdate, zoomScale != oldValue else { return }
             window.updateZoomScale(zoomScale, around: pendingZoomWindowPoint)
             pendingZoomWindowPoint = nil
         }
@@ -32,10 +46,15 @@ final class EditorWindowController: NSObject, NSWindowDelegate {
         didSet {
             if oldValue == .text { canvas.commitTextEditing() }
             toolbar.select(tool: tool)
+            canvas.refreshToolCursor()
         }
     }
     private var colorIndex = 0 {
         didSet { toolbar.select(color: colorIndex) }
+    }
+    /// Drawing size for new shapes (z/x/c). Resets to small per editor session.
+    private var annotationSize: ShapeSize = .small {
+        didSet { toolbar.select(size: annotationSize) }
     }
 
     /// Strong self-retain while the window is open (no window controller chain).
@@ -44,6 +63,7 @@ final class EditorWindowController: NSObject, NSWindowDelegate {
     init(capture: CaptureResult, settingsStore: SettingsStore, onClose: (() -> Void)? = nil) {
         self.bitmap = capture.image
         self.scale = capture.scale
+        self.captureMetadata = capture.metadata
         self.settingsStore = settingsStore
         self.onClose = onClose
 
@@ -54,10 +74,14 @@ final class EditorWindowController: NSObject, NSWindowDelegate {
         canvas = CanvasView(bitmap: bitmap, pointSize: pointSize)
         toolbar = EditorToolbar(
             palette: settingsStore.settings.paletteHex,
-            escCopies: settingsStore.settings.escBehavior == .copyAndClose,
             textEnterBehavior: settingsStore.settings.textEnterBehavior
         )
-        window = EditorWindow(canvas: canvas, toolbar: toolbar, imagePointSize: pointSize)
+        window = EditorWindow(
+            canvas: canvas,
+            toolbar: toolbar,
+            imagePointSize: pointSize,
+            escCopies: settingsStore.settings.escBehavior == .copyAndClose
+        )
 
         super.init()
 
@@ -72,11 +96,13 @@ final class EditorWindowController: NSObject, NSWindowDelegate {
         }
         toolbar.onTool = { [weak self] in self?.tool = $0 }
         toolbar.onColor = { [weak self] in self?.colorIndex = $0 }
-        toolbar.onUndo = { [weak self] in self?.undo() }
-        toolbar.onSave = { [weak self] in self?.saveAs() }
-        toolbar.onDone = { [weak self] in self?.finish() }
+        toolbar.onSize = { [weak self] in self?.annotationSize = $0 }
+        window.onUndo = { [weak self] in self?.undo() }
+        window.onSave = { [weak self] in self?.quickSave() }
+        window.onDone = { [weak self] in self?.finish() }
         toolbar.select(tool: tool)
         toolbar.select(color: colorIndex)
+        toolbar.select(size: annotationSize)
     }
 
     func show() {
@@ -102,7 +128,7 @@ final class EditorWindowController: NSObject, NSWindowDelegate {
                 copyToClipboard()
                 return true
             case "s":
-                saveAs()
+                if mods.contains(.shift) { saveAs() } else { quickSave() }
                 return true
             case "+", "=":
                 zoomIn()
@@ -137,8 +163,12 @@ final class EditorWindowController: NSObject, NSWindowDelegate {
         case "w": tool = .rectangle; return true
         case "e": tool = .counter; return true
         case "r": tool = .text; return true
-        case "t": tool = .crop; return true
-        case "1", "2", "3", "4", "5", "6", "7":
+        case "t": tool = .pixelate; return true
+        case "y": tool = .crop; return true
+        case "z": annotationSize = .small; return true
+        case "x": annotationSize = .medium; return true
+        case "c": annotationSize = .large; return true
+        case "1", "2", "3", "4", "5":
             colorIndex = Int(chars)! - 1
             return true
         default:
@@ -148,12 +178,54 @@ final class EditorWindowController: NSObject, NSWindowDelegate {
 
     private func undo() {
         canvas.cancelTextEditing()
-        stack.undo()
-        canvas.needsDisplay = true
+        pendingUndoBase = nil
+        guard let previous = undoStack.popLast() else { return }
+        redoStack.append(currentSnapshot())
+        apply(previous)
     }
 
     private func redo() {
-        stack.redo()
+        canvas.cancelTextEditing()
+        pendingUndoBase = nil
+        guard let next = redoStack.popLast() else { return }
+        undoStack.append(currentSnapshot())
+        apply(next)
+    }
+
+    /// Full editor document state: the base image plus the vector annotations.
+    private struct DocumentSnapshot {
+        let bitmap: CGImage
+        let stack: AnnotationStack
+    }
+
+    private func currentSnapshot() -> DocumentSnapshot {
+        DocumentSnapshot(bitmap: bitmap, stack: stack)
+    }
+
+    /// Capture the pre-mutation state once per interaction. A no-op if a step
+    /// is already open, so an auto-expand and the shape commit that follows it
+    /// share a single base and undo together.
+    private func beginUndoStep() {
+        if pendingUndoBase == nil { pendingUndoBase = currentSnapshot() }
+    }
+
+    /// Close the open undo step, recording it so it can be reversed.
+    private func commitUndoStep() {
+        guard let base = pendingUndoBase else { return }
+        pendingUndoBase = nil
+        undoStack.append(base)
+        redoStack.removeAll()
+    }
+
+    private func apply(_ snapshot: DocumentSnapshot) {
+        bitmap = snapshot.bitmap
+        stack = snapshot.stack
+        let pointSize = NSSize(
+            width: CGFloat(bitmap.width) / scale,
+            height: CGFloat(bitmap.height) / scale
+        )
+        canvas.replaceBitmap(bitmap, pointSize: pointSize)
+        window.updateImagePointSize(pointSize)
         canvas.needsDisplay = true
     }
 
@@ -166,10 +238,13 @@ final class EditorWindowController: NSObject, NSWindowDelegate {
     }
 
     private func resetZoom() {
-        // zoomScale.didSet skips window.updateZoomScale when the value is already
-        // 1, so crop or canvas-extend followed by "100%" would silently no-op.
-        // Always push the update so the viewport re-centers on the current canvas.
+        // Sync our zoom to 1 silently, then let the window do a single clean
+        // "fit & center the image" pass. Doing both the incremental zoom update
+        // (which re-centers around the viewport midpoint) and the reset pass
+        // fought each other, so zooming out then pressing 100% landed off-center.
+        suppressZoomUpdate = true
         zoomScale = 1
+        suppressZoomUpdate = false
         window.resetZoom()
     }
 
@@ -218,13 +293,37 @@ final class EditorWindowController: NSObject, NSWindowDelegate {
 
     @discardableResult
     private func copyToClipboard() -> Bool {
-        let copied = Exporter.copyToClipboard(flattened(), pointScale: exportPointScale)
-        if !copied {
+        let copied = Exporter.copyToClipboard(
+            flattened(),
+            pointScale: exportPointScale,
+            metadata: captureMetadata
+        )
+        if copied {
+            if !settingsStore.settings.suppressCopyNotification {
+                Notifier.copiedToClipboard()
+            }
+        } else {
             presentError(ExportError.clipboardWriteFailed)
         }
         return copied
     }
 
+    /// ⌘S: write straight to the default folder with the filename template,
+    /// then confirm with a toast and close. No panel, no Finder.
+    private func quickSave() {
+        let settings = settingsStore.settings
+        let folder = Exporter.defaultSaveFolder(settings: settings)
+        let url = folder.appendingPathComponent(Exporter.filename(pattern: settings.filenamePattern))
+        do {
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            try Exporter.writePNG(flattened(), pointScale: exportPointScale, to: url)
+            finishSave(to: url)
+        } catch {
+            presentError(error)
+        }
+    }
+
+    /// ⇧⌘S: choose the location with a save panel, then confirm and close.
     private func saveAs() {
         let settings = settingsStore.settings
         let panel = NSSavePanel()
@@ -234,10 +333,22 @@ final class EditorWindowController: NSObject, NSWindowDelegate {
         panel.nameFieldStringValue = Exporter.filename(pattern: settings.filenamePattern)
         panel.beginSheetModal(for: window) { [weak self] response in
             guard let self, response == .OK, let url = panel.url else { return }
-            if !Exporter.writePNG(self.flattened(), pointScale: self.exportPointScale, to: url) {
-                self.presentError(ExportError.pngWriteFailed(url))
+            do {
+                try Exporter.writePNG(self.flattened(), pointScale: self.exportPointScale, to: url)
+                self.finishSave(to: url)
+            } catch {
+                self.presentError(error)
             }
         }
+    }
+
+    /// Confirm a successful save with the same toast as copy (showing the path)
+    /// and close the editor.
+    private func finishSave(to url: URL) {
+        if !settingsStore.settings.suppressCopyNotification {
+            Notifier.saved(to: url)
+        }
+        close()
     }
 
     private func presentError(_ error: Error) {
@@ -298,6 +409,7 @@ final class EditorWindowController: NSObject, NSWindowDelegate {
 protocol CanvasDataSource: AnyObject {
     var currentTool: EditorTool { get }
     var currentColorIndex: Int { get }
+    var currentSize: ShapeSize { get }
     var visibleShapes: [Shape] { get }
     var palette: [String] { get }
     var strokeWidth: CGFloat { get }
@@ -307,6 +419,7 @@ protocol CanvasDataSource: AnyObject {
     func commit(shape: Shape)
     func commitCrop(_ rect: NSRect)
     func expandCanvasIfNeeded(toFit rect: NSRect) -> NSPoint
+    func endInteraction()
     func nextCounterNumber() -> Int
     func dragOutImage() -> (image: CGImage, pattern: String, pointScale: CGFloat)
 }
@@ -314,16 +427,28 @@ protocol CanvasDataSource: AnyObject {
 extension EditorWindowController: CanvasDataSource {
     var currentTool: EditorTool { tool }
     var currentColorIndex: Int { colorIndex }
+    var currentSize: ShapeSize { annotationSize }
     var visibleShapes: [Shape] { Array(stack.visible) }
     var palette: [String] { settingsStore.settings.paletteHex }
+    // Base stroke width; ShapeRenderer scales it per shape by the shape's size.
     var strokeWidth: CGFloat { settingsStore.settings.strokeWidth }
-    var textSize: CGFloat { settingsStore.settings.textSize }
+    // Text bakes its scaled point size at creation, so this is pre-scaled.
+    var textSize: CGFloat { settingsStore.settings.textSize * CGFloat(annotationSize.scale) }
     var textEnterBehavior: TextEnterBehavior { settingsStore.settings.textEnterBehavior }
     var autoExpandCanvas: Bool { settingsStore.settings.autoExpandCanvas }
 
     func commit(shape: Shape) {
+        beginUndoStep()
         stack.append(shape)
         canvas.needsDisplay = true
+        commitUndoStep()
+    }
+
+    func endInteraction() {
+        // Flush a step left open by an auto-expand that never reached a shape
+        // commit (e.g. a drag that grew the canvas but released too small to
+        // draw). Normal commits self-close, so this is usually a no-op.
+        commitUndoStep()
     }
 
     func commitCrop(_ rect: NSRect) {
@@ -334,6 +459,7 @@ extension EditorWindowController: CanvasDataSource {
               let cropped = bitmap.cropping(to: crop.pixels)
         else { return }
 
+        beginUndoStep()
         bitmap = cropped
         stack = shiftedStack(afterCroppingTo: crop.points)
 
@@ -343,6 +469,7 @@ extension EditorWindowController: CanvasDataSource {
         )
         canvas.replaceBitmap(cropped, pointSize: pointSize)
         window.updateImagePointSize(pointSize)
+        commitUndoStep()
     }
 
     func expandCanvasIfNeeded(toFit rect: NSRect) -> NSPoint {
@@ -358,6 +485,9 @@ extension EditorWindowController: CanvasDataSource {
             fill: NSColor(hex: settingsStore.settings.canvasExtensionBackgroundHex) ?? .white
         ) else { return .zero }
 
+        // Open an undo step (if one isn't already open for this drag); the shape
+        // commit that triggered the expand closes it, so both undo as one.
+        beginUndoStep()
         bitmap = expanded.image
         if expanded.offset != .zero {
             stack = shiftedStack(by: expanded.offset)
@@ -438,6 +568,7 @@ extension EditorWindowController: CanvasDataSource {
             shifted.append(Shape(
                 kind: shape.kind,
                 colorIndex: shape.colorIndex,
+                size: shape.size,
                 start: CorePoint(x: shape.start.x + offset.x, y: shape.start.y + offset.y),
                 end: CorePoint(x: shape.end.x + offset.x, y: shape.end.y + offset.y)
             ))
@@ -473,6 +604,7 @@ extension EditorWindowController: CanvasDataSource {
             shifted.append(Shape(
                 kind: shape.kind,
                 colorIndex: shape.colorIndex,
+                size: shape.size,
                 start: CorePoint(x: shape.start.x - crop.minX, y: shape.start.y - crop.minY),
                 end: CorePoint(x: shape.end.x - crop.minX, y: shape.end.y - crop.minY)
             ))
@@ -496,6 +628,7 @@ private extension Shape {
         Shape(
             kind: kind,
             colorIndex: colorIndex,
+            size: size,
             start: CorePoint(x: start.x + x, y: start.y + y),
             end: CorePoint(x: end.x + x, y: end.y + y)
         )
@@ -507,12 +640,12 @@ private extension Shape {
             return crop.contains(NSPoint(x: end.x, y: end.y))
         case .text:
             return crop.contains(NSPoint(x: start.x, y: start.y))
-        case .arrow, .rectangle:
+        case .arrow, .rectangle, .pixelate:
             let minX = min(start.x, end.x)
             let minY = min(start.y, end.y)
             let maxX = max(start.x, end.x)
             let maxY = max(start.y, end.y)
-            let pad = max(strokeWidth, 1)
+            let pad = max(strokeWidth * CGFloat(size.scale), 1)
             let bounds = NSRect(
                 x: minX - pad,
                 y: minY - pad,
@@ -579,24 +712,24 @@ final class EditorContainerView: NSView {
     }
 }
 
-/// Top strip: the brand mark left, image dimensions right, 1px rule below.
-/// Doubles as the window's drag handle.
+/// Top strip: the brand mark left, the editor actions (undo / save / copy &
+/// close) right, 1px rule below. Doubles as the window's drag handle.
 final class EditorHeaderView: NSView {
-    let dimensionLabel = NSTextField(labelWithString: "")
-    var onZoomIn: (() -> Void)?
-    var onZoomOut: (() -> Void)?
-    var onZoomReset: (() -> Void)?
+    var onUndo: (() -> Void)?
+    var onSave: (() -> Void)?
+    var onDone: (() -> Void)?
 
     private let brandIcon = NSImageView(image: Theme.logoImage(size: 16, template: true) ?? NSImage())
     private let brandLabel = NSTextField(labelWithString: Theme.brandName)
-    private let zoomOutButton = HeaderIconButton(symbolName: "minus.magnifyingglass")
-    private let zoomResetButton = HeaderTextButton(title: "100%")
-    private let zoomInButton = HeaderIconButton(symbolName: "plus.magnifyingglass")
+    private let undoButton = HeaderIconButton(symbolName: "arrow.uturn.backward", key: "⌘Z")
+    private let saveButton = HeaderIconButton(symbolName: "square.and.arrow.down", key: "⌘S")
+    private let doneButton: HeaderTextButton
     private let rule = NSView()
 
     override var mouseDownCanMoveWindow: Bool { true }
 
-    override init(frame: NSRect) {
+    init(frame: NSRect, escCopies: Bool) {
+        doneButton = HeaderTextButton(title: escCopies ? "Copy & Close" : "Close", key: "esc")
         super.init(frame: frame)
         wantsLayer = true
 
@@ -608,20 +741,17 @@ final class EditorHeaderView: NSView {
         brandLabel.translatesAutoresizingMaskIntoConstraints = false
         addSubview(brandLabel)
 
-        dimensionLabel.font = Theme.headerFont
-        dimensionLabel.alignment = .right
-        dimensionLabel.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(dimensionLabel)
-
-        zoomOutButton.toolTip = "Zoom out"
-        zoomOutButton.onClick = { [weak self] in self?.onZoomOut?() }
-        zoomResetButton.toolTip = "Reset zoom"
-        zoomResetButton.onClick = { [weak self] in self?.onZoomReset?() }
-        zoomInButton.toolTip = "Zoom in"
-        zoomInButton.onClick = { [weak self] in self?.onZoomIn?() }
-        addSubview(zoomOutButton)
-        addSubview(zoomResetButton)
-        addSubview(zoomInButton)
+        undoButton.toolTip = "Undo (⌘Z)"
+        undoButton.onClick = { [weak self] in self?.onUndo?() }
+        saveButton.toolTip = "Save PNG to folder (⌘S) · Save as… (⇧⌘S)"
+        saveButton.onClick = { [weak self] in self?.onSave?() }
+        doneButton.toolTip = escCopies
+            ? "Copy the image to the clipboard and close (Esc)"
+            : "Close the editor (Esc)"
+        doneButton.onClick = { [weak self] in self?.onDone?() }
+        addSubview(undoButton)
+        addSubview(saveButton)
+        addSubview(doneButton)
 
         rule.wantsLayer = true
         rule.translatesAutoresizingMaskIntoConstraints = false
@@ -634,15 +764,13 @@ final class EditorHeaderView: NSView {
             brandIcon.heightAnchor.constraint(equalToConstant: 16),
             brandLabel.leadingAnchor.constraint(equalTo: brandIcon.trailingAnchor, constant: 7),
             brandLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
-            dimensionLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
-            dimensionLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
-            zoomInButton.trailingAnchor.constraint(equalTo: dimensionLabel.leadingAnchor, constant: -12),
-            zoomInButton.centerYAnchor.constraint(equalTo: centerYAnchor),
-            zoomResetButton.trailingAnchor.constraint(equalTo: zoomInButton.leadingAnchor, constant: -1),
-            zoomResetButton.centerYAnchor.constraint(equalTo: centerYAnchor),
-            zoomOutButton.trailingAnchor.constraint(equalTo: zoomResetButton.leadingAnchor, constant: -1),
-            zoomOutButton.centerYAnchor.constraint(equalTo: centerYAnchor),
-            brandLabel.trailingAnchor.constraint(lessThanOrEqualTo: zoomOutButton.leadingAnchor, constant: -12),
+            doneButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
+            doneButton.centerYAnchor.constraint(equalTo: centerYAnchor),
+            saveButton.trailingAnchor.constraint(equalTo: doneButton.leadingAnchor, constant: -8),
+            saveButton.centerYAnchor.constraint(equalTo: centerYAnchor),
+            undoButton.trailingAnchor.constraint(equalTo: saveButton.leadingAnchor, constant: -2),
+            undoButton.centerYAnchor.constraint(equalTo: centerYAnchor),
+            brandLabel.trailingAnchor.constraint(lessThanOrEqualTo: undoButton.leadingAnchor, constant: -12),
             rule.leadingAnchor.constraint(equalTo: leadingAnchor),
             rule.trailingAnchor.constraint(equalTo: trailingAnchor),
             rule.bottomAnchor.constraint(equalTo: bottomAnchor),
@@ -663,13 +791,91 @@ final class EditorHeaderView: NSView {
             layer?.backgroundColor = Theme.chrome.cgColor
             brandIcon.contentTintColor = Theme.ink
             brandLabel.textColor = Theme.ink
-            dimensionLabel.textColor = Theme.inkDim
             rule.layer?.backgroundColor = Theme.rule.cgColor
+        }
+    }
+}
+
+/// Small floating readout pinned to the bottom-right of the canvas, just above
+/// the toolbar: compact zoom controls + percentage, then the image dimensions.
+final class CanvasStatusBar: NSView {
+    var onZoomIn: (() -> Void)?
+    var onZoomOut: (() -> Void)?
+    var onZoomReset: (() -> Void)?
+
+    private let zoomOutButton = HeaderIconButton(symbolName: "minus.magnifyingglass")
+    private let zoomResetButton = HeaderTextButton(title: "100%")
+    private let zoomInButton = HeaderIconButton(symbolName: "plus.magnifyingglass")
+    private let separator = NSView()
+    private let dimensionLabel = NSTextField(labelWithString: "")
+
+    override var mouseDownCanMoveWindow: Bool { false }
+
+    init() {
+        super.init(frame: .zero)
+        wantsLayer = true
+        layer?.cornerRadius = 7
+        layer?.borderWidth = 1
+        translatesAutoresizingMaskIntoConstraints = false
+
+        zoomOutButton.toolTip = "Zoom out (⌘−)"
+        zoomOutButton.onClick = { [weak self] in self?.onZoomOut?() }
+        zoomResetButton.toolTip = "Reset zoom (⌘0)"
+        zoomResetButton.onClick = { [weak self] in self?.onZoomReset?() }
+        zoomInButton.toolTip = "Zoom in (⌘+)"
+        zoomInButton.onClick = { [weak self] in self?.onZoomIn?() }
+
+        dimensionLabel.font = .monospacedDigitSystemFont(ofSize: 10.5, weight: .medium)
+        dimensionLabel.alignment = .center
+
+        separator.wantsLayer = true
+        separator.translatesAutoresizingMaskIntoConstraints = false
+
+        let stack = NSStackView(views: [zoomOutButton, zoomResetButton, zoomInButton, separator, dimensionLabel])
+        stack.orientation = .horizontal
+        stack.alignment = .centerY
+        stack.spacing = 2
+        stack.setCustomSpacing(8, after: zoomInButton)
+        stack.setCustomSpacing(8, after: separator)
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(stack)
+        NSLayoutConstraint.activate([
+            separator.widthAnchor.constraint(equalToConstant: 1),
+            separator.heightAnchor.constraint(equalToConstant: 13),
+            // Fixed widths so the readout never grows/shrinks as zoom % or the
+            // dimensions change (keeps the overlay a stable size).
+            zoomResetButton.widthAnchor.constraint(equalToConstant: 46),
+            dimensionLabel.widthAnchor.constraint(equalToConstant: 80),
+            stack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 5),
+            stack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -9),
+            stack.topAnchor.constraint(equalTo: topAnchor, constant: 3),
+            stack.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -3),
+        ])
+        applyColors()
+    }
+
+    required init?(coder: NSCoder) { fatalError() }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        applyColors()
+    }
+
+    private func applyColors() {
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            layer?.backgroundColor = Theme.chrome.withAlphaComponent(0.92).cgColor
+            layer?.borderColor = Theme.rule.cgColor
+            separator.layer?.backgroundColor = Theme.hairline.cgColor
+            dimensionLabel.textColor = Theme.inkDim
         }
     }
 
     func updateZoomScale(_ scale: CGFloat) {
         zoomResetButton.title = "\(Int((scale * 100).rounded()))%"
+    }
+
+    func setDimension(_ text: String) {
+        dimensionLabel.stringValue = text
     }
 }
 
@@ -677,18 +883,28 @@ final class EditorWindow: NSWindow {
     var keyHandler: ((NSEvent) -> Bool)?
     var gestureHandler: ((CGFloat, NSPoint) -> Void)?
     var onZoomIn: (() -> Void)? {
-        didSet { header?.onZoomIn = onZoomIn }
+        didSet { statusBar?.onZoomIn = onZoomIn }
     }
     var onZoomOut: (() -> Void)? {
-        didSet { header?.onZoomOut = onZoomOut }
+        didSet { statusBar?.onZoomOut = onZoomOut }
     }
     var onZoomReset: (() -> Void)? {
-        didSet { header?.onZoomReset = onZoomReset }
+        didSet { statusBar?.onZoomReset = onZoomReset }
+    }
+    var onUndo: (() -> Void)? {
+        didSet { header?.onUndo = onUndo }
+    }
+    var onSave: (() -> Void)? {
+        didSet { header?.onSave = onSave }
+    }
+    var onDone: (() -> Void)? {
+        didSet { header?.onDone = onDone }
     }
     private weak var header: EditorHeaderView?
+    private weak var statusBar: CanvasStatusBar?
     private weak var canvasScrollView: CanvasScrollView?
 
-    init(canvas: CanvasView, toolbar: EditorToolbar, imagePointSize: NSSize) {
+    init(canvas: CanvasView, toolbar: EditorToolbar, imagePointSize: NSSize, escCopies: Bool) {
         let headerHeight = Theme.headerHeight
         let toolbarHeight = Theme.toolbarHeight
         let canvasPadding = CanvasHostView.padding
@@ -743,13 +959,25 @@ final class EditorWindow: NSWindow {
         let headerView = EditorHeaderView(frame: NSRect(
             x: 0, y: contentSize.height - headerHeight,
             width: contentSize.width, height: headerHeight
-        ))
+        ), escCopies: escCopies)
         headerView.autoresizingMask = [.width, .minYMargin]
-        headerView.dimensionLabel.stringValue = Self.dimensionText(imagePointSize)
-        headerView.onZoomIn = onZoomIn
-        headerView.onZoomOut = onZoomOut
-        headerView.onZoomReset = onZoomReset
         header = headerView
+
+        let status = CanvasStatusBar()
+        status.setDimension(Self.dimensionText(imagePointSize))
+        let statusSize = status.fittingSize
+        // Frame-based (like the other container subviews) to avoid mixing
+        // Auto Layout into this autoresizing container, which thrashed the
+        // scroll/canvas layout during zoom.
+        status.translatesAutoresizingMaskIntoConstraints = true
+        status.frame = NSRect(
+            x: contentSize.width - statusSize.width - 12,
+            y: toolbarHeight + 10,
+            width: statusSize.width,
+            height: statusSize.height
+        )
+        status.autoresizingMask = [.minXMargin, .maxYMargin]
+        statusBar = status
 
         canvas.frame = NSRect(origin: .zero, size: imagePointSize)
         let canvasHost = CanvasHostView(canvas: canvas, imagePointSize: imagePointSize)
@@ -774,7 +1002,7 @@ final class EditorWindow: NSWindow {
         scroll.hasHorizontalScroller = false
         scroll.autohidesScrollers = true
         scroll.drawsBackground = true
-        scroll.backgroundColor = Theme.well
+        scroll.backgroundColor = Theme.canvasBackdrop
         // Don't let AppKit add titlebar insets/edge effects (renders an
         // opaque glass sheet over the canvas on macOS 26).
         scroll.automaticallyAdjustsContentInsets = false
@@ -789,6 +1017,7 @@ final class EditorWindow: NSWindow {
         container.addSubview(scroll)
         container.addSubview(toolbar)
         container.addSubview(headerView)
+        container.addSubview(status)
         contentView = container
     }
 
@@ -797,7 +1026,7 @@ final class EditorWindow: NSWindow {
     }
 
     func updateImagePointSize(_ pointSize: NSSize, layoutCanvas: Bool = true) {
-        header?.dimensionLabel.stringValue = Self.dimensionText(pointSize)
+        statusBar?.setDimension(Self.dimensionText(pointSize))
         guard let container = contentView,
               let scroll = container.subviews.compactMap({ $0 as? CanvasScrollView }).first,
               let host = scroll.documentView as? CanvasHostView
@@ -813,7 +1042,7 @@ final class EditorWindow: NSWindow {
     }
 
     func updateZoomScale(_ scale: CGFloat, around windowPoint: NSPoint?) {
-        header?.updateZoomScale(scale)
+        statusBar?.updateZoomScale(scale)
         guard let container = contentView,
               let scroll = container.subviews.compactMap({ $0 as? CanvasScrollView }).first,
               let host = scroll.documentView as? CanvasHostView
@@ -825,7 +1054,7 @@ final class EditorWindow: NSWindow {
     /// Always sets zoom to 1 and re-centers the viewport on the current canvas,
     /// even when zoom was already 1 (e.g. after crop or canvas extension).
     func resetZoom() {
-        header?.updateZoomScale(1)
+        statusBar?.updateZoomScale(1)
         guard let container = contentView,
               let scroll = container.subviews.compactMap({ $0 as? CanvasScrollView }).first,
               let host = scroll.documentView as? CanvasHostView
@@ -1107,16 +1336,21 @@ final class CanvasHostView: NSView {
     func forceZoomToOne(in scrollView: NSScrollView) {
         zoomScale = 1
         canvas.setPointSize(imagePointSize, zoomScale: 1)
-        fit(to: scrollView.contentView.bounds.size)
-        scrollView.layoutSubtreeIfNeeded()
+        // Resolve the current viewport from the scroll view's own content size
+        // (stable) rather than the clip bounds, which can be mid-transition when
+        // coming from a zoomed-out state — that fed `fit` a bad size and blew
+        // the canvas up past the viewport on the first press.
+        let viewportSize = scrollView.contentSize
+        fit(to: viewportSize)
+        needsLayout = true
+        layoutSubtreeIfNeeded()
         (scrollView as? CanvasScrollView)?.refreshScrollerVisibility()
-        scrollView.layoutSubtreeIfNeeded()
 
-        let viewportSize = scrollView.contentView.bounds.size
-        let centeredOrigin = centeredViewportOrigin(for: viewportSize)
+        let finalViewport = scrollView.contentSize
+        let centeredOrigin = centeredViewportOrigin(for: finalViewport)
         let origin = NSPoint(
-            x: max(0, min(centeredOrigin.x, bounds.width - viewportSize.width)),
-            y: max(0, min(centeredOrigin.y, bounds.height - viewportSize.height))
+            x: max(0, min(centeredOrigin.x, bounds.width - finalViewport.width)),
+            y: max(0, min(centeredOrigin.y, bounds.height - finalViewport.height))
         )
         scrollView.contentView.scroll(to: origin)
         scrollView.reflectScrolledClipView(scrollView.contentView)
@@ -1146,6 +1380,7 @@ final class CanvasView: NSView, NSDraggingSource {
     private var liveCropRect: NSRect?
     private var dragStart: NSPoint?
     private var isDragOut = false
+    private var dragOutFileURL: URL?
     private var textEditor: AnnotationTextView?
 
     init(bitmap: CGImage, pointSize: NSSize) {
@@ -1158,6 +1393,19 @@ final class CanvasView: NSView, NSDraggingSource {
     }
 
     required init?(coder: NSCoder) { fatalError() }
+
+    override func resetCursorRects() {
+        super.resetCursorRects()
+        // While space-panning, the enclosing scroll view owns the hand cursor.
+        if isSpacePanning?() == true { return }
+        let cursor: NSCursor = dataSource?.currentTool == .text ? .iBeam : .crosshair
+        addCursorRect(bounds, cursor: cursor)
+    }
+
+    /// Re-evaluate the tool cursor (call when the active tool changes).
+    func refreshToolCursor() {
+        window?.invalidateCursorRects(for: self)
+    }
 
     override var isFlipped: Bool { true }
     // Dragging on the image must draw, never move the window.
@@ -1173,9 +1421,10 @@ final class CanvasView: NSView, NSDraggingSource {
         guard let source = dataSource else { return }
         NSGraphicsContext.saveGraphicsState()
         NSBezierPath(rect: bounds).addClip()
-        ShapeRenderer.draw(source.visibleShapes, palette: source.palette, strokeWidth: source.strokeWidth)
+        let sourceScale = bounds.width > 0 ? CGFloat(bitmap.width) / bounds.width : 1
+        ShapeRenderer.draw(source.visibleShapes, palette: source.palette, strokeWidth: source.strokeWidth, sourceImage: bitmap, sourceScale: sourceScale)
         if let liveShape {
-            ShapeRenderer.draw(liveShape, palette: source.palette, strokeWidth: source.strokeWidth)
+            ShapeRenderer.draw(liveShape, palette: source.palette, strokeWidth: source.strokeWidth, sourceImage: bitmap, sourceScale: sourceScale)
         }
         NSGraphicsContext.restoreGraphicsState()
         if let liveCropRect {
@@ -1221,6 +1470,17 @@ final class CanvasView: NSView, NSDraggingSource {
         return CorePoint(x: p.x, y: p.y)
     }
 
+    /// Projects `end` onto the nearest 45° ray from `start`, preserving length.
+    private func snapped(_ end: CorePoint, from start: CorePoint) -> CorePoint {
+        let dx = end.x - start.x
+        let dy = end.y - start.y
+        let length = hypot(dx, dy)
+        guard length > 0 else { return end }
+        let step = Double.pi / 4
+        let angle = (atan2(dy, dx) / step).rounded() * step
+        return CorePoint(x: start.x + cos(angle) * length, y: start.y + sin(angle) * length)
+    }
+
     private func cropRect(from start: NSPoint, to end: NSPoint) -> NSRect {
         NSRect(
             x: min(start.x, end.x),
@@ -1244,9 +1504,11 @@ final class CanvasView: NSView, NSDraggingSource {
 
         switch source.currentTool {
         case .arrow:
-            liveShape = Shape(kind: .arrow, colorIndex: source.currentColorIndex, start: core, end: core)
+            liveShape = Shape(kind: .arrow, colorIndex: source.currentColorIndex, size: source.currentSize, start: core, end: core)
         case .rectangle:
-            liveShape = Shape(kind: .rectangle, colorIndex: source.currentColorIndex, start: core, end: core)
+            liveShape = Shape(kind: .rectangle, colorIndex: source.currentColorIndex, size: source.currentSize, start: core, end: core)
+        case .pixelate:
+            liveShape = Shape(kind: .pixelate, colorIndex: source.currentColorIndex, size: source.currentSize, start: core, end: core)
         case .counter:
             liveShape = nil // counters stamp on mouse-up (click)
         case .text:
@@ -1278,13 +1540,17 @@ final class CanvasView: NSView, NSDraggingSource {
         }
         guard let source = dataSource, var shape = liveShape else { return }
         var end = corePoint(event)
-        if case .rectangle = shape.kind, event.modifierFlags.contains(.shift) {
+        let shiftHeld = event.modifierFlags.contains(.shift)
+        if case .rectangle = shape.kind, shiftHeld {
             // ⇧-drag constrains to a square.
             let side = max(abs(end.x - shape.start.x), abs(end.y - shape.start.y))
             end = CorePoint(
                 x: shape.start.x + side * (end.x >= shape.start.x ? 1 : -1),
                 y: shape.start.y + side * (end.y >= shape.start.y ? 1 : -1)
             )
+        } else if case .arrow = shape.kind, shiftHeld {
+            // ⇧-drag snaps the arrow to the nearest 45°.
+            end = snapped(end, from: shape.start)
         }
         shape.end = end
         if source.autoExpandCanvas {
@@ -1298,19 +1564,21 @@ final class CanvasView: NSView, NSDraggingSource {
         needsDisplay = true
     }
 
-    private func expansionRect(for shape: Shape, strokeWidth: CGFloat) -> NSRect {
+    private func expansionRect(for shape: Shape, strokeWidth baseStrokeWidth: CGFloat) -> NSRect {
         let minX = min(shape.start.x, shape.end.x)
         let minY = min(shape.start.y, shape.end.y)
         let maxX = max(shape.start.x, shape.end.x)
         let maxY = max(shape.start.y, shape.end.y)
+        let scale = CGFloat(shape.size.scale)
+        let strokeWidth = baseStrokeWidth * scale
         let drawingPad: CGFloat
         switch shape.kind {
-        case .rectangle:
+        case .rectangle, .pixelate, .arrow:
+            // Arrow grows the canvas the same way as rectangle: only at the edge,
+            // not early. (Its head may clip slightly at the very edge by design.)
             drawingPad = ceil(max(strokeWidth, 1) / 2) + 1
-        case .arrow:
-            drawingPad = max(28, strokeWidth * 8)
         case .counter:
-            drawingPad = ShapeRenderer.counterRadius
+            drawingPad = ShapeRenderer.counterRadius * scale
         case .text:
             drawingPad = 0
         }
@@ -1331,6 +1599,7 @@ final class CanvasView: NSView, NSDraggingSource {
             liveShape = nil
             dragStart = nil
             isDragOut = false
+            dataSource?.endInteraction()
         }
         guard let source = dataSource else { return }
 
@@ -1346,6 +1615,7 @@ final class CanvasView: NSView, NSDraggingSource {
             var shape = Shape(
                 kind: .counter(number: source.nextCounterNumber()),
                 colorIndex: source.currentColorIndex,
+                size: source.currentSize,
                 start: point,
                 end: point
             )
@@ -1429,6 +1699,7 @@ final class CanvasView: NSView, NSDraggingSource {
         source.commit(shape: Shape(
             kind: .text(string: string, size: source.textSize),
             colorIndex: source.currentColorIndex,
+            size: source.currentSize,
             start: anchor,
             end: anchor
         ))
@@ -1456,6 +1727,7 @@ final class CanvasView: NSView, NSDraggingSource {
 
         let (image, pattern, pointScale) = source.dragOutImage()
         guard let fileURL = Exporter.tempFileForDrag(image, pattern: pattern, pointScale: pointScale) else { return }
+        dragOutFileURL = fileURL
 
         let item = NSDraggingItem(pasteboardWriter: fileURL as NSURL)
         let dragSize = NSSize(width: 160, height: 160 * CGFloat(image.height) / CGFloat(image.width))
@@ -1472,6 +1744,15 @@ final class CanvasView: NSView, NSDraggingSource {
         .copy
     }
 
+    func draggingSession(_ session: NSDraggingSession, endedAt screenPoint: NSPoint, operation: NSDragOperation) {
+        if let url = dragOutFileURL {
+            DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 60) {
+                try? FileManager.default.removeItem(at: url)
+            }
+        }
+        dragOutFileURL = nil
+    }
+
 }
 
 private final class HeaderIconButton: NSControl {
@@ -1480,10 +1761,13 @@ private final class HeaderIconButton: NSControl {
         didSet { updateAppearance() }
     }
     private let iconView = NSImageView()
+    private let keyLabel = NSTextField(labelWithString: "")
+    private let hasKey: Bool
 
     override var mouseDownCanMoveWindow: Bool { false }
 
-    init(symbolName: String) {
+    init(symbolName: String, key: String? = nil) {
+        hasKey = key != nil
         super.init(frame: .zero)
         wantsLayer = true
         layer?.cornerRadius = 6
@@ -1494,14 +1778,31 @@ private final class HeaderIconButton: NSControl {
         iconView.imageScaling = .scaleProportionallyDown
         iconView.translatesAutoresizingMaskIntoConstraints = false
         addSubview(iconView)
-        NSLayoutConstraint.activate([
-            widthAnchor.constraint(equalToConstant: 26),
+
+        var constraints: [NSLayoutConstraint] = [
             heightAnchor.constraint(equalToConstant: 22),
             iconView.widthAnchor.constraint(equalToConstant: 14),
             iconView.heightAnchor.constraint(equalToConstant: 14),
-            iconView.centerXAnchor.constraint(equalTo: centerXAnchor),
             iconView.centerYAnchor.constraint(equalTo: centerYAnchor),
-        ])
+        ]
+        if let key {
+            keyLabel.stringValue = key
+            keyLabel.font = Theme.cellKeyFont
+            keyLabel.translatesAutoresizingMaskIntoConstraints = false
+            addSubview(keyLabel)
+            constraints += [
+                iconView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 7),
+                keyLabel.leadingAnchor.constraint(equalTo: iconView.trailingAnchor, constant: 4),
+                keyLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -7),
+                keyLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
+            ]
+        } else {
+            constraints += [
+                widthAnchor.constraint(equalToConstant: 26),
+                iconView.centerXAnchor.constraint(equalTo: centerXAnchor),
+            ]
+        }
+        NSLayoutConstraint.activate(constraints)
         updateAppearance()
     }
 
@@ -1530,6 +1831,7 @@ private final class HeaderIconButton: NSControl {
             layer?.backgroundColor = isHovered ? Theme.hoverWash.cgColor : NSColor.clear.cgColor
             layer?.borderColor = (isHovered ? Theme.accent.withAlphaComponent(0.45) : Theme.hairline).cgColor
             iconView.contentTintColor = Theme.ink
+            if hasKey { keyLabel.textColor = Theme.inkDim }
         }
     }
 }
@@ -1544,11 +1846,14 @@ private final class HeaderTextButton: NSControl {
         didSet { updateAppearance() }
     }
     private let label: NSTextField
+    private let keyLabel = NSTextField(labelWithString: "")
+    private let hasKey: Bool
 
     override var mouseDownCanMoveWindow: Bool { false }
 
-    init(title: String) {
+    init(title: String, key: String? = nil) {
         label = NSTextField(labelWithString: title)
+        hasKey = key != nil
         super.init(frame: .zero)
         wantsLayer = true
         layer?.cornerRadius = 6
@@ -1557,14 +1862,30 @@ private final class HeaderTextButton: NSControl {
         label.font = Theme.headerFont
         label.alignment = .center
         label.translatesAutoresizingMaskIntoConstraints = false
+        label.setContentHuggingPriority(.required, for: .horizontal)
         addSubview(label)
-        NSLayoutConstraint.activate([
-            widthAnchor.constraint(equalToConstant: 42),
+
+        var constraints: [NSLayoutConstraint] = [
+            widthAnchor.constraint(greaterThanOrEqualToConstant: 40),
             heightAnchor.constraint(equalToConstant: 22),
-            label.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 4),
-            label.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -4),
+            label.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 9),
             label.centerYAnchor.constraint(equalTo: centerYAnchor),
-        ])
+        ]
+        if let key {
+            keyLabel.stringValue = key
+            keyLabel.font = Theme.cellKeyFont
+            keyLabel.translatesAutoresizingMaskIntoConstraints = false
+            keyLabel.setContentHuggingPriority(.required, for: .horizontal)
+            addSubview(keyLabel)
+            constraints += [
+                keyLabel.leadingAnchor.constraint(equalTo: label.trailingAnchor, constant: 6),
+                keyLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -9),
+                keyLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
+            ]
+        } else {
+            constraints.append(label.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -9))
+        }
+        NSLayoutConstraint.activate(constraints)
         updateAppearance()
     }
 
@@ -1592,7 +1913,8 @@ private final class HeaderTextButton: NSControl {
         effectiveAppearance.performAsCurrentDrawingAppearance {
             layer?.backgroundColor = isHovered ? Theme.hoverWash.cgColor : NSColor.clear.cgColor
             layer?.borderColor = (isHovered ? Theme.accent.withAlphaComponent(0.45) : Theme.hairline).cgColor
-            label.textColor = Theme.inkDim
+            label.textColor = Theme.ink
+            if hasKey { keyLabel.textColor = Theme.inkDim }
         }
     }
 }

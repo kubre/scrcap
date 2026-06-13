@@ -121,7 +121,7 @@ test("capture options follow default shortcut order") {
     checkEqual(CaptureMode.captureOrder, [.region, .window, .fullscreen, .scrolling])
     checkEqual(
         AppAction.shortcutOrder,
-        [.captureRegion, .captureWindow, .captureFullscreen, .captureScrolling, .repeatLast]
+        [.captureRegion, .captureWindow, .captureFullscreen, .captureScrolling, .captureDelayed, .repeatLast]
     )
 }
 
@@ -165,7 +165,7 @@ test("defaults when no file") {
     withTempDir { dir in
         let store = SettingsStore(directory: dir)
         checkEqual(store.settings, .defaults)
-        checkEqual(store.settings.paletteHex.count, 7)
+        checkEqual(store.settings.paletteHex.count, 5)
         checkEqual(store.settings.paletteHex[0], "#FF3B30")
         checkEqual(store.settings.windowCaptureTarget, .active)
         check(store.settings.autoExpandCanvas)
@@ -268,7 +268,7 @@ test("decodable settings are normalized on load") {
 
         let store = SettingsStore(directory: dir)
         checkEqual(store.settings.paletteHex, [
-            "#ABCDEF", "#FF9500", "#FFCC00", "#34C759", "#0A84FF", "#BF5AF2", "#F2F2F7",
+            "#ABCDEF", "#FF9500", "#34C759", "#0A84FF", "#1C1C1E",
         ])
         checkEqual(store.settings.canvasExtensionBackgroundHex, "#00FF00")
         checkEqual(store.settings.strokeWidth, Settings.maxStrokeWidth)

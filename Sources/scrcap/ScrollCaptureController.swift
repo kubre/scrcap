@@ -7,6 +7,8 @@ import ApplicationServices
 import ScrcapCore
 
 final class ScrollCaptureController {
+    private static let maxAccumulatedPixelBytes = 256 * 1024 * 1024
+
     private let capture: CaptureProviding
     private let settingsStore: SettingsStore
 
@@ -56,12 +58,16 @@ final class ScrollCaptureController {
     @MainActor
     private func stitchLoop(rect: NSRect, screen: NSScreen) async throws -> CaptureResult {
         let scale = screen.backingScaleFactor
-        let maxRows = settingsStore.settings.scrollingMaxHeight
         let scrollStepPoints = Int32(rect.height * 0.7)
 
         let firstCapture = try await capture.captureRegion(rect, on: screen)
         let first = Self.extractRows(from: firstCapture.image)
-        var accumulatedRows = first.rows
+        let maxRows = Self.effectiveMaxRows(
+            configuredMaxRows: settingsStore.settings.scrollingMaxHeight,
+            initialRows: first.hashes.count,
+            bytesPerRow: first.bytesPerRow
+        )
+        var accumulatedBytes = first.bytes
         var accumulatedHashes = first.hashes
         var previousFrameHashes = first.hashes
         let width = first.width
@@ -90,7 +96,7 @@ final class ScrollCaptureController {
             previousFrameHashes = next.hashes
             if fixedTop > 0, fixedTop < Int(Double(next.hashes.count) * 0.9) {
                 next.hashes.removeFirst(fixedTop)
-                next.rows.removeFirst(fixedTop)
+                next.bytes.removeFirst(fixedTop * next.bytesPerRow)
             } else if fixedTop >= Int(Double(next.hashes.count) * 0.9) {
                 // Nothing moved at all — non-scrollable or bottom.
                 consecutiveNoNewRows += 1
@@ -116,8 +122,10 @@ final class ScrollCaptureController {
             let end = alignment.newContentStart + appendedCount
 
             accumulatedHashes.append(contentsOf: next.hashes[alignment.newContentStart..<end])
-            accumulatedRows.append(contentsOf: next.rows[alignment.newContentStart..<end])
-            assert(accumulatedHashes.count == accumulatedRows.count, "Rows and hashes must stay aligned.")
+            let startByte = alignment.newContentStart * next.bytesPerRow
+            let endByte = end * next.bytesPerRow
+            accumulatedBytes.append(contentsOf: next.bytes[startByte..<endByte])
+            assert(accumulatedHashes.count * first.bytesPerRow == accumulatedBytes.count, "Rows and bytes must stay aligned.")
 
             if appendedCount < availableRows {
                 break
@@ -129,16 +137,17 @@ final class ScrollCaptureController {
         if accumulatedHashes.count == first.hashes.count {
             return CaptureResult(image: firstCapture.image, scale: scale)
         }
-        let image = try composite(rows: accumulatedRows, width: width)
+        let image = try composite(bytes: accumulatedBytes, width: width)
         return CaptureResult(image: image, scale: scale)
     }
 
     // MARK: Frame capture & pixel access
 
     private struct FrameData {
-        var rows: [[UInt8]]
+        var bytes: [UInt8]
         var hashes: [UInt64]
         var width: Int
+        var bytesPerRow: Int
     }
 
     @MainActor
@@ -158,13 +167,20 @@ final class ScrollCaptureController {
     }
 
     private static func extractRows(from image: CGImage) -> FrameData {
-        var rows: [[UInt8]] = []
-        rows.reserveCapacity(image.height)
+        let bytesPerRow = image.width * 4
+        var bytes: [UInt8] = []
+        bytes.reserveCapacity(bytesPerRow * image.height)
         let hashes = renderRows(from: image) { _, rowBytes, hashes in
-            rows.append([UInt8](rowBytes))
+            bytes.append(contentsOf: rowBytes)
             hashes.append(StitchEngine.rowHash(rowBytes))
         }
-        return FrameData(rows: rows, hashes: hashes, width: image.width)
+        return FrameData(bytes: bytes, hashes: hashes, width: image.width, bytesPerRow: bytesPerRow)
+    }
+
+    private static func effectiveMaxRows(configuredMaxRows: Int, initialRows: Int, bytesPerRow: Int) -> Int {
+        guard bytesPerRow > 0 else { return configuredMaxRows }
+        let memoryLimitedRows = max(initialRows, maxAccumulatedPixelBytes / bytesPerRow)
+        return max(initialRows, min(configuredMaxRows, memoryLimitedRows))
     }
 
     /// Draws the image once into an RGBA buffer and walks it row by row.
@@ -197,14 +213,14 @@ final class ScrollCaptureController {
         return hashes
     }
 
-    private func composite(rows: [[UInt8]], width: Int) throws -> CGImage {
-        let height = rows.count
+    private func composite(bytes: [UInt8], width: Int) throws -> CGImage {
         let bytesPerRow = width * 4
-        var buffer = [UInt8]()
-        buffer.reserveCapacity(bytesPerRow * height)
-        for row in rows { buffer.append(contentsOf: row) }
+        guard bytesPerRow > 0, bytes.count.isMultiple(of: bytesPerRow) else {
+            throw CaptureError.cropFailed
+        }
+        let height = bytes.count / bytesPerRow
 
-        guard let provider = CGDataProvider(data: Data(buffer) as CFData),
+        guard let provider = CGDataProvider(data: Data(bytes) as CFData),
               let image = CGImage(
                   width: width, height: height,
                   bitsPerComponent: 8, bitsPerPixel: 32, bytesPerRow: bytesPerRow,

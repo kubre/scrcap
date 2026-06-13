@@ -45,14 +45,16 @@ public enum ThemeMode: String, Codable, Sendable {
 }
 
 public struct Settings: Codable, Equatable, Sendable {
-    public static let currentSchemaVersion = 6
-    public static let paletteSlotCount = 7
+    public static let currentSchemaVersion = 8
+    public static let paletteSlotCount = 5
     public static let minStrokeWidth = 1.0
     public static let maxStrokeWidth = 8.0
     public static let minTextSize = 10.0
     public static let maxTextSize = 36.0
     public static let minScrollingMaxHeight = 1_000
     public static let maxScrollingMaxHeight = 100_000
+    public static let minCaptureDelay = 1
+    public static let maxCaptureDelay = 10
 
     public var schemaVersion: Int
     /// AppAction.rawValue → chord string ("opt+shift+2").
@@ -70,6 +72,11 @@ public struct Settings: Codable, Equatable, Sendable {
     /// Which window the Window capture action targets (schema v4).
     public var windowCaptureTarget: WindowCaptureTarget
     public var includeWindowShadow: Bool
+    /// Background fill for window captures — the rounded corners and shadow are
+    /// transparent otherwise. Transparent keeps the alpha; else fills with the
+    /// color (default white). schema v8.
+    public var windowBackgroundTransparent: Bool
+    public var windowBackgroundHex: String
     /// Automatically grow the editor canvas when drawing beyond an edge (schema v5).
     public var autoExpandCanvas: Bool
     /// Fill color for newly-created canvas area (schema v5).
@@ -84,10 +91,16 @@ public struct Settings: Codable, Equatable, Sendable {
     public var launchAtLogin: Bool
     /// Theme override: system follows macOS appearance, light/dark force it (schema v6).
     public var themeMode: ThemeMode
+    /// Include the mouse pointer in captures (schema v7).
+    public var includeCursor: Bool
+    /// Countdown, in seconds, for the delayed-capture mode (schema v7).
+    public var captureDelaySeconds: Int
+    /// When true, suppress the "Copied to clipboard" notification (schema v7).
+    public var suppressCopyNotification: Bool
     public var resolvedExportScale: Int { exportScale == 1 ? 1 : 2 }
 
     public static let defaultPalette = [
-        "#FF3B30", "#FF9500", "#FFCC00", "#34C759", "#0A84FF", "#BF5AF2", "#F2F2F7",
+        "#FF3B30", "#FF9500", "#34C759", "#0A84FF", "#1C1C1E",
     ]
 
     public static var defaults: Settings {
@@ -102,6 +115,8 @@ public struct Settings: Codable, Equatable, Sendable {
             textEnterBehavior: .newline,
             windowCaptureTarget: .active,
             includeWindowShadow: false,
+            windowBackgroundTransparent: false,
+            windowBackgroundHex: "#FFFFFF",
             autoExpandCanvas: true,
             canvasExtensionBackgroundHex: "#FFFFFF",
             saveFolder: nil,
@@ -109,7 +124,10 @@ public struct Settings: Codable, Equatable, Sendable {
             exportScale: 2,
             scrollingMaxHeight: 20_000,
             launchAtLogin: false,
-            themeMode: .system
+            themeMode: .system,
+            includeCursor: false,
+            captureDelaySeconds: 3,
+            suppressCopyNotification: false
         )
     }
 
@@ -161,11 +179,13 @@ public struct Settings: Codable, Equatable, Sendable {
             return Self.normalizedHexColor(candidate) ?? Self.defaultPalette[index]
         }
         canvasExtensionBackgroundHex = Self.normalizedHexColor(canvasExtensionBackgroundHex) ?? "#FFFFFF"
+        windowBackgroundHex = Self.normalizedHexColor(windowBackgroundHex) ?? "#FFFFFF"
 
         strokeWidth = Self.clampFinite(strokeWidth, min: Self.minStrokeWidth, max: Self.maxStrokeWidth)
         textSize = Self.clampFinite(textSize, min: Self.minTextSize, max: Self.maxTextSize)
         exportScale = exportScale == 1 ? 1 : 2
         scrollingMaxHeight = min(max(scrollingMaxHeight, Self.minScrollingMaxHeight), Self.maxScrollingMaxHeight)
+        captureDelaySeconds = min(max(captureDelaySeconds, Self.minCaptureDelay), Self.maxCaptureDelay)
     }
 
     private static func clampFinite(_ value: Double, min: Double, max: Double) -> Double {
@@ -225,6 +245,19 @@ public final class SettingsStore {
                 json["canvasExtensionBackgroundHex"] = "#FFFFFF"
             case 5: // v6 added theme mode preference
                 json["themeMode"] = ThemeMode.system.rawValue
+            case 6: // v7 trimmed the palette to 5 curated colors and added new toggles
+                json["paletteHex"] = Settings.defaultPalette
+                json["includeCursor"] = false
+                json["captureDelaySeconds"] = 3
+                json["suppressCopyNotification"] = false
+                if var hotkeys = json["hotkeys"] as? [String: String],
+                   hotkeys[AppAction.captureDelayed.rawValue] == nil {
+                    hotkeys[AppAction.captureDelayed.rawValue] = "opt+shift+5"
+                    json["hotkeys"] = hotkeys
+                }
+            case 7: // v8 added a configurable window-capture background
+                json["windowBackgroundTransparent"] = false
+                json["windowBackgroundHex"] = "#FFFFFF"
             default:
                 break
             }
@@ -234,11 +267,17 @@ public final class SettingsStore {
         return try? JSONSerialization.data(withJSONObject: json)
     }
 
-    public func update(_ mutate: (inout Settings) -> Void) {
-        mutate(&settings)
-        settings.normalize()
-        if !save() {
+    @discardableResult
+    public func update(_ mutate: (inout Settings) -> Void) -> Bool {
+        var next = settings
+        mutate(&next)
+        next.normalize()
+        if save(next) {
+            settings = next
+            return true
+        } else {
             NSLog("Scrcap: failed to persist settings update.")
+            return false
         }
     }
 
@@ -247,6 +286,10 @@ public final class SettingsStore {
     /// treat a false return as a signal to surface diagnostics.
     @discardableResult
     public func save() -> Bool {
+        save(settings)
+    }
+
+    private func save(_ settings: Settings) -> Bool {
         let dir = fileURL.deletingLastPathComponent()
         do {
             try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)

@@ -11,27 +11,91 @@ enum ShapeRenderer {
         return NSColor(hex: palette[index]) ?? .systemRed
     }
 
-    static func draw(_ shapes: [Shape], palette: [String], strokeWidth: CGFloat) {
+    /// `sourceImage`/`sourceScale` (pixels-per-point) are only needed to render
+    /// `.pixelate` shapes, which sample the underlying image.
+    static func draw(
+        _ shapes: [Shape],
+        palette: [String],
+        strokeWidth: CGFloat,
+        sourceImage: CGImage? = nil,
+        sourceScale: CGFloat = 1
+    ) {
         for shape in shapes {
-            draw(shape, palette: palette, strokeWidth: strokeWidth)
+            draw(shape, palette: palette, strokeWidth: strokeWidth, sourceImage: sourceImage, sourceScale: sourceScale)
         }
     }
 
-    static func draw(_ shape: Shape, palette: [String], strokeWidth: CGFloat) {
+    static func draw(
+        _ shape: Shape,
+        palette: [String],
+        strokeWidth: CGFloat,
+        sourceImage: CGImage? = nil,
+        sourceScale: CGFloat = 1
+    ) {
         let color = color(at: shape.colorIndex, palette: palette)
         let start = NSPoint(x: shape.start.x, y: shape.start.y)
         let end = NSPoint(x: shape.end.x, y: shape.end.y)
+        // Stroke and counter radius scale with the shape's size; text bakes its
+        // scaled point size into the kind at creation, so it isn't scaled here.
+        let scale = CGFloat(shape.size.scale)
 
         switch shape.kind {
         case .arrow:
-            drawArrow(from: start, to: end, color: color, strokeWidth: strokeWidth)
+            drawArrow(from: start, to: end, color: color, strokeWidth: strokeWidth * scale)
         case .rectangle:
-            drawRectangle(from: start, to: end, color: color, strokeWidth: strokeWidth)
+            drawRectangle(from: start, to: end, color: color, strokeWidth: strokeWidth * scale)
+        case .pixelate:
+            drawPixelate(from: start, to: end, sourceImage: sourceImage, sourceScale: sourceScale)
         case .counter(let number):
-            drawCounter(number: number, at: end, color: color, strokeWidth: strokeWidth)
+            drawCounter(number: number, at: end, color: color, radius: counterRadius * scale)
         case .text(let string, let size):
             drawText(string, at: start, color: color, size: size)
         }
+    }
+
+    private static let pixelateBlock: CGFloat = 9
+
+    /// Mosaics the source image within the region. A pure CGBitmapContext
+    /// round-trip preserves orientation, so the downsampled block image lines
+    /// up with the underlying pixels when drawn back (nearest-neighbor).
+    private static func drawPixelate(from start: NSPoint, to end: NSPoint, sourceImage: CGImage?, sourceScale: CGFloat) {
+        let rect = NSRect(
+            x: min(start.x, end.x), y: min(start.y, end.y),
+            width: abs(start.x - end.x), height: abs(start.y - end.y)
+        )
+        guard rect.width > 1, rect.height > 1 else { return }
+
+        guard let sourceImage else {
+            // No source available (shouldn't happen in normal flows): obscure
+            // the region with a solid block rather than leaking content.
+            NSColor.gray.setFill()
+            NSBezierPath(rect: rect).fill()
+            return
+        }
+
+        let pixelRect = CGRect(
+            x: rect.minX * sourceScale, y: rect.minY * sourceScale,
+            width: rect.width * sourceScale, height: rect.height * sourceScale
+        ).integral.intersection(CGRect(x: 0, y: 0, width: sourceImage.width, height: sourceImage.height))
+        guard pixelRect.width >= 1, pixelRect.height >= 1,
+              let crop = sourceImage.cropping(to: pixelRect) else { return }
+
+        let cols = max(1, Int((rect.width / pixelateBlock).rounded()))
+        let rows = max(1, Int((rect.height / pixelateBlock).rounded()))
+        guard let ctx = CGContext(
+            data: nil, width: cols, height: rows,
+            bitsPerComponent: 8, bytesPerRow: 0,
+            space: CGColorSpace(name: CGColorSpace.sRGB)!,
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) else { return }
+        ctx.interpolationQuality = .medium
+        ctx.draw(crop, in: CGRect(x: 0, y: 0, width: cols, height: rows))
+        guard let blocks = ctx.makeImage() else { return }
+
+        NSImage(cgImage: blocks, size: rect.size).draw(
+            in: rect, from: .zero, operation: .copy, fraction: 1,
+            respectFlipped: true, hints: [.interpolation: NSImageInterpolation.none]
+        )
     }
 
     static func textFont(size: CGFloat) -> NSFont {
@@ -107,14 +171,13 @@ enum ShapeRenderer {
     static let counterRadius: CGFloat = 14
 
     /// Filled circle with a centered white numeral.
-    private static func drawCounter(number: Int, at center: NSPoint, color: NSColor, strokeWidth: CGFloat) {
-        let r = counterRadius
+    private static func drawCounter(number: Int, at center: NSPoint, color: NSColor, radius r: CGFloat) {
         let circleRect = NSRect(x: center.x - r, y: center.y - r, width: r * 2, height: r * 2)
         color.setFill()
         NSBezierPath(ovalIn: circleRect).fill()
 
         let text = "\(number)"
-        let fontSize: CGFloat = text.count > 2 ? 11 : 14
+        let fontSize: CGFloat = (text.count > 2 ? 11 : 14) * (r / counterRadius)
         let numeralColor: NSColor = color.isLight ? .black : .white
         let attrs: [NSAttributedString.Key: Any] = [
             .font: NSFont.systemFont(ofSize: fontSize, weight: .bold),

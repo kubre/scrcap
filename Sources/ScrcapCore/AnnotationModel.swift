@@ -19,6 +19,9 @@ public struct CorePoint: Codable, Equatable, Sendable {
 public enum ShapeKind: Codable, Equatable, Sendable {
     case arrow
     case rectangle
+    /// Pixelated/obscured region (drag a rectangle); the renderer mosaics the
+    /// underlying image within the region. Carries no associated data.
+    case pixelate
     /// Counter badge; the number is fixed at creation time. Undo removes the
     /// shape, and the next stamp derives its number from what remains visible.
     case counter(number: Int)
@@ -28,17 +31,35 @@ public enum ShapeKind: Codable, Equatable, Sendable {
     case text(string: String, size: Double)
 }
 
+/// The three drawing sizes selectable in the editor (S/M/L). `scale` multiplies
+/// the base stroke width and counter radius; for text the scaled point size is
+/// baked into `ShapeKind.text` at creation, so the renderer never scales text.
+public enum ShapeSize: String, Codable, Equatable, Sendable, CaseIterable {
+    case small, medium, large
+
+    public var scale: Double {
+        switch self {
+        case .small: return 1
+        case .medium: return 1.8
+        case .large: return 2.8
+        }
+    }
+}
+
 public struct Shape: Codable, Equatable, Sendable {
     public var kind: ShapeKind
-    /// Index into the 7-slot palette (0-based). Resolved to an actual color by
-    /// the presentation layer.
+    /// Index into the palette (0-based). Resolved to an actual color by the
+    /// presentation layer.
     public var colorIndex: Int
+    /// The drawing size this shape was created at (S/M/L).
+    public var size: ShapeSize
     public var start: CorePoint
     public var end: CorePoint
 
-    public init(kind: ShapeKind, colorIndex: Int, start: CorePoint, end: CorePoint) {
+    public init(kind: ShapeKind, colorIndex: Int, size: ShapeSize = .small, start: CorePoint, end: CorePoint) {
         self.kind = kind
         self.colorIndex = colorIndex
+        self.size = size
         self.start = start
         self.end = end
     }

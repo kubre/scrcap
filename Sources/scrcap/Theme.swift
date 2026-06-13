@@ -18,35 +18,42 @@ enum Theme {
 
     // MARK: Chrome (appearance-following: enamel ↔ carbon inversion)
 
-    /// Chrome surface — warm paper in light, graphite in dark.
+    /// Chrome surface — neutral macOS-style gray (light) / graphite (dark).
     static let chrome = NSColor(name: nil) { appearance in
         appearance.isDark
-            ? NSColor(srgbRed: 0.110, green: 0.105, blue: 0.100, alpha: 1)
-            : NSColor(srgbRed: 0.955, green: 0.948, blue: 0.935, alpha: 1)
+            ? NSColor(srgbRed: 0.105, green: 0.107, blue: 0.110, alpha: 1)
+            : NSColor(srgbRed: 0.948, green: 0.949, blue: 0.952, alpha: 1)
     }
     /// The canvas sheet the screenshot sits on — white in light, near-black in dark.
     static let well = NSColor(name: nil) { appearance in
         appearance.isDark
-            ? NSColor(srgbRed: 0.065, green: 0.063, blue: 0.060, alpha: 1)
-            : NSColor(srgbRed: 0.985, green: 0.982, blue: 0.975, alpha: 1)
+            ? NSColor(srgbRed: 0.062, green: 0.063, blue: 0.066, alpha: 1)
+            : NSColor(srgbRed: 0.984, green: 0.985, blue: 0.988, alpha: 1)
+    }
+    /// Padding area behind the screenshot in the editor. A neutral mid-gray so a
+    /// white screenshot has a visible edge against it.
+    static let canvasBackdrop = NSColor(name: nil) { appearance in
+        appearance.isDark
+            ? NSColor(srgbRed: 0.100, green: 0.102, blue: 0.106, alpha: 1)
+            : NSColor(srgbRed: 0.842, green: 0.845, blue: 0.852, alpha: 1)
     }
     /// Primary text/icon ink.
     static let ink = NSColor(name: nil) { appearance in
         appearance.isDark
-            ? NSColor(srgbRed: 0.920, green: 0.910, blue: 0.895, alpha: 1)
-            : NSColor(srgbRed: 0.105, green: 0.095, blue: 0.088, alpha: 1)
+            ? NSColor(srgbRed: 0.912, green: 0.914, blue: 0.918, alpha: 1)
+            : NSColor(srgbRed: 0.098, green: 0.099, blue: 0.104, alpha: 1)
     }
     /// Secondary ink.
     static let inkDim = NSColor(name: nil) { appearance in
         appearance.isDark
-            ? NSColor(srgbRed: 0.610, green: 0.595, blue: 0.575, alpha: 1)
-            : NSColor(srgbRed: 0.410, green: 0.385, blue: 0.360, alpha: 1)
+            ? NSColor(srgbRed: 0.600, green: 0.605, blue: 0.615, alpha: 1)
+            : NSColor(srgbRed: 0.398, green: 0.402, blue: 0.412, alpha: 1)
     }
     /// Structural border.
     static let rule = NSColor(name: nil) { appearance in
         appearance.isDark
-            ? NSColor(srgbRed: 0.250, green: 0.240, blue: 0.230, alpha: 1)
-            : NSColor(srgbRed: 0.680, green: 0.650, blue: 0.610, alpha: 1)
+            ? NSColor(srgbRed: 0.245, green: 0.248, blue: 0.253, alpha: 1)
+            : NSColor(srgbRed: 0.660, green: 0.664, blue: 0.672, alpha: 1)
     }
     /// Quiet divider between toolbar cells.
     static let hairline = NSColor(name: nil) { appearance in
@@ -56,6 +63,11 @@ enum Theme {
     }
     /// Hover wash for flat cells.
     static let hoverWash = accent.withAlphaComponent(0.12)
+    /// Pressed wash for flat cells — darker than hover for a distinct mouse-down state.
+    static let pressedWash = accent.withAlphaComponent(0.26)
+    /// Selected/active wash — a translucent red used uniformly for the active
+    /// tool, color, and size (no border).
+    static let activeWash = accent.withAlphaComponent(0.20)
 
     // MARK: Metrics — sharp corners, fixed rhythm
 
@@ -198,8 +210,17 @@ enum ThemeTag {
         origin.y = max(6, min(origin.y, bounds.height - size.height - 6))
         let box = NSRect(origin: origin, size: size)
 
+        // Soft shadow so the readout stays legible over busy/light content.
+        NSGraphicsContext.saveGraphicsState()
+        let shadow = NSShadow()
+        shadow.shadowColor = NSColor.black.withAlphaComponent(0.45)
+        shadow.shadowBlurRadius = 8
+        shadow.shadowOffset = .zero
+        shadow.set()
         Theme.tagBackground.setFill()
         box.fill()
+        NSGraphicsContext.restoreGraphicsState()
+
         Theme.tagRule.setStroke()
         let frame = NSBezierPath(rect: box.insetBy(dx: 0.5, dy: 0.5))
         frame.lineWidth = 1

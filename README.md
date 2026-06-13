@@ -41,6 +41,7 @@ Requires macOS 14+ and a Swift 6 toolchain (Command Line Tools are enough).
 ```sh
 swift run scrcap              # run directly (dev)
 swift run scrcap-core-tests   # run the portable-core test suite
+scripts/test.sh               # build + core tests + AppKit smoke tests
 scripts/make_app.sh           # app bundle → dist/scrcap.app (+ size budget gate)
 ```
 
