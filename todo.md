@@ -1,0 +1,535 @@
+# scrcap Windows Port TODO
+
+Status: implementation in progress. Checked implementation items indicate code
+or a local/static guard exists in this branch. Windows runtime verification,
+manual QA, visual baselines, UI automation against a real desktop, capture
+fixtures, and performance budgets stay unchecked until they pass on a Windows
+10/11 machine.
+
+## Branch and Repository Hygiene
+
+- [x] Track `scrcap-windows/` in git so the Windows port is actually part of the branch.
+- [x] Keep `.gitignore` rules for Windows build outputs: `bin/`, `obj/`, and `TestResults/`.
+- [x] Keep the root README Windows-port note after the subtree is tracked.
+- [x] Add a Windows-port README section that states current feature readiness accurately.
+- [x] Add CI or documented local commands for restore, build, tests, and UI color guard.
+- [ ] Verify the solution builds on a real Windows machine with .NET 8 SDK.
+- [ ] Verify all runnable tests pass on Windows before calling any milestone complete.
+
+## M0 - Skeleton and Guardrails
+
+- [x] Ensure `Scrcap.Core` has no WPF, WinForms, Win32, WinRT, DirectX, or UI references.
+- [x] Ensure all platform P/Invoke and Windows APIs live only in `Scrcap.Windows.Platform`.
+- [x] Ensure UI code talks to platform services through interfaces.
+- [x] Add analyzer or script coverage for hard-coded UI colors outside token files.
+- [x] Extend the hard-coded UI guard to catch hard-coded font sizes and key layout metrics where practical.
+- [x] Add token resources for every required color token.
+- [x] Add token resources for every required metric token.
+- [x] Add token resources for typography choices.
+- [x] Add stable vector icon resources with keys for all toolbar icons.
+- [x] Add a failing visual test harness before building out more UI.
+- [x] Confirm `app.manifest` declares PerMonitorV2 DPI awareness.
+- [x] Add required test command-line flags: `--test-mode`.
+- [x] Add required test command-line flag: `--open-sample-editor <png>`.
+- [x] Add required test command-line flag: `--open-preferences`.
+- [x] Add required test command-line flag: `--dump-window-png <path>`.
+- [x] Add required test command-line flag: `--test-app-theme light|dark`.
+- [x] Add required test command-line flag: `--test-taskbar-theme light|dark`.
+
+## M1 - Core Port
+
+- [x] Finish annotation model support for full-document snapshots, not only append-only shapes.
+- [x] Model crop as a real bitmap/document operation instead of storing it as a rectangle shape.
+- [x] Implement crop survival rules for shapes inside, outside, and intersecting crop bounds.
+- [x] Shift surviving shapes by crop origin after crop.
+- [x] Preserve undo/redo across shapes, text, crop, and auto-expand operations.
+- [x] Ensure redo tail truncates when a new interaction is committed.
+- [x] Ensure counter numbering follows visible counters after undo and redo.
+- [x] Add core tests for crop survival and coordinate shifting.
+- [x] Add core tests for crop undo restoring bitmap dimensions and shapes.
+- [x] Add core tests for auto-expand plus annotation undo as one step.
+- [x] Add keymap parsing for Windows display and canonical storage formats.
+- [x] Change default stored Windows global hotkeys to canonical Windows strings if required by the plan contract.
+- [x] Reject harmful or reserved bindings: `Alt+F4`.
+- [x] Reject harmful or reserved bindings: `Win+L`.
+- [x] Reject harmful or reserved bindings: `Ctrl+Alt+Delete`.
+- [x] Reject harmful or reserved bindings: `Win+D`.
+- [x] Reject harmful or reserved bindings: `Win+Tab`.
+- [x] Reject bare unmodified keys for global shortcuts.
+- [x] Implement keymap conflict stealing and victim unbinding.
+- [x] Add tests for all reserved shortcut rejection cases.
+- [x] Add tests for shortcut conflict victim unbinding.
+- [x] Ensure settings load corrupt JSON as defaults without crashing.
+- [x] Ensure corrupt settings are not overwritten until the user changes a setting.
+- [x] Ensure settings normalization fills invalid palette slots from defaults.
+- [x] Ensure settings normalization clamps stroke width.
+- [x] Ensure settings normalization clamps text size.
+- [x] Ensure settings normalization clamps capture delay.
+- [x] Ensure settings normalization clamps scrolling max height.
+- [x] Ensure settings normalization strips invalid filename characters.
+- [x] Make settings writes atomic with flush and replace semantics.
+- [x] Add tests that simulated atomic-write failures leave the previous valid file intact.
+- [x] Finish filename generation tests for `{date}`, `{time}`, empty names, and illegal characters.
+- [x] Finish stitch row hash tests for FNV-1a over BGRA/RGBA rows.
+- [x] Finish stitch alignment tests for largest suffix/prefix overlap.
+- [x] Finish stitch alignment tests for 98 percent tolerance.
+- [x] Finish stitch alignment tests for minimum 16 row overlap.
+- [x] Finish fixed-edge detection tests for sticky top and bottom rows.
+- [x] Finish no-scroll and identical-frame stitch tests.
+
+## M2 - Static Editor, No Capture
+
+- [x] Replace the default title bar editor with custom chrome.
+- [x] Use `WindowChrome` instead of `AllowsTransparency=true` for the editor.
+- [x] Build the required 36 DIP editor header.
+- [x] Build the required 42 DIP bottom toolbar.
+- [x] Build the editor container with 10 DIP radius, 1 DIP rule border, and chrome background.
+- [x] Set editor minimum width to 600 DIP.
+- [x] Set editor minimum height to header plus 200 DIP canvas plus toolbar.
+- [x] Implement initial 100 percent zoom when the image fits within 90 percent of work area.
+- [x] Implement fit-to-work-area zoom when the image does not fit.
+- [x] Show accurate zoom percent in the status bar.
+- [x] Allow dragging the empty header background to move the window.
+- [x] Allow dragging empty toolbar gaps to move the window.
+- [x] Prevent toolbar cells from dragging the window.
+- [x] Implement the required header brand block.
+- [x] Implement icon-only undo button with tooltip.
+- [x] Disable undo button when there is no undo.
+- [x] Implement icon-only save button with tooltip.
+- [x] Implement done pill showing `Copy & Close` or `Close` based on settings.
+- [x] Implement bottom rule under the header.
+- [x] Replace text toolbar buttons with icon plus key-label cells.
+- [x] Implement tool cells for Q Arrow.
+- [x] Implement tool cells for W Rectangle.
+- [x] Implement tool cells for E Counter.
+- [x] Implement tool cells for R Text.
+- [x] Implement tool cells for T Pixelate.
+- [x] Implement tool cells for Y Crop.
+- [x] Implement color swatch cells for keys 1 through 5.
+- [x] Implement size cells for Z small, X medium, and C large.
+- [x] Implement toolbar hover wash.
+- [x] Implement toolbar pressed wash.
+- [x] Implement toolbar selected wash.
+- [x] Ensure selected tool, color, and size use the red active state.
+- [x] Add `AutomationProperties.AutomationId` to every clickable editor control.
+- [x] Add `AutomationProperties.Name` to every clickable editor control.
+- [x] Load a sample PNG from `--open-sample-editor <png>`.
+- [x] Keep Arrow selected by default in every new editor session.
+- [x] Reset palette slot to 1 in every new editor session.
+- [x] Reset annotation size to small in every new editor session.
+- [x] Store annotation coordinates in image logical coordinates, not raw canvas coordinates.
+- [x] Convert window point to viewport point to image DIP exactly once.
+- [x] Add coordinate tests for 100 percent DPI.
+- [x] Add coordinate tests for 150 percent DPI.
+- [x] Add coordinate tests for 200 percent DPI.
+- [x] Draw the source bitmap at correct zoom and offset.
+- [x] Draw transient previews while dragging.
+- [x] Commit arrows on mouse-up without Enter.
+- [x] Keep Arrow tool armed after arrow commit.
+- [x] Skip arrow commit for length under 2 DIP.
+- [x] Render arrows with round shaft cap.
+- [x] Render arrowheads with the required length clamp and spread angle.
+- [x] Commit rectangles on mouse-up without Enter.
+- [x] Keep Rectangle tool armed after rectangle commit.
+- [x] Skip rectangle commit when width or height is under 2 DIP.
+- [x] Implement Shift-constrained square rectangles.
+- [x] Render rounded stroke-only rectangles.
+- [x] Commit counters on mouse-up without drag.
+- [x] Keep Counter tool armed after counter commit.
+- [x] Center counter badges at pointer.
+- [x] Choose counter numeral color by fill luma.
+- [x] Size counter font correctly for more than two digits.
+- [x] Implement inline text editor at click anchor.
+- [x] Make live text metrics match final rendered text.
+- [x] Implement Return inserts newline with Shift+Return commits mode.
+- [x] Implement Return commits with Shift+Return inserts newline mode.
+- [x] Make Esc exit text entry without closing the editor.
+- [x] Commit non-empty text when switching away from Text tool.
+- [x] Cancel empty text without adding an undo snapshot.
+- [x] Render text with Segoe UI Bold and configured text size.
+- [x] Commit pixelate regions on mouse-up without Enter.
+- [x] Keep Pixelate tool armed after pixelate commit.
+- [x] Skip pixelate commit when width or height is not greater than 1 DIP.
+- [x] Render pixelation by mosaicing source bitmap with 9 DIP block size.
+- [x] Commit crop on mouse-up without Enter.
+- [x] Keep Crop tool armed after crop commit.
+- [x] Render crop preview using the same hazard ants as capture selection.
+- [x] Crop bitmap only for crop rect at least 2 by 2 DIP.
+- [x] Apply crop survival rules to existing shapes.
+- [x] Make crop undo restore the full previous document.
+- [x] Implement Ctrl+Z undo for one full interaction.
+- [x] Implement Ctrl+Shift+Z redo.
+- [x] Implement Ctrl+C copy flattened PNG while keeping editor open.
+- [x] Implement Ctrl+S save PNG to configured folder and close after success.
+- [x] Implement Ctrl+Shift+S Save As PNG and close after success.
+- [x] Implement Ctrl+plus zoom in.
+- [x] Implement Ctrl+minus zoom out.
+- [x] Implement Ctrl+0 zoom reset.
+- [x] Implement zoom steps: 25, 33, 50, 67, 75, 100, 125, 150, 200, 300, 400 percent.
+- [x] Implement Esc copy-and-close or close-only based on settings.
+- [x] Implement Ctrl+W discard and close.
+- [x] Implement Alt-drag flattened temp PNG to another app.
+- [x] Clean temp drag-out files older than 24 hours.
+- [x] Flatten export at native pixel resolution.
+- [x] Set PNG DPI metadata to 96 for 1x export.
+- [x] Set PNG DPI metadata to 192 for 2x export.
+- [ ] Add visual baselines for editor light mode.
+- [ ] Add visual baselines for editor dark mode.
+- [ ] Add UI automation that draws all editor tools by mouse and keyboard.
+- [ ] Add UI automation proving non-text shapes do not require Enter.
+- [ ] Add UI automation proving Ctrl+Z removes the last committed interaction.
+- [ ] Add UI automation proving exported PNG matches visual baseline tolerance.
+
+## M3 - Preferences, Theme, and Settings Persistence
+
+- [x] Replace default Preferences title bar with app custom chrome.
+- [x] Match default Preferences size 720 by 540.
+- [x] Enforce Preferences minimum size 680 by 480.
+- [x] Build 36 DIP Preferences header.
+- [x] Build 42 DIP Preferences tab bar.
+- [x] Style tabs to match the app, not default WPF tabs.
+- [x] Add General tab rows for theme segmented control.
+- [x] Add General tab row for launch at login.
+- [x] Add General reset section.
+- [x] Add red outlined Reset all button.
+- [x] Add Capture tab.
+- [x] Add per-mode after-capture behavior controls.
+- [x] Add window capture target active/pick control.
+- [x] Add include cursor control.
+- [x] Add capture delay control.
+- [x] Add include window shadow control.
+- [x] Add window background control.
+- [x] Add scrolling max height control.
+- [x] Add Shortcuts tab shortcut recorder rows.
+- [x] Suspend global hotkeys while shortcut recorder is armed.
+- [x] Record the currently pressed chord instead of firing capture while recorder is armed.
+- [x] Show conflict warning when a shortcut steals another action.
+- [x] Unbind the victim action when a shortcut is stolen.
+- [x] Add reset shortcuts button.
+- [x] Add Editor tab palette controls.
+- [x] Add Editor tab stroke width control.
+- [x] Add Editor tab text size control.
+- [x] Add Editor tab Return behavior control.
+- [x] Add Editor tab Esc behavior control.
+- [x] Add Editor tab auto-expand canvas control.
+- [x] Add Editor tab canvas extension background control.
+- [x] Add Output tab save folder picker.
+- [x] Add Output tab filename pattern control.
+- [x] Add Output tab export scale control.
+- [x] Add Output tab suppress copy notification control.
+- [x] Add About tab.
+- [x] Show version in About.
+- [x] Show build channel in About.
+- [x] Show GitHub or source link in About.
+- [x] Add check for updates only if implemented; otherwise omit it.
+- [x] Add license and credits in About.
+- [x] Apply settings immediately where the plan expects immediate UI updates.
+- [x] Persist preferences on change or save according to the final chosen UX.
+- [ ] Reopen Preferences and verify persisted settings are loaded on Windows.
+- [x] Implement app theme service for System, Light, and Dark modes.
+- [x] Apply app theme to editor resources.
+- [x] Apply app theme to preferences resources.
+- [x] Keep taskbar theme separate from app theme for tray icon contrast.
+- [x] Add fake theme services for tests.
+- [ ] Add UI automation that opens Preferences.
+- [ ] Add UI automation that clicks every Preferences tab.
+- [ ] Add UI automation that changes at least one setting in each tab.
+- [ ] Add UI automation that verifies settings JSON writes.
+- [ ] Add UI automation that closes and reopens Preferences to verify persistence.
+- [ ] Add UI automation that resets all settings and verifies defaults.
+- [ ] Add light Preferences screenshot baseline.
+- [ ] Add dark Preferences screenshot baseline.
+
+## M4 - Tray and Global Hotkeys
+
+- [x] Keep app tray-resident and invisible until capture or preferences is requested.
+- [x] Register global hotkeys before expensive UI setup.
+- [x] Do not show the app in the taskbar while it is only running in the tray.
+- [x] Make hotkey registration failures non-blocking.
+- [x] Show a notification when a hotkey fails to register.
+- [x] Mark failed shortcut rows with an error in Preferences.
+- [x] Re-register hotkeys on settings changes.
+- [x] Unregister hotkeys on shutdown.
+- [x] Suspend hotkeys while shortcut recorder is active.
+- [x] Resume hotkeys after shortcut recorder finishes.
+- [x] Add tray menu item for Capture Region.
+- [x] Add tray menu item for Capture Window.
+- [x] Add tray menu item for Capture Fullscreen.
+- [x] Add tray menu item for Scrolling Capture.
+- [x] Add tray menu item for Delayed Region Capture.
+- [x] Add tray menu item for Repeat Last Capture.
+- [x] Add tray menu item for Preferences.
+- [x] Add tray menu item for Quit scrcap.
+- [x] Omit Check for Updates until it is implemented.
+- [x] Ship real multi-resolution `scrcap-tray-taskbar-light.ico`.
+- [x] Ship real multi-resolution `scrcap-tray-taskbar-dark.ico`.
+- [x] Stop generating tray icons dynamically at runtime.
+- [x] Update tray icon when taskbar theme changes.
+- [x] Read Windows mode for taskbar theme when available.
+- [x] Fall back to app theme if taskbar theme is unavailable.
+- [x] Listen for `UISettings.ColorValuesChanged`.
+- [x] Listen for `WM_SETTINGCHANGE`.
+- [x] Listen for `SystemEvents.UserPreferenceChanged`.
+- [x] Debounce theme changes to 100 ms.
+- [x] Add tests that light to dark to light taskbar theme flips icon asset keys.
+- [ ] Add manual visual checklist for Windows 10 light taskbar.
+- [ ] Add manual visual checklist for Windows 10 dark taskbar.
+- [ ] Add manual visual checklist for Windows 11 light taskbar.
+- [ ] Add manual visual checklist for Windows 11 dark taskbar.
+
+## M5 - Region, Window, Fullscreen, and Delayed Overlay
+
+- [x] Pre-create overlay windows so hotkey to overlay is fast.
+- [x] Create one overlay per monitor.
+- [x] Rebuild overlays when displays change.
+- [x] Cover physical monitor bounds, including negative virtual-screen coordinates.
+- [x] Make the overlay under the mouse receive Esc, Space, and Tab.
+- [x] Draw pre-drag crosshair lines through the mouse.
+- [x] Draw coordinate tag near the mouse and clamp it inside bounds.
+- [x] Draw dim mask at 38 percent black.
+- [x] Punch out selected rect while dragging.
+- [x] Draw capture selection with marching ants.
+- [x] Animate marching ants only while active drag is live.
+- [x] Stop all overlay timers while overlay is hidden.
+- [x] Show bottom-center hint before drag.
+- [x] Show size tag above rect during drag.
+- [x] Show hint tag below rect during drag.
+- [x] Implement Space mid-drag to move selection instead of resize.
+- [x] Cancel region overlay with Esc before drag.
+- [x] Cancel region overlay with Esc during drag.
+- [x] Hide overlay before capture starts.
+- [x] Wait one compositor turn or flush before reading capture.
+- [x] Implement delayed region countdown UI.
+- [x] Implement window picker mode.
+- [x] Enumerate windows in z-order with `EnumWindows`.
+- [x] Filter invisible windows.
+- [x] Filter cloaked windows.
+- [x] Filter tool windows.
+- [x] Filter own-process windows.
+- [x] Filter desktop and shell windows.
+- [x] Filter windows smaller than 40 by 40.
+- [x] Use `DwmGetWindowAttribute(DWMWA_EXTENDED_FRAME_BOUNDS)` for window bounds.
+- [x] Fall back to `GetWindowRect` only when DWM bounds fail.
+- [x] Highlight hovered window candidates.
+- [x] Preserve previous window candidate when possible.
+- [x] Implement Tab cycling among overlapping window candidates.
+- [x] Show overlap index label such as `2/4`.
+- [x] Commit selected window on click.
+- [x] Cancel window picker with Esc.
+- [ ] Add overlay visual baseline for 1920 by 1080 at 150 percent DPI.
+- [ ] Add UI automation for region drag.
+- [ ] Add UI automation for Space-move during region drag.
+- [ ] Add UI automation for Esc cancel.
+- [ ] Add UI automation for window hover and click.
+- [ ] Add UI automation for Tab cycling overlapping windows.
+
+## M6 - Native Capture
+
+- [x] Implement Windows.Graphics.Capture service for monitor capture.
+- [x] Implement Windows.Graphics.Capture service for window capture.
+- [x] Implement region capture by capturing monitor and cropping physical pixel rect.
+- [x] Create capture items from HMONITOR for monitor capture.
+- [x] Create capture items from HWND for window capture.
+- [x] Use Direct3D11 device and frame pool.
+- [x] Convert captured frames to WPF-compatible bitmaps.
+- [x] Dispose GPU resources deterministically.
+- [x] Convert logical selection rects to physical pixels using monitor DPI.
+- [ ] Verify region crop at 100 percent DPI.
+- [ ] Verify region crop at 150 percent DPI.
+- [ ] Verify region crop at 200 percent DPI.
+- [x] Hide scrcap overlay windows before capture.
+- [x] Hide scrcap editor windows before capture when needed.
+- [x] Avoid capturing scrcap UI pixels in output.
+- [x] Implement include cursor when supported.
+- [x] Disable or mark include cursor unavailable when unsupported.
+- [x] Implement clean window capture without shadow.
+- [x] Composite no-shadow window capture on white background when requested.
+- [x] Preserve transparent rounded corners when transparent background is requested.
+- [x] Implement synthetic soft shadow with 20 DIP padding when shadow is enabled.
+- [x] Use BitBlt only as fallback for monitor or region capture.
+- [x] Do not use BitBlt as the only capture path.
+- [x] Detect black or blank protected-content captures.
+- [x] Show warning toast when a window blocks capture.
+- [x] Keep app running when capture fails.
+- [x] Hide overlays when capture fails.
+- [x] Do not leave topmost windows stuck after capture failure.
+- [x] Implement after-capture open editor behavior.
+- [x] Implement after-capture copy only behavior.
+- [x] Implement after-capture both behavior.
+- [x] Implement repeat last region target if still valid.
+- [x] Implement repeat last window target if still valid.
+- [x] Implement repeat last fullscreen target if still valid.
+- [ ] Build deterministic capture fixture app.
+- [ ] Expose fixture HWND through stdout or named pipe.
+- [ ] Add capture test for DWM bounds converted to pixels.
+- [ ] Add capture test for colored corners matching expected pixels.
+- [ ] Add capture test proving no overlay pixels are present.
+- [ ] Add capture test for fullscreen monitor under cursor.
+- [ ] Add capture tests for shadow on/off and transparent/white background variants.
+- [ ] Add capture failure cleanup test.
+
+## M7 - Scrolling Capture
+
+- [x] Start scrolling capture from the same region overlay.
+- [x] Move cursor to region center before wheel input.
+- [x] Capture first frame.
+- [x] Hash rows using FNV-1a over 4-byte rows.
+- [x] Accumulate output pixel bytes.
+- [x] Set scroll step to floor of 70 percent region height.
+- [x] Inject scroll down using `SendInput`.
+- [x] Implement settle detection by polling frame hashes every 120 ms.
+- [x] Stop settle wait after two matching frames.
+- [x] Stop settle wait after 600 ms timeout.
+- [x] Detect fixed top rows.
+- [x] Detect fixed bottom rows.
+- [x] Crop fixed rows from new frame unless they cover at least 90 percent of the frame.
+- [x] Align accumulated suffix to new-frame prefix.
+- [x] Require minimum 16 row overlap for alignment.
+- [x] Use 98 percent row-hash tolerance for alignment.
+- [x] Stop after two consecutive iterations with no new rows.
+- [x] Stop at settings scrolling max height.
+- [x] Stop at 256 MB accumulated pixel memory cap.
+- [x] Implement Esc cancellation.
+- [x] Implement HUD STOP cancellation.
+- [x] Return partial capture only when at least the first frame is valid.
+- [x] Report cancellation when no valid frame exists.
+- [x] Build scrolling capture HUD.
+- [x] Position HUD top-right of selected monitor.
+- [x] Style HUD with fixed carbon block, red dot, count, and STOP button.
+- [x] Disable or freeze HUD animation in tests.
+- [ ] Build scroll fixture app with deterministic scrollable panel.
+- [ ] Add fixture support for sticky header.
+- [ ] Add fixture support for lazy-loading delay.
+- [ ] Add scrolling test for normal page.
+- [ ] Add scrolling test for sticky header.
+- [ ] Add scrolling test for no-scroll fallback.
+- [ ] Add scrolling test for bottom/bounce detection.
+- [ ] Add scrolling test for lazy-load delay.
+- [ ] Add scrolling test for max-height cap.
+- [ ] Compare stitched output rows to expected generated bitmap.
+
+## M8 - Packaging, Performance, and Release Hardening
+
+- [x] Add framework-dependent single-file Windows x64 publish command.
+- [x] Add optional self-contained single-file Windows x64 publish command.
+- [x] Label framework-dependent and self-contained artifacts clearly.
+- [ ] Ship `scrcap.exe`.
+- [ ] Ship tray icon assets.
+- [ ] Ship license.
+- [x] Exclude development artifacts from release output.
+- [x] Add artifact gate that fails on PDBs in release package.
+- [x] Add artifact gate that fails on test baselines in release package.
+- [x] Add artifact gate that fails on intermediate files in release package.
+- [ ] Measure hotkey to overlay visible latency.
+- [ ] Keep warm hotkey to overlay budget under 60 ms.
+- [ ] Measure idle CPU after 10 seconds.
+- [ ] Keep idle CPU under 0.2 percent average.
+- [ ] Measure idle private memory after startup plus 10 seconds.
+- [ ] Keep idle private memory under 90 MB for framework-dependent build.
+- [ ] Expose or test overlay timer counts.
+- [ ] Ensure hidden overlays have zero active timers.
+- [ ] Ensure marching ants timer runs only while selecting.
+- [ ] Test editor rendering with 500 shapes.
+- [ ] Ensure editor does not create one WPF element per shape.
+- [ ] Document measured performance budgets.
+- [x] Add release packaging docs.
+- [x] Add Windows differences doc for any behavior that intentionally differs from macOS.
+- [ ] Add tests for every documented Windows behavior difference.
+
+## Visual and UI Quality Gates
+
+- [x] Replace default WPF buttons in editor visible UI with styled app controls.
+- [x] Replace default WPF tabs in preferences with styled app tabs.
+- [x] Replace default WPF checkboxes, combo boxes, sliders, and text boxes with styled app controls where visible.
+- [x] Ensure no raw Win32-looking visible editor, overlay, toolbar, or preferences UI remains.
+- [x] Ensure every visible UI file consumes ThemeTokens.
+- [x] Ensure every toolbar cell has an icon and does not fall back to missing-icon text.
+- [x] Ensure text fits inside all buttons, tabs, and compact controls.
+- [x] Ensure toolbar layout does not shift when active states change.
+- [ ] Ensure editor and preferences match light-mode baselines.
+- [ ] Ensure editor and preferences match dark-mode baselines.
+- [ ] Ensure overlay tags match baselines.
+- [ ] Ensure scrolling HUD matches baselines.
+- [ ] Ensure failed visual diffs write actual PNG, expected PNG, heatmap PNG, and JSON summary.
+- [ ] Require explicit accept flag or environment variable for baseline updates.
+- [ ] Include updated screenshots whenever baselines are intentionally changed.
+
+## Manual QA Matrix
+
+- [ ] Test on Windows 10 22H2.
+- [ ] Test on current stable Windows 11.
+- [ ] Test 100 percent DPI.
+- [ ] Test 125 percent DPI.
+- [ ] Test 150 percent DPI.
+- [ ] Test 200 percent DPI.
+- [ ] Test mixed-DPI monitors.
+- [ ] Test negative virtual-screen coordinates.
+- [ ] Test app Light theme.
+- [ ] Test app Dark theme.
+- [ ] Test app System theme.
+- [ ] Test Windows/taskbar light mode.
+- [ ] Test Windows/taskbar dark mode.
+- [ ] Test high contrast mode.
+- [ ] Switch theme while app is running and verify tray icon changes.
+- [ ] Paste copied PNG into Paint.
+- [ ] Paste copied PNG into Word.
+- [ ] Paste copied PNG into Teams.
+- [ ] Paste copied PNG into Slack.
+- [ ] Paste copied PNG into browser contenteditable.
+- [ ] Paste copied PNG into Outlook.
+- [ ] Verify pasted image is not double-sized.
+- [ ] Verify pasted image is not blurry.
+- [ ] Capture normal Win32 window.
+- [ ] Capture WPF window.
+- [ ] Capture Chromium browser window.
+- [ ] Capture maximized window.
+- [ ] Capture borderless app.
+- [ ] Verify elevated app behavior.
+- [ ] Verify minimized windows are ignored.
+- [ ] Verify hidden windows are ignored.
+- [ ] Scrolling capture a browser page.
+- [ ] Scrolling capture a chat app.
+- [ ] Scrolling capture a list with sticky header.
+- [ ] Scrolling capture a non-scrollable region.
+- [ ] Scrolling capture a page with lazy-loaded images.
+- [ ] Test hotkey already registered by another app.
+- [ ] Test clipboard locked failure.
+- [ ] Test missing save folder failure.
+- [ ] Test disk write denied failure.
+- [ ] Test protected content capture failure.
+
+## Final Definition of Done
+
+- [ ] All capture modes work from tray menu.
+- [ ] All capture modes work from global hotkeys.
+- [ ] Editor opens focused and accepts tool shortcuts immediately.
+- [ ] Non-text annotations commit on mouse-up without Enter.
+- [ ] Undo and redo work across shapes, auto-expand, crop, and text.
+- [ ] Copy outputs valid PNG with correct dimensions and DPI metadata.
+- [ ] Save outputs valid PNG with correct dimensions and DPI metadata.
+- [ ] Drag-out outputs valid PNG and cleans temp files.
+- [ ] Settings persist, migrate, normalize, and reset.
+- [ ] Editor matches the provided design language in light mode.
+- [ ] Editor matches the provided design language in dark mode.
+- [ ] Preferences match the provided design language in light mode.
+- [ ] Preferences match the provided design language in dark mode.
+- [ ] Toolbar controls match visual baselines.
+- [ ] Status bar matches visual baselines.
+- [ ] Overlay tags match visual baselines.
+- [ ] Scrolling HUD matches visual baselines.
+- [ ] Red active state is consistent across tools, colors, sizes, overlays, and controls.
+- [ ] Tray icon remains visible on light taskbars.
+- [ ] Tray icon remains visible on dark taskbars.
+- [ ] Tray icon updates while app is running.
+- [x] Core tests pass.
+- [ ] Rendering golden tests pass.
+- [ ] UI automation tests pass.
+- [ ] Capture fixture tests pass.
+- [ ] Scrolling fixture tests pass.
+- [ ] Performance budgets are measured and documented.
+- [ ] Multi-monitor and high-DPI manual QA is complete.
+- [x] Platform APIs are isolated behind interfaces.
+- [x] All visible metrics and colors live in tokens.
+- [x] Every clickable control has `AutomationProperties.AutomationId`.
+- [x] Every clickable control has `AutomationProperties.Name`.
+- [x] Release package excludes development artifacts.

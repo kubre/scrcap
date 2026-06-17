@@ -1,0 +1,55 @@
+<Window x:Class="Scrcap.Windows.UI.Overlay.ScrollingCaptureHud"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        WindowStyle="None"
+        AllowsTransparency="True"
+        ResizeMode="NoResize"
+        Topmost="True"
+        ShowInTaskbar="False"
+        Background="Transparent"
+        Width="{StaticResource MetricScrollingHudWidth}"
+        Height="{StaticResource MetricScrollingHudHeight}"
+        KeyDown="Window_KeyDown">
+  <Border Background="{StaticResource BrushInk}"
+          BorderBrush="{StaticResource BrushAccent}"
+          BorderThickness="{StaticResource MetricBorderThickness}"
+          CornerRadius="{StaticResource MetricPreferencesRadius}"
+          Padding="{StaticResource MetricScrollingHudPadding}">
+    <Grid>
+      <Grid.ColumnDefinitions>
+        <ColumnDefinition Width="*" />
+        <ColumnDefinition Width="Auto" />
+      </Grid.ColumnDefinitions>
+      <StackPanel Orientation="Horizontal"
+                  VerticalAlignment="Center">
+        <Ellipse Width="{StaticResource MetricScrollingHudDot}"
+                 Height="{StaticResource MetricScrollingHudDot}"
+                 Fill="{StaticResource BrushAccent}" />
+        <StackPanel Margin="{StaticResource MetricButtonGapRight}">
+          <TextBlock Foreground="{StaticResource BrushOnAccent}"
+                     FontFamily="{StaticResource FontUi}"
+                     FontSize="{StaticResource FontSizeBody}"
+                     FontWeight="SemiBold"
+                     Text="Scrolling" />
+          <TextBlock x:Name="ProgressText"
+                     Foreground="{StaticResource BrushRule}"
+                     FontFamily="{StaticResource FontUi}"
+                     FontSize="{StaticResource FontSizeSmall}"
+                     Text="1 frame" />
+        </StackPanel>
+      </StackPanel>
+      <Button Grid.Column="1"
+              AutomationProperties.AutomationId="ScrollingCaptureStop"
+              AutomationProperties.Name="Stop scrolling capture"
+              MinWidth="{StaticResource MetricScrollingHudStopMinWidth}"
+              Padding="{StaticResource MetricScrollingHudStopPadding}"
+              Background="{StaticResource BrushAccent}"
+              BorderBrush="{StaticResource BrushAccentDeep}"
+              Foreground="{StaticResource BrushOnAccent}"
+              FontFamily="{StaticResource FontUi}"
+              FontSize="{StaticResource FontSizeSmall}"
+              Click="Stop_Click"
+              Content="STOP" />
+    </Grid>
+  </Border>
+</Window>

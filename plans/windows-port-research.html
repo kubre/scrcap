@@ -1,0 +1,1487 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>scrcap Windows Port Research</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f7f8fa;
+      --paper: #ffffff;
+      --ink: #1b1f24;
+      --muted: #5d6673;
+      --line: #d8dee6;
+      --soft: #eef2f7;
+      --accent: #1d5f8c;
+      --accent-soft: #e6f2f8;
+      --warn: #7a4d00;
+      --warn-soft: #fff4d7;
+      --good: #166534;
+      --good-soft: #e9f7ee;
+      --bad: #8a1f1f;
+      --bad-soft: #fdecec;
+      --code: #f3f5f7;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      line-height: 1.55;
+    }
+
+    main {
+      max-width: 1120px;
+      margin: 0 auto;
+      padding: 32px 20px 56px;
+    }
+
+    article {
+      background: var(--paper);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 32px;
+    }
+
+    h1, h2, h3, h4 {
+      line-height: 1.2;
+      margin: 0;
+      color: #111827;
+    }
+
+    h1 {
+      font-size: 32px;
+      letter-spacing: 0;
+    }
+
+    h2 {
+      margin-top: 38px;
+      padding-top: 24px;
+      border-top: 1px solid var(--line);
+      font-size: 24px;
+    }
+
+    h3 {
+      margin-top: 28px;
+      font-size: 19px;
+    }
+
+    h4 {
+      margin-top: 20px;
+      font-size: 16px;
+    }
+
+    p {
+      margin: 12px 0;
+    }
+
+    a {
+      color: var(--accent);
+      text-decoration-thickness: 1px;
+      text-underline-offset: 2px;
+    }
+
+    ul, ol {
+      margin: 10px 0 16px 24px;
+      padding: 0;
+    }
+
+    li {
+      margin: 6px 0;
+    }
+
+    code {
+      padding: 2px 5px;
+      border-radius: 4px;
+      background: var(--code);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 0.92em;
+    }
+
+    pre {
+      overflow-x: auto;
+      margin: 14px 0;
+      padding: 14px 16px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: var(--code);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 13px;
+      line-height: 1.5;
+    }
+
+    pre code {
+      padding: 0;
+      background: transparent;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 16px 0 22px;
+      font-size: 14px;
+    }
+
+    th, td {
+      vertical-align: top;
+      border: 1px solid var(--line);
+      padding: 10px 12px;
+    }
+
+    th {
+      width: 24%;
+      background: var(--soft);
+      text-align: left;
+      font-weight: 650;
+    }
+
+    td ul {
+      margin-top: 0;
+      margin-bottom: 0;
+    }
+
+    .lede {
+      color: var(--muted);
+      font-size: 16px;
+      margin-top: 10px;
+      max-width: 860px;
+    }
+
+    .meta {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 10px;
+      margin: 24px 0;
+    }
+
+    .meta div,
+    .note,
+    .decision,
+    .risk,
+    .good {
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 12px 14px;
+    }
+
+    .meta strong {
+      display: block;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 650;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      margin-bottom: 4px;
+    }
+
+    .decision {
+      border-color: #b7d5e7;
+      background: var(--accent-soft);
+    }
+
+    .note {
+      background: #fafbfc;
+    }
+
+    .good {
+      border-color: #b7dfc4;
+      background: var(--good-soft);
+    }
+
+    .risk {
+      border-color: #e6c471;
+      background: var(--warn-soft);
+    }
+
+    .badge {
+      display: inline-block;
+      padding: 2px 7px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: #fff;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 650;
+      white-space: nowrap;
+    }
+
+    .priority {
+      display: inline-block;
+      min-width: 36px;
+      padding: 2px 6px;
+      border-radius: 4px;
+      text-align: center;
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .p0 { background: var(--bad-soft); color: var(--bad); }
+    .p1 { background: var(--warn-soft); color: var(--warn); }
+    .p2 { background: var(--accent-soft); color: var(--accent); }
+    .p3 { background: var(--good-soft); color: var(--good); }
+
+    .toc {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px 18px;
+      margin: 20px 0 4px;
+      padding: 16px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: #fafbfc;
+    }
+
+    .toc a {
+      display: block;
+      color: var(--ink);
+      text-decoration: none;
+    }
+
+    .toc a:hover {
+      color: var(--accent);
+      text-decoration: underline;
+    }
+
+    .section-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 14px;
+    }
+
+    .compact-table th {
+      width: 18%;
+    }
+
+    .wide-table th {
+      width: auto;
+    }
+
+    .wide-table th:first-child {
+      width: 18%;
+    }
+
+    .nowrap {
+      white-space: nowrap;
+    }
+
+    @media (max-width: 760px) {
+      main {
+        padding: 12px;
+      }
+
+      article {
+        padding: 20px;
+      }
+
+      h1 {
+        font-size: 26px;
+      }
+
+      .meta,
+      .toc,
+      .section-grid {
+        grid-template-columns: 1fr;
+      }
+
+      table,
+      thead,
+      tbody,
+      tr,
+      th,
+      td {
+        display: block;
+      }
+
+      tr {
+        border: 1px solid var(--line);
+        margin-bottom: 12px;
+      }
+
+      th,
+      td {
+        border: 0;
+        width: 100%;
+      }
+
+      th {
+        border-bottom: 1px solid var(--line);
+      }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <article>
+      <header>
+        <h1>scrcap Windows Port Research</h1>
+        <p class="lede">
+          A source-grounded review of the current <code>scrcap-windows/</code> implementation, comparable Windows screenshot and capture applications, and Windows platform guidance. The goal is to identify simple patterns that preserve performance without turning the port into a large framework.
+        </p>
+
+        <div class="meta">
+          <div>
+            <strong>Generated</strong>
+            2026-06-17
+          </div>
+          <div>
+            <strong>Local baseline</strong>
+            commit <code>b0f5a5e</code>
+          </div>
+          <div>
+            <strong>Scope</strong>
+            research and implementation plan
+          </div>
+          <div>
+            <strong>Runtime testing</strong>
+            no Windows runtime smoke was run
+          </div>
+        </div>
+
+        <div class="decision">
+          <strong>Overall decision:</strong>
+          keep the current C#/.NET 8/WPF port shape. Do not rewrite the UI, do not add DXGI Desktop Duplication yet, and do not copy large workflow systems from mature tools. The highest-value improvements are to make capture backend selection observable, keep raw frames raw until export, make scrolling capture memory-bounded, cache expensive editor effects, and replace source-string tests with real Windows behavior tests.
+        </div>
+
+        <nav class="toc" aria-label="Table of contents">
+          <a href="#executive-summary">Executive summary</a>
+          <a href="#current-baseline">Current local baseline</a>
+          <a href="#repo-study">External repository study</a>
+          <a href="#platform-guidance">Microsoft platform guidance</a>
+          <a href="#good-port-patterns">What makes a good Windows port</a>
+          <a href="#implementation-plan">Implementation plan</a>
+          <a href="#contracts">Suggested contracts</a>
+          <a href="#testing">Verification and tests</a>
+          <a href="#do-not-do">What not to do yet</a>
+          <a href="#source-index">Source index</a>
+        </nav>
+      </header>
+
+      <section id="executive-summary">
+        <h2>Executive Summary</h2>
+        <p>
+          The Windows port is already organized in a good way for a small native screenshot tool. The main issue is not architecture. The main issue is that several hot paths convert or retain more data than needed: capture becomes PNG too early, WGC frames pass through several layers before becoming an image, scrolling capture stores full bitmap frames, and pixelate rendering reads pixels cell by cell during render.
+        </p>
+        <p>
+          The better pattern is a small explicit pipeline:
+        </p>
+        <pre><code>capture target -> backend selection -> raw BGRA frame -> editor model -> render/cache -> export PNG only at output boundaries</code></pre>
+        <p>
+          Mature Windows screenshot and capture projects converge on the same few principles: isolate platform capture code, make backend choice explicit, keep frame data close to its native format, handle DPI and monitor geometry deliberately, put overlay ownership in one place, and test on real Windows graphics paths.
+        </p>
+
+        <table class="wide-table">
+          <thead>
+            <tr>
+              <th>Rank</th>
+              <th>Change</th>
+              <th>Why it matters</th>
+              <th>Expected complexity</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><span class="priority p0">P0</span></td>
+              <td>Keep current project split and WPF shell.</td>
+              <td>The existing structure already separates portable core logic, Windows platform APIs, and UI composition. Rewriting would add risk without solving the current performance issues.</td>
+              <td>None. This is a constraint on future work.</td>
+            </tr>
+            <tr>
+              <td><span class="priority p1">P1</span></td>
+              <td>Replace internal <code>PngBytes</code> capture contract with raw frame/pixel data.</td>
+              <td>Avoids capture -> PNG encode -> PNG decode -> editor render. It also gives WGC and GDI a stable lower-level result shape.</td>
+              <td>Medium. Touches capture service, app handoff, editor load, save/copy/export boundaries.</td>
+            </tr>
+            <tr>
+              <td><span class="priority p1">P1</span></td>
+              <td>Make backend choice explicit and observable.</td>
+              <td>Windows capture failures are environment-specific. A user or test should know whether WGC or GDI was used and why fallback happened.</td>
+              <td>Low. Metadata plus a small backend resolver.</td>
+            </tr>
+            <tr>
+              <td><span class="priority p1">P1</span></td>
+              <td>Add real Windows fixture tests.</td>
+              <td>Current source-string tests are useful as temporary guardrails but cannot catch actual capture, DPI, overlay, or WPF behavior bugs.</td>
+              <td>Medium. Needs a Windows test fixture and CI/manual gate.</td>
+            </tr>
+            <tr>
+              <td><span class="priority p2">P2</span></td>
+              <td>Rework scrolling capture storage.</td>
+              <td>Scrolling capture is the one feature likely to create very tall images and high memory pressure. The cap should govern storage, not only report late failure.</td>
+              <td>Medium to high. Can be done incrementally around current stitching logic.</td>
+            </tr>
+            <tr>
+              <td><span class="priority p2">P2</span></td>
+              <td>Cache pixelate output using downscale/upscale.</td>
+              <td>Eliminates repeated <code>CopyPixels</code>, tiny allocations, and brush creation inside render loops.</td>
+              <td>Low to medium. Narrow editor rendering change.</td>
+            </tr>
+            <tr>
+              <td><span class="priority p3">P3</span></td>
+              <td>Optimize WGC conversion behind a converter interface.</td>
+              <td>Greenshot and OBS show that direct GPU texture/staging copies are cleaner long-term than layered <code>SoftwareBitmap</code> conversion.</td>
+              <td>Medium. Keep isolated so it does not leak into app logic.</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="current-baseline">
+        <h2>Current Local Baseline</h2>
+        <p>
+          The current <code>scrcap-windows/</code> subtree has a reasonable shape for a native Windows port.
+        </p>
+
+        <div class="section-grid">
+          <div class="good">
+            <h3>Keep</h3>
+            <ul>
+              <li><code>Scrcap.Core</code> contains portable logic: annotations, settings, keymaps, filename generation, and stitching.</li>
+              <li><code>Scrcap.Windows.Platform</code> contains Windows capture, monitor/window selection, global hotkeys, tray integration, and taskbar/theme code.</li>
+              <li><code>Scrcap.Windows.UI</code> contains WPF app composition, overlay, editor, preferences, and resources.</li>
+              <li><code>Directory.Build.props</code> enables nullable, implicit usings, deterministic builds, and warnings-as-errors.</li>
+              <li><code>app.manifest</code> declares Per-Monitor V2 DPI awareness.</li>
+              <li>Release scripts already check restore, build, tests, UI color guardrails, and publish artifacts.</li>
+            </ul>
+          </div>
+
+          <div class="risk">
+            <h3>Fix</h3>
+            <ul>
+              <li><code>CaptureResult</code> carries <code>byte[] PngBytes</code>, so screenshots are encoded as PNG before the editor needs them.</li>
+              <li><code>WindowsGraphicsCaptureBackend</code> converts Direct3D frames through <code>SoftwareBitmap</code>, WinRT buffers, managed arrays, and <code>System.Drawing.Bitmap</code>.</li>
+              <li>Scrolling capture keeps a growing <code>List&lt;Bitmap&gt;</code> and row hash state until final stitching.</li>
+              <li>Pixelate preview/export performs per-cell <code>CopyPixels</code> and allocates a new 4-byte array in the render loop.</li>
+              <li>Several Windows tests assert source strings rather than exercising WGC, GDI fallback, overlay selection, or packaged app behavior.</li>
+            </ul>
+          </div>
+        </div>
+
+        <h3>Local evidence inspected</h3>
+        <table class="wide-table">
+          <thead>
+            <tr>
+              <th>Area</th>
+              <th>Files</th>
+              <th>Observation</th>
+              <th>Action implied</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Capture result</td>
+              <td><code>scrcap-windows/src/Scrcap.Windows.Platform/Capture/CaptureModels.cs</code></td>
+              <td><code>CaptureResult</code> stores PNG bytes. This makes PNG the internal transport format.</td>
+              <td>Introduce raw frame/pixel contract and encode PNG only on save/copy/export.</td>
+            </tr>
+            <tr>
+              <td>WGC capture</td>
+              <td><code>WindowsGraphicsCaptureBackend.cs</code></td>
+              <td>Uses <code>Direct3D11CaptureFramePool.CreateFreeThreaded</code>, starts a session, waits for one frame, then converts with <code>SoftwareBitmap</code> and managed copies.</td>
+              <td>Keep WGC primary. Isolate conversion now; replace with staging texture copy later if benchmarked worthwhile.</td>
+            </tr>
+            <tr>
+              <td>GDI fallback</td>
+              <td><code>GdiCaptureFallback.cs</code></td>
+              <td>Uses classic <code>GetDC</code>, compatible DC/bitmap, <code>BitBlt</code>, cursor draw, and cleanup.</td>
+              <td>Keep as last-resort fallback. Make fallback reason visible.</td>
+            </tr>
+            <tr>
+              <td>Scrolling capture</td>
+              <td><code>WindowsCaptureService.cs</code></td>
+              <td>Stores full frames, accumulated row hashes, cropped frame portions, and finally stitches.</td>
+              <td>Preserve algorithm initially, but change storage to strips/spool with a stop reason.</td>
+            </tr>
+            <tr>
+              <td>Editor rendering</td>
+              <td><code>EditorCanvas.cs</code></td>
+              <td><code>DrawPixelate</code> does repeated cell reads and allocations inside rendering.</td>
+              <td>Cache a generated pixelated bitmap for the shape/source version/export scale.</td>
+            </tr>
+            <tr>
+              <td>App orchestration</td>
+              <td><code>App.xaml.cs</code>, <code>OverlayWindow.xaml.cs</code></td>
+              <td><code>App</code> directly creates overlay flows for region/window capture while overlay already owns most selection details.</td>
+              <td>Extract a small capture target picker/controller.</td>
+            </tr>
+            <tr>
+              <td>DPI and overlay</td>
+              <td><code>app.manifest</code>, <code>OverlayWindow.xaml</code></td>
+              <td>Per-Monitor V2 is declared. Overlay is topmost, borderless, transparent WPF.</td>
+              <td>Add mixed-DPI tests and keep overlay render content minimal.</td>
+            </tr>
+            <tr>
+              <td>Settings</td>
+              <td><code>Scrcap.Core/Settings.cs</code></td>
+              <td>Settings normalize, migrate, and save through temp-write replacement.</td>
+              <td>Keep this pattern. It is a good portable core implementation.</td>
+            </tr>
+            <tr>
+              <td>Tests</td>
+              <td><code>CaptureImplementationTests.cs</code>, <code>AppFlowImplementationTests.cs</code></td>
+              <td>Some tests are source-content assertions.</td>
+              <td>Replace release confidence with real Windows fixture tests; keep source guards only temporarily.</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="repo-study">
+        <h2>External Repository Study</h2>
+        <p>
+          The following projects were studied because they cover the relevant Windows capture design space: screenshot workflow tools, long-running capture/recording, WGC interop, cross-platform overlay capture, and high-performance backend selection. The patterns below are intentionally reduced to what scrcap should copy, not everything these applications do.
+        </p>
+
+        <h3>ShareX</h3>
+        <p>
+          Source: <a href="https://github.com/ShareX/ShareX">ShareX</a> at <code>a241c7e5a16b4a40163bf9954a1c06c7b4f3e640</code>.
+        </p>
+        <table>
+          <tbody>
+            <tr>
+              <th>Relevant files</th>
+              <td>
+                <ul>
+                  <li><a href="https://github.com/ShareX/ShareX/blob/a241c7e5a16b4a40163bf9954a1c06c7b4f3e640/ShareX.ScreenCaptureLib/Screenshot.cs"><code>ShareX.ScreenCaptureLib/Screenshot.cs</code></a></li>
+                  <li><a href="https://github.com/ShareX/ShareX/blob/a241c7e5a16b4a40163bf9954a1c06c7b4f3e640/ShareX.ScreenCaptureLib/ScrollingCaptureManager.cs"><code>ShareX.ScreenCaptureLib/ScrollingCaptureManager.cs</code></a></li>
+                  <li><a href="https://github.com/ShareX/ShareX/blob/a241c7e5a16b4a40163bf9954a1c06c7b4f3e640/ShareX.ScreenCaptureLib/RegionCaptureTasks.cs"><code>ShareX.ScreenCaptureLib/RegionCaptureTasks.cs</code></a></li>
+                </ul>
+              </td>
+            </tr>
+            <tr>
+              <th>What it does well</th>
+              <td>
+                <ul>
+                  <li>Region and window capture entry points are small task helpers. They open the picker, wait for a target, and return a concrete result.</li>
+                  <li>Classic GDI capture is isolated in a helper around <code>GetWindowDC</code>, compatible DC/bitmap, <code>BitBlt</code>, optional cursor drawing, and cleanup.</li>
+                  <li>Scrolling capture compares locked bitmap memory directly instead of using high-level per-pixel APIs.</li>
+                  <li>Overlap and stitch logic is optimized around row/bitmap data access instead of UI rendering.</li>
+                </ul>
+              </td>
+            </tr>
+            <tr>
+              <th>Pattern to copy</th>
+              <td>
+                Keep capture target picking as a concrete workflow. For scrolling capture, prefer locked memory, row hashes, and strip composition over per-pixel object APIs.
+              </td>
+            </tr>
+            <tr>
+              <th>Pattern to avoid</th>
+              <td>
+                ShareX has a very large workflow, upload, automation, and destination system. scrcap should not copy that product surface.
+              </td>
+            </tr>
+            <tr>
+              <th>scrcap implication</th>
+              <td>
+                Keep <code>GdiCaptureFallback</code> small. Add a <code>CaptureTargetPicker</code>. Rework scrolling capture storage and row access without adding new user-facing settings.
+              </td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h3>ScreenToGif</h3>
+        <p>
+          Source: <a href="https://github.com/NickeManarin/ScreenToGif">ScreenToGif</a> at <code>27a49c3be69486f2db964290f4f2274e790fb687</code>.
+        </p>
+        <table>
+          <tbody>
+            <tr>
+              <th>Relevant files</th>
+              <td>
+                <ul>
+                  <li><a href="https://github.com/NickeManarin/ScreenToGif/blob/27a49c3be69486f2db964290f4f2274e790fb687/ScreenToGif/Capture/ImageCapture.cs"><code>ScreenToGif/Capture/ImageCapture.cs</code></a></li>
+                  <li><a href="https://github.com/NickeManarin/ScreenToGif/blob/27a49c3be69486f2db964290f4f2274e790fb687/ScreenToGif/Capture/CachedCapture.cs"><code>ScreenToGif/Capture/CachedCapture.cs</code></a></li>
+                  <li><a href="https://github.com/NickeManarin/ScreenToGif/blob/27a49c3be69486f2db964290f4f2274e790fb687/ScreenToGif/Controls/BaseScreenRecorder.cs"><code>ScreenToGif/Controls/BaseScreenRecorder.cs</code></a></li>
+                  <li><a href="https://github.com/NickeManarin/ScreenToGif/blob/27a49c3be69486f2db964290f4f2274e790fb687/ScreenToGif.Model/Models/Frame.cs"><code>ScreenToGif.Model/Models/Frame.cs</code></a></li>
+                  <li><a href="https://github.com/NickeManarin/ScreenToGif/blob/27a49c3be69486f2db964290f4f2274e790fb687/ScreenToGif.Model/Models/ExportProject.cs"><code>ScreenToGif.Model/Models/ExportProject.cs</code></a></li>
+                </ul>
+              </td>
+            </tr>
+            <tr>
+              <th>What it does well</th>
+              <td>
+                <ul>
+                  <li>Capture policy is explicit: direct capture, changed-only capture, cached capture, and image capture are separate implementation choices.</li>
+                  <li>Frame data can be memory-backed or file-backed. The frame model supports <code>Path</code> and <code>Data</code>.</li>
+                  <li>Long-running capture can use buffered and compressed streams, reducing managed object pressure.</li>
+                  <li>The export model can count frames from either files or in-memory collections.</li>
+                </ul>
+              </td>
+            </tr>
+            <tr>
+              <th>Pattern to copy</th>
+              <td>
+                Make storage policy explicit. For a long capture, use memory while small and spill strips/frames to disk when needed.
+              </td>
+            </tr>
+            <tr>
+              <th>Pattern to avoid</th>
+              <td>
+                ScreenToGif is a recorder. Its many recording settings should not become scrcap UI. Use the storage idea only where scroll capture needs it.
+              </td>
+            </tr>
+            <tr>
+              <th>scrcap implication</th>
+              <td>
+                <code>ScrollingCaptureOptions.MemoryCapBytes</code> should map to a real storage policy: keep strips in memory under the cap, then spool to temp files with cleanup.
+              </td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h3>Greenshot</h3>
+        <p>
+          Source: <a href="https://github.com/greenshot/greenshot">Greenshot</a> at <code>3c179082fa116348c814a3cc844a49b73b4e8d16</code>.
+        </p>
+        <table>
+          <tbody>
+            <tr>
+              <th>Relevant files</th>
+              <td>
+                <ul>
+                  <li><a href="https://github.com/greenshot/greenshot/blob/3c179082fa116348c814a3cc844a49b73b4e8d16/src/Greenshot/Native/WindowsGraphicsCaptureInterop.cs"><code>src/Greenshot/Native/WindowsGraphicsCaptureInterop.cs</code></a></li>
+                  <li><a href="https://github.com/greenshot/greenshot/blob/3c179082fa116348c814a3cc844a49b73b4e8d16/src/Greenshot/Forms/MainForm.cs"><code>src/Greenshot/Forms/MainForm.cs</code></a></li>
+                  <li><a href="https://github.com/greenshot/greenshot/blob/3c179082fa116348c814a3cc844a49b73b4e8d16/src/Greenshot/GreenshotMain.cs"><code>src/Greenshot/GreenshotMain.cs</code></a></li>
+                </ul>
+              </td>
+            </tr>
+            <tr>
+              <th>What it does well</th>
+              <td>
+                <ul>
+                  <li>WGC interop is concentrated in one low-level file.</li>
+                  <li>The code creates capture items for window and monitor handles, creates a D3D11 device, starts a frame pool/session, and waits for a frame.</li>
+                  <li>GPU-to-CPU transfer uses a staging texture and row copy from mapped memory.</li>
+                  <li>Startup remains tray/app-shell oriented and keeps single-instance/config concerns separate from capture internals.</li>
+                </ul>
+              </td>
+            </tr>
+            <tr>
+              <th>Pattern to copy</th>
+              <td>
+                Keep WGC interop isolated and move toward direct texture/staging-copy conversion once the raw frame contract exists.
+              </td>
+            </tr>
+            <tr>
+              <th>Pattern to avoid</th>
+              <td>
+                Greenshot carries historical plugin/config complexity. scrcap should keep JSON settings and the existing small project split.
+              </td>
+            </tr>
+            <tr>
+              <th>scrcap implication</th>
+              <td>
+                Put all WGC conversion detail behind one converter. Do not let Direct3D details leak into editor or app composition.
+              </td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h3>Flameshot</h3>
+        <p>
+          Source: <a href="https://github.com/flameshot-org/flameshot">Flameshot</a> at <code>18accdcc9a739233438b1591965067e3e9cdec72</code>.
+        </p>
+        <table>
+          <tbody>
+            <tr>
+              <th>Relevant files</th>
+              <td>
+                <ul>
+                  <li><a href="https://github.com/flameshot-org/flameshot/blob/18accdcc9a739233438b1591965067e3e9cdec72/src/utils/screengrabber.cpp"><code>src/utils/screengrabber.cpp</code></a></li>
+                  <li><a href="https://github.com/flameshot-org/flameshot/blob/18accdcc9a739233438b1591965067e3e9cdec72/src/widgets/capture/capturewidget.cpp"><code>src/widgets/capture/capturewidget.cpp</code></a></li>
+                  <li><a href="https://github.com/flameshot-org/flameshot/blob/18accdcc9a739233438b1591965067e3e9cdec72/src/tools/pixelate/pixelatetool.cpp"><code>src/tools/pixelate/pixelatetool.cpp</code></a></li>
+                </ul>
+              </td>
+            </tr>
+            <tr>
+              <th>What it does well</th>
+              <td>
+                <ul>
+                  <li>One capture widget owns the screenshot, selected screen placement, topmost frameless behavior, selection, toolbar, shortcuts, and magnifier setup.</li>
+                  <li>Windows overlay placement accounts for selected-screen geometry and device pixel ratio.</li>
+                  <li>Pixelate is done by copying a region, scaling down, then scaling up, not by repeated per-cell pixel reads during every render.</li>
+                </ul>
+              </td>
+            </tr>
+            <tr>
+              <th>Pattern to copy</th>
+              <td>
+                Copy the ownership boundary: one capture surface/controller should own target selection. Copy the pixelate strategy: downscale/upscale cached bitmap.
+              </td>
+            </tr>
+            <tr>
+              <th>Pattern to avoid</th>
+              <td>
+                Flameshot centralizes many UI concerns in a large Qt widget. scrcap should keep smaller WPF classes and extract a controller rather than making one giant window file.
+              </td>
+            </tr>
+            <tr>
+              <th>scrcap implication</th>
+              <td>
+                Introduce <code>CaptureTargetPicker</code>. Add <code>PixelateRenderer</code> or equivalent cache helper.
+              </td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h3>OBS Studio</h3>
+        <p>
+          Source: <a href="https://github.com/obsproject/obs-studio">OBS Studio</a> at <code>fe522d431e3f778808345776d46c1b3978db0399</code>.
+        </p>
+        <table>
+          <tbody>
+            <tr>
+              <th>Relevant files</th>
+              <td>
+                <ul>
+                  <li><a href="https://github.com/obsproject/obs-studio/blob/fe522d431e3f778808345776d46c1b3978db0399/libobs-winrt/winrt-capture.cpp"><code>libobs-winrt/winrt-capture.cpp</code></a></li>
+                  <li><a href="https://github.com/obsproject/obs-studio/blob/fe522d431e3f778808345776d46c1b3978db0399/plugins/win-capture/window-capture.c"><code>plugins/win-capture/window-capture.c</code></a></li>
+                  <li><a href="https://github.com/obsproject/obs-studio/blob/fe522d431e3f778808345776d46c1b3978db0399/plugins/win-capture/dc-capture.c"><code>plugins/win-capture/dc-capture.c</code></a></li>
+                </ul>
+              </td>
+            </tr>
+            <tr>
+              <th>What it does well</th>
+              <td>
+                <ul>
+                  <li>Capture method is explicit: automatic, WGC, or BitBlt. Automatic resolves to a chosen backend.</li>
+                  <li>Feature support is checked before cursor toggling and border toggling.</li>
+                  <li>The WGC hot path keeps frames as D3D11 textures and copies subresources into reusable textures.</li>
+                  <li>GDI fallback also works through reusable graphics resources where possible.</li>
+                </ul>
+              </td>
+            </tr>
+            <tr>
+              <th>Pattern to copy</th>
+              <td>
+                Separate selected backend from chosen backend. Feature-gate optional WGC properties. Keep hot frame data raw until the consumer needs an output format.
+              </td>
+            </tr>
+            <tr>
+              <th>Pattern to avoid</th>
+              <td>
+                OBS is a real-time compositor. scrcap does not need game capture, injection hooks, audio, color-space pipelines, or a GPU render graph.
+              </td>
+            </tr>
+            <tr>
+              <th>scrcap implication</th>
+              <td>
+                Add a lightweight backend resolver and metadata. Do not add OBS-level infrastructure.
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="platform-guidance">
+        <h2>Microsoft Platform Guidance</h2>
+        <p>
+          The platform guidance supports the current overall direction: WGC as the primary API, GDI as a fallback, Per-Monitor V2 DPI awareness, and careful overlay rendering.
+        </p>
+
+        <table class="wide-table">
+          <thead>
+            <tr>
+              <th>Topic</th>
+              <th>Source</th>
+              <th>Practical reading for scrcap</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Windows.Graphics.Capture</td>
+              <td><a href="https://learn.microsoft.com/en-us/windows/apps/develop/media-authoring-processing/screen-capture">Screen capture with Windows.Graphics.Capture</a></td>
+              <td>WGC is the right primary API for modern Windows window and monitor capture. It is built for capture items and capture sessions rather than raw desktop scraping.</td>
+            </tr>
+            <tr>
+              <td>Threading</td>
+              <td><a href="https://learn.microsoft.com/en-us/uwp/api/windows.graphics.capture.direct3d11captureframepool.createfreethreaded">Direct3D11CaptureFramePool.CreateFreeThreaded</a></td>
+              <td><code>CreateFreeThreaded</code> avoids DispatcherQueue dependency and raises frame events from an internal worker thread. The current port uses this right direction.</td>
+            </tr>
+            <tr>
+              <td>Session features</td>
+              <td><a href="https://learn.microsoft.com/en-us/uwp/api/windows.graphics.capture.graphicscapturesession">GraphicsCaptureSession</a></td>
+              <td>Features such as cursor capture, border requirement, dirty region mode, secondary windows, and minimum update interval are version-dependent. Access them through capability checks.</td>
+            </tr>
+            <tr>
+              <td>Cursor capture</td>
+              <td><a href="https://learn.microsoft.com/en-us/uwp/api/windows.graphics.capture.graphicscapturesession.iscursorcaptureenabled">IsCursorCaptureEnabled</a></td>
+              <td>Cursor inclusion should be a backend feature gate, not a hard assumption.</td>
+            </tr>
+            <tr>
+              <td>Borderless capture</td>
+              <td><a href="https://learn.microsoft.com/en-us/uwp/api/windows.graphics.capture.graphicscapturesession.isborderrequired">IsBorderRequired</a>, <a href="https://learn.microsoft.com/en-us/uwp/api/windows.graphics.capture.graphicscaptureaccesskind">GraphicsCaptureAccessKind</a></td>
+              <td>Suppressing the capture border requires explicit support and access. Use only behind a capability check and expect denial.</td>
+            </tr>
+            <tr>
+              <td>DXGI Desktop Duplication</td>
+              <td><a href="https://learn.microsoft.com/en-us/windows/win32/direct3ddxgi/desktop-dup-api">Desktop Duplication API</a>, <a href="https://learn.microsoft.com/en-us/windows/win32/api/dxgi1_2/nf-dxgi1_2-idxgioutputduplication-acquirenextframe">AcquireNextFrame</a></td>
+              <td>DXGI exposes dirty/move rects, pointer updates, rotation, timeouts, and lower-level GPU surfaces. It is powerful but increases correctness burden. Do not add it until WGC fails a real requirement.</td>
+            </tr>
+            <tr>
+              <td>GDI capture</td>
+              <td><a href="https://learn.microsoft.com/en-us/windows/win32/gdi/capturing-an-image">GDI image capture</a></td>
+              <td><code>BitBlt</code> remains a useful compatibility fallback, especially for older or unusual windows, but should not be the main performance path.</td>
+            </tr>
+            <tr>
+              <td>High DPI</td>
+              <td><a href="https://learn.microsoft.com/en-us/windows/win32/hidpi/high-dpi-desktop-application-development-on-windows">High DPI desktop app development</a>, <a href="https://learn.microsoft.com/en-us/windows/win32/hidpi/declaring-managed-apps-dpi-aware">Per-monitor DPI-aware WPF guidance</a></td>
+              <td>Per-Monitor V2 is mandatory for picker/editor correctness because WPF uses device-independent units while capture works in physical pixels.</td>
+            </tr>
+            <tr>
+              <td>WPF rendering</td>
+              <td><a href="https://learn.microsoft.com/en-us/dotnet/desktop/wpf/advanced/graphics-rendering-tiers">WPF graphics rendering tiers</a>, <a href="https://learn.microsoft.com/en-us/dotnet/api/system.windows.window.allowstransparency">Window.AllowsTransparency</a></td>
+              <td>Transparent topmost WPF overlays are appropriate for selection, but they should stay visually simple and short-lived.</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <div class="note">
+          <strong>API choice:</strong>
+          WGC primary plus GDI fallback is the right simple stack now. DXGI Desktop Duplication should remain a future escape hatch for a proven gap, not a preemptive architecture layer.
+        </div>
+      </section>
+
+      <section id="good-port-patterns">
+        <h2>What Makes a Good Windows Port</h2>
+
+        <h3>1. Backend strategy is explicit and observable</h3>
+        <p>
+          A good Windows port does not hide backend selection inside broad exception handling. It records the requested backend, chosen backend, capability checks, and fallback reason. This matters because capture failures vary by OS version, GPU driver, window type, desktop state, and policy.
+        </p>
+        <table>
+          <tbody>
+            <tr>
+              <th>Good shape</th>
+              <td><code>Auto</code>, <code>WindowsGraphicsCapture</code>, and <code>Gdi</code> are visible concepts. <code>Auto</code> resolves to a chosen backend. The result includes backend metadata.</td>
+            </tr>
+            <tr>
+              <th>Bad shape</th>
+              <td>Try WGC, catch broad exceptions, silently fall back to GDI, and return only pixels. This works until users report "capture is slow" or "window capture is wrong" and there is no evidence.</td>
+            </tr>
+            <tr>
+              <th>Repo examples</th>
+              <td>OBS logs selected vs chosen method. ScreenToGif selects concrete capture implementations. scrcap should copy this at small scale.</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h3>2. Raw frames stay raw until export</h3>
+        <p>
+          PNG is excellent for files and clipboard formats. It is not a good internal message format between capture and editor. The internal result should be BGRA pixels, a WPF <code>BitmapSource</code>, or a wrapper that can produce either without re-encoding.
+        </p>
+        <table>
+          <tbody>
+            <tr>
+              <th>Good shape</th>
+              <td>Capture returns <code>CapturedPixels</code> or <code>CapturedFrame</code>. Editor receives that object directly. PNG is produced only for save, copy PNG, drag-out, or export.</td>
+            </tr>
+            <tr>
+              <th>Bad shape</th>
+              <td>Capture returns PNG bytes. UI decodes PNG immediately. Export later re-encodes PNG after annotation flattening.</td>
+            </tr>
+            <tr>
+              <th>Repo examples</th>
+              <td>Greenshot moves from WGC texture to CPU pixels with staging texture copy. OBS keeps textures as textures in the hot path.</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h3>3. DPI and monitor geometry are core behavior</h3>
+        <p>
+          Screenshot tools cannot treat DPI as a display styling concern. Selection rectangles, window bounds, captured pixels, virtual screen coordinates, and WPF device-independent pixels must cross one deliberate boundary.
+        </p>
+        <table>
+          <tbody>
+            <tr>
+              <th>Good shape</th>
+              <td>A tiny helper handles WPF point -> physical pixel, physical pixel -> WPF point, per-monitor scale, and virtual-screen normalization.</td>
+            </tr>
+            <tr>
+              <th>Bad shape</th>
+              <td>Coordinates are converted ad hoc inside overlay mouse handlers, capture service, and editor math.</td>
+            </tr>
+            <tr>
+              <th>Repo examples</th>
+              <td>Flameshot handles selected-screen geometry and device pixel ratio when placing the capture widget.</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h3>4. Overlay ownership is simple and singular</h3>
+        <p>
+          The app composition root should not know every detail of region selection, window picking, countdowns, cancellation, monitor placement, and keyboard interaction. It should ask for a target and then capture it.
+        </p>
+        <table>
+          <tbody>
+            <tr>
+              <th>Good shape</th>
+              <td><code>ICaptureTargetPicker.PickAsync(...)</code> returns a <code>CaptureTarget</code> or cancellation. The overlay/controller owns details.</td>
+            </tr>
+            <tr>
+              <th>Bad shape</th>
+              <td><code>App.xaml.cs</code> directly constructs overlay windows, wires each picker path, and accumulates workflow logic.</td>
+            </tr>
+            <tr>
+              <th>Repo examples</th>
+              <td>Flameshot uses a capture widget as the owner of capture UX. ShareX uses small region capture task helpers.</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h3>5. Long capture has a storage policy</h3>
+        <p>
+          Scrolling capture is not just "take many screenshots and stitch them." It is an unbounded data problem. The port should know when it is storing full frames, strips, hashes, or temp files.
+        </p>
+        <table>
+          <tbody>
+            <tr>
+              <th>Good shape</th>
+              <td>Keep previous frame, current frame, row hashes, output strips, memory estimate, temp spool state, progress, and stop reason.</td>
+            </tr>
+            <tr>
+              <th>Bad shape</th>
+              <td>Retain every full frame until the final output, with the cap checked after large allocations have already occurred.</td>
+            </tr>
+            <tr>
+              <th>Repo examples</th>
+              <td>ScreenToGif explicitly supports memory-backed and file-backed frames. ShareX uses locked bitmap memory for scrolling comparisons.</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h3>6. Editor effects are cached</h3>
+        <p>
+          Rendering should draw prepared visual assets, not repeatedly sample the source image at a tiny granularity. Pixelate is the clearest current example.
+        </p>
+        <table>
+          <tbody>
+            <tr>
+              <th>Good shape</th>
+              <td>Pixelate creates a cached bitmap for source version + shape bounds + block size + export scale. Render draws the cached bitmap.</td>
+            </tr>
+            <tr>
+              <th>Bad shape</th>
+              <td>Render loops allocate byte arrays and brushes for each cell and call <code>CopyPixels</code> repeatedly.</td>
+            </tr>
+            <tr>
+              <th>Repo examples</th>
+              <td>Flameshot pixelates by copy region -> scale down -> scale up.</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h3>7. Tests run the Windows behavior</h3>
+        <p>
+          A Windows graphics port should not ship on source assertions alone. Source assertions can catch accidental architecture drift, but they cannot verify WGC, GDI fallback, DPI, transparency, HWND capture, or packaged-app behavior.
+        </p>
+        <table>
+          <tbody>
+            <tr>
+              <th>Good shape</th>
+              <td>Core tests run anywhere. Windows capture fixture tests run on Windows. UIA smoke tests drive actual app flows. Packaged app smoke tests prove the release artifact opens and handles preferences/editor flows.</td>
+            </tr>
+            <tr>
+              <th>Bad shape</th>
+              <td>Tests assert that source files contain strings like <code>StartCapture</code> or <code>OverlayWindow</code> and treat that as release confidence.</td>
+            </tr>
+            <tr>
+              <th>Repo examples</th>
+              <td>The mature projects rely on real platform code boundaries. scrcap needs test boundaries that match those platform boundaries.</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="implementation-plan">
+        <h2>Implementation Plan</h2>
+        <p>
+          This order keeps changes small and testable. It makes behavior visible first, then removes wasteful conversion, then improves the known hot paths.
+        </p>
+
+        <h3><span class="priority p0">P0</span> Keep the current architecture</h3>
+        <table>
+          <tbody>
+            <tr>
+              <th>Decision</th>
+              <td>Keep C#/.NET 8/WPF. Keep <code>Scrcap.Core</code>, <code>Scrcap.Windows.Platform</code>, and <code>Scrcap.Windows.UI</code>.</td>
+            </tr>
+            <tr>
+              <th>Why</th>
+              <td>The performance issues are inside data flow and hot paths, not caused by the project split.</td>
+            </tr>
+            <tr>
+              <th>Do not do</th>
+              <td>Do not rewrite to WinUI. Do not add DXGI. Do not add a workflow/plugin system.</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h3><span class="priority p1">P1</span> Add backend metadata and resolver</h3>
+        <table>
+          <tbody>
+            <tr>
+              <th>Current state</th>
+              <td><code>WindowsCaptureService</code> tries WGC, catches fallback-eligible exceptions, then uses GDI.</td>
+            </tr>
+            <tr>
+              <th>Change</th>
+              <td>Add backend preference, backend used, fallback reason, and capability checks. Return them in capture metadata.</td>
+            </tr>
+            <tr>
+              <th>Acceptance</th>
+              <td>A capture result can say "requested Auto, chose WindowsGraphicsCapture" or "requested Auto, WGC failed with access denied, chose Gdi".</td>
+            </tr>
+            <tr>
+              <th>Tests</th>
+              <td>Unit-test resolver behavior. Add integration test hooks later to force GDI or WGC when running on Windows.</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h3><span class="priority p1">P1</span> Replace internal PNG transport</h3>
+        <table>
+          <tbody>
+            <tr>
+              <th>Current state</th>
+              <td><code>CaptureResult.PngBytes</code> forces encode/decode before editing.</td>
+            </tr>
+            <tr>
+              <th>Change</th>
+              <td>Return <code>CapturedPixels</code> from platform code or <code>CapturedFrame</code> at UI boundary. Keep PNG encoding in output paths.</td>
+            </tr>
+            <tr>
+              <th>Acceptance</th>
+              <td>Single screenshot capture opens in editor without encoding PNG first. Save/copy still produce identical PNG output.</td>
+            </tr>
+            <tr>
+              <th>Tests</th>
+              <td>Existing editor flatten tests should still pass. Add tests for metadata preservation and PNG output boundaries.</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h3><span class="priority p1">P1</span> Add Windows behavior fixtures</h3>
+        <table>
+          <tbody>
+            <tr>
+              <th>Current state</th>
+              <td>Some tests read source code and assert strings.</td>
+            </tr>
+            <tr>
+              <th>Change</th>
+              <td>Add a deterministic fixture window that renders colored regions, text, checkerboards, and known bounds.</td>
+            </tr>
+            <tr>
+              <th>Acceptance</th>
+              <td>WGC capture of fixture by HWND verifies expected pixels. GDI fallback verifies expected pixels where supported. Overlay UIA can select a known region and exit cleanly.</td>
+            </tr>
+            <tr>
+              <th>Tests</th>
+              <td>Windows-only test project or test category. CI can skip when no interactive desktop is available, but release guardrails should run it on a Windows desktop runner or manual gate.</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h3><span class="priority p2">P2</span> Rework scrolling capture storage</h3>
+        <table>
+          <tbody>
+            <tr>
+              <th>Current state</th>
+              <td>Scrolling capture stores full frames and accumulated hashes until final stitch.</td>
+            </tr>
+            <tr>
+              <th>Change</th>
+              <td>Create <code>ScrollingCaptureSession</code> that owns previous frame, current row hashes, output strips, memory estimate, temp spool, progress, and stop reason.</td>
+            </tr>
+            <tr>
+              <th>Acceptance</th>
+              <td>Memory cap is enforced before retaining more data. Huge captures return a structured stop reason or use temp spool. Cancellation cleans up temp data.</td>
+            </tr>
+            <tr>
+              <th>Tests</th>
+              <td>Pure tests around row hashing/overlap and memory policy. Windows fixture later for real scrolling target.</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h3><span class="priority p2">P2</span> Cache pixelate rendering</h3>
+        <table>
+          <tbody>
+            <tr>
+              <th>Current state</th>
+              <td><code>EditorCanvas.DrawPixelate</code> reads one pixel per cell and allocates during render.</td>
+            </tr>
+            <tr>
+              <th>Change</th>
+              <td>Introduce a small <code>PixelateRenderer</code> helper that copies the selected region once, scales down, scales up with nearest-neighbor behavior, and caches by source version and shape properties.</td>
+            </tr>
+            <tr>
+              <th>Acceptance</th>
+              <td>Pixelate visual output remains correct. Repeated renders do not call <code>CopyPixels</code> per cell. Export and preview share the same strategy.</td>
+            </tr>
+            <tr>
+              <th>Tests</th>
+              <td>Rendering test for deterministic pixelate output. Optional benchmark for large pixelate rectangle.</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h3><span class="priority p2">P2</span> Extract capture target picker</h3>
+        <table>
+          <tbody>
+            <tr>
+              <th>Current state</th>
+              <td><code>App.xaml.cs</code> directly creates overlay windows for region and window picking.</td>
+            </tr>
+            <tr>
+              <th>Change</th>
+              <td>Add <code>CaptureTargetPicker</code> in the overlay/UI boundary. It owns region selection, window picking, selected monitor, countdown, cancellation, and DPI conversions.</td>
+            </tr>
+            <tr>
+              <th>Acceptance</th>
+              <td><code>App.xaml.cs</code> asks for a target and then invokes capture. Overlay behavior remains unchanged.</td>
+            </tr>
+            <tr>
+              <th>Tests</th>
+              <td>Unit tests for target picker state decisions where possible. UIA smoke for the actual overlay.</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h3><span class="priority p3">P3</span> Optimize WGC conversion behind a stable interface</h3>
+        <table>
+          <tbody>
+            <tr>
+              <th>Current state</th>
+              <td>WGC frames convert through <code>SoftwareBitmap</code> and multiple managed copies.</td>
+            </tr>
+            <tr>
+              <th>Change</th>
+              <td>Add <code>IFrameConverter</code>. Keep current converter initially if needed. Add staging texture converter once raw frame contract and fixture tests exist.</td>
+            </tr>
+            <tr>
+              <th>Acceptance</th>
+              <td>Converter can be benchmarked and replaced without changing capture service, editor, or app composition.</td>
+            </tr>
+            <tr>
+              <th>Tests</th>
+              <td>Fixture capture pixel tests compare converter output. Benchmark tracks single-region and full-screen latency.</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="contracts">
+        <h2>Suggested Contracts</h2>
+        <p>
+          These are intentionally small. The goal is to make the important boundaries explicit without building a large abstraction layer.
+        </p>
+
+        <h3>Backend metadata</h3>
+        <pre><code>public enum CaptureBackendPreference
+{
+    Auto,
+    WindowsGraphicsCapture,
+    Gdi
+}
+
+public enum CaptureBackendUsed
+{
+    WindowsGraphicsCapture,
+    Gdi
+}
+
+public sealed record CaptureMetadata(
+    CaptureBackendPreference RequestedBackend,
+    CaptureBackendUsed BackendUsed,
+    string? FallbackReason,
+    RectInt32 CaptureBounds,
+    double DpiScaleX,
+    double DpiScaleY,
+    DateTimeOffset CapturedAt);</code></pre>
+
+        <h3>Raw frame transport</h3>
+        <pre><code>public sealed record CapturedPixels(
+    ReadOnlyMemory&lt;byte&gt; Bgra32,
+    int PixelWidth,
+    int PixelHeight,
+    int Stride,
+    CaptureMetadata Metadata);
+
+public sealed record CaptureResult(
+    CapturedPixels Pixels,
+    CaptureTarget Target,
+    CaptureMetadata Metadata);</code></pre>
+
+        <p>
+          If WPF integration is preferred at the UI boundary, keep that conversion outside the platform service:
+        </p>
+        <pre><code>public sealed record CapturedFrame(
+    BitmapSource Bitmap,
+    CaptureTarget Target,
+    CaptureMetadata Metadata);</code></pre>
+
+        <h3>Capture target picker</h3>
+        <pre><code>public interface ICaptureTargetPicker
+{
+    Task&lt;CaptureTarget?&gt; PickAsync(
+        AppAction action,
+        Settings settings,
+        CancellationToken cancellationToken);
+}</code></pre>
+
+        <p>
+          The picker should own overlay windows and return a target. It should not capture pixels. This keeps UI selection and platform capture separate.
+        </p>
+
+        <h3>Scrolling capture state</h3>
+        <pre><code>public enum ScrollingCaptureStopReason
+{
+    Completed,
+    BottomReached,
+    Cancelled,
+    Timeout,
+    MaxHeightReached,
+    MemoryCapReached,
+    AlignmentFailed,
+    CaptureFailed
+}
+
+public sealed record ScrollingCaptureProgress(
+    int FrameCount,
+    int OutputHeight,
+    long EstimatedBytes,
+    bool IsSpoolingToDisk,
+    ScrollingCaptureStopReason? StopReason);</code></pre>
+
+        <h3>Pixelate cache key</h3>
+        <pre><code>public readonly record struct PixelateCacheKey(
+    long SourceVersion,
+    Int32Rect SourceBounds,
+    int BlockSize,
+    double ExportScale);</code></pre>
+
+        <p>
+          The cache can be very small. It only needs to avoid recomputing the same shape while the user pans, redraws, exports, or copies.
+        </p>
+      </section>
+
+      <section id="testing">
+        <h2>Verification and Tests</h2>
+        <p>
+          The Windows port needs a layered verification plan. The current source checks can remain temporarily, but release confidence should come from runtime behavior.
+        </p>
+
+        <h3>Current host commands</h3>
+        <p>Use these for the existing macOS/native scrcap code when the change touches shared behavior or the root app:</p>
+        <pre><code>swift run scrcap-core-tests
+scripts/test.sh</code></pre>
+
+        <h3>Windows port commands</h3>
+        <p>Run these from <code>scrcap-windows/</code> on Windows:</p>
+        <pre><code>dotnet restore .\Scrcap.sln
+dotnet test .\tests\Scrcap.Core.Tests\Scrcap.Core.Tests.csproj
+dotnet test .\tests\Scrcap.Windows.Platform.Tests\Scrcap.Windows.Platform.Tests.csproj
+dotnet build .\src\Scrcap.Windows.UI\Scrcap.Windows.UI.csproj
+pwsh .\tools\Check-HardcodedUiColors.ps1
+pwsh .\tools\Test-ReleaseGuardrails.ps1 -SkipPublish</code></pre>
+
+        <h3>Release readiness gates</h3>
+        <table class="wide-table">
+          <thead>
+            <tr>
+              <th>Gate</th>
+              <th>What it proves</th>
+              <th>Required before release?</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Core tests</td>
+              <td>Portable annotation, settings, keymap, filename, and stitch logic still works.</td>
+              <td>Yes</td>
+            </tr>
+            <tr>
+              <td>WGC fixture capture</td>
+              <td>Window/monitor capture returns expected pixels through WGC.</td>
+              <td>Yes</td>
+            </tr>
+            <tr>
+              <td>GDI fallback fixture capture</td>
+              <td>Fallback path still captures expected pixels and cursor behavior where supported.</td>
+              <td>Yes</td>
+            </tr>
+            <tr>
+              <td>Mixed DPI overlay test</td>
+              <td>Selection rectangle maps correctly between WPF coordinates and captured pixels at 100%, 125%, and mixed monitor scale.</td>
+              <td>Yes for public release</td>
+            </tr>
+            <tr>
+              <td>UIA preferences smoke</td>
+              <td>Packaged app can open preferences and switch tabs without runtime failures.</td>
+              <td>Yes</td>
+            </tr>
+            <tr>
+              <td>Editor smoke</td>
+              <td>Editor opens a captured image, draws annotations, saves, copies, and closes.</td>
+              <td>Yes</td>
+            </tr>
+            <tr>
+              <td>Scrolling capture fixture</td>
+              <td>Scroll capture reaches expected height, respects memory cap, and reports stop reason.</td>
+              <td>Yes if scrolling capture ships enabled</td>
+            </tr>
+            <tr>
+              <td>Performance budget</td>
+              <td>Region capture, full-screen capture, editor open, pixelate render, and save stay within known limits on a reference machine.</td>
+              <td>Recommended</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h3>Suggested benchmark budgets</h3>
+        <p>
+          These are starting budgets, not final product claims. Tune them after measuring on actual Windows hardware.
+        </p>
+        <table class="wide-table">
+          <thead>
+            <tr>
+              <th>Operation</th>
+              <th>Initial budget</th>
+              <th>Notes</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Small region WGC capture</td>
+              <td>&lt; 150 ms after target selection</td>
+              <td>Measure capture service only, excluding human selection time.</td>
+            </tr>
+            <tr>
+              <td>Full 4K monitor WGC capture</td>
+              <td>&lt; 300 ms</td>
+              <td>Current <code>SoftwareBitmap</code> path may exceed this. Use as a reason to benchmark before optimizing.</td>
+            </tr>
+            <tr>
+              <td>Editor open after capture</td>
+              <td>&lt; 150 ms for common screenshot sizes</td>
+              <td>Removing PNG encode/decode should help here.</td>
+            </tr>
+            <tr>
+              <td>Pixelate redraw for large region</td>
+              <td>&lt; 16 to 33 ms after cache warm</td>
+              <td>Cache misses can be slower; repeated renders should be cheap.</td>
+            </tr>
+            <tr>
+              <td>Scrolling capture memory</td>
+              <td>Never exceed configured cap by more than one frame/strip</td>
+              <td>Track estimated bytes and spill/stop before retaining too much data.</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="do-not-do">
+        <h2>What Not To Do Yet</h2>
+        <ul>
+          <li>Do not add DXGI Desktop Duplication until WGC plus GDI fallback fails a real requirement.</li>
+          <li>Do not replace WPF with WinUI or another UI stack. The current bottlenecks are data flow and rendering details, not the UI framework choice.</li>
+          <li>Do not add ShareX-style workflow/upload automation.</li>
+          <li>Do not expose ScreenToGif-style performance settings. Keep storage policy internal unless users need a knob.</li>
+          <li>Do not copy OBS's render graph, game capture, or audio/video architecture.</li>
+          <li>Do not make source-string tests the final release gate.</li>
+          <li>Do not optimize WGC conversion before adding metadata and test fixtures. Otherwise there is no clean way to prove behavior stayed correct.</li>
+        </ul>
+      </section>
+
+      <section id="source-index">
+        <h2>Source Index</h2>
+
+        <h3>External repositories</h3>
+        <table class="wide-table">
+          <thead>
+            <tr>
+              <th>Project</th>
+              <th>Commit</th>
+              <th>Files used</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>ShareX</td>
+              <td><code>a241c7e5a16b4a40163bf9954a1c06c7b4f3e640</code></td>
+              <td>
+                <a href="https://github.com/ShareX/ShareX/blob/a241c7e5a16b4a40163bf9954a1c06c7b4f3e640/ShareX.ScreenCaptureLib/Screenshot.cs">Screenshot.cs</a>,
+                <a href="https://github.com/ShareX/ShareX/blob/a241c7e5a16b4a40163bf9954a1c06c7b4f3e640/ShareX.ScreenCaptureLib/ScrollingCaptureManager.cs">ScrollingCaptureManager.cs</a>,
+                <a href="https://github.com/ShareX/ShareX/blob/a241c7e5a16b4a40163bf9954a1c06c7b4f3e640/ShareX.ScreenCaptureLib/RegionCaptureTasks.cs">RegionCaptureTasks.cs</a>
+              </td>
+            </tr>
+            <tr>
+              <td>ScreenToGif</td>
+              <td><code>27a49c3be69486f2db964290f4f2274e790fb687</code></td>
+              <td>
+                <a href="https://github.com/NickeManarin/ScreenToGif/blob/27a49c3be69486f2db964290f4f2274e790fb687/ScreenToGif/Capture/ImageCapture.cs">ImageCapture.cs</a>,
+                <a href="https://github.com/NickeManarin/ScreenToGif/blob/27a49c3be69486f2db964290f4f2274e790fb687/ScreenToGif/Capture/CachedCapture.cs">CachedCapture.cs</a>,
+                <a href="https://github.com/NickeManarin/ScreenToGif/blob/27a49c3be69486f2db964290f4f2274e790fb687/ScreenToGif/Controls/BaseScreenRecorder.cs">BaseScreenRecorder.cs</a>,
+                <a href="https://github.com/NickeManarin/ScreenToGif/blob/27a49c3be69486f2db964290f4f2274e790fb687/ScreenToGif.Model/Models/Frame.cs">Frame.cs</a>,
+                <a href="https://github.com/NickeManarin/ScreenToGif/blob/27a49c3be69486f2db964290f4f2274e790fb687/ScreenToGif.Model/Models/ExportProject.cs">ExportProject.cs</a>
+              </td>
+            </tr>
+            <tr>
+              <td>Greenshot</td>
+              <td><code>3c179082fa116348c814a3cc844a49b73b4e8d16</code></td>
+              <td>
+                <a href="https://github.com/greenshot/greenshot/blob/3c179082fa116348c814a3cc844a49b73b4e8d16/src/Greenshot/Native/WindowsGraphicsCaptureInterop.cs">WindowsGraphicsCaptureInterop.cs</a>,
+                <a href="https://github.com/greenshot/greenshot/blob/3c179082fa116348c814a3cc844a49b73b4e8d16/src/Greenshot/Forms/MainForm.cs">MainForm.cs</a>,
+                <a href="https://github.com/greenshot/greenshot/blob/3c179082fa116348c814a3cc844a49b73b4e8d16/src/Greenshot/GreenshotMain.cs">GreenshotMain.cs</a>
+              </td>
+            </tr>
+            <tr>
+              <td>Flameshot</td>
+              <td><code>18accdcc9a739233438b1591965067e3e9cdec72</code></td>
+              <td>
+                <a href="https://github.com/flameshot-org/flameshot/blob/18accdcc9a739233438b1591965067e3e9cdec72/src/utils/screengrabber.cpp">screengrabber.cpp</a>,
+                <a href="https://github.com/flameshot-org/flameshot/blob/18accdcc9a739233438b1591965067e3e9cdec72/src/widgets/capture/capturewidget.cpp">capturewidget.cpp</a>,
+                <a href="https://github.com/flameshot-org/flameshot/blob/18accdcc9a739233438b1591965067e3e9cdec72/src/tools/pixelate/pixelatetool.cpp">pixelatetool.cpp</a>
+              </td>
+            </tr>
+            <tr>
+              <td>OBS Studio</td>
+              <td><code>fe522d431e3f778808345776d46c1b3978db0399</code></td>
+              <td>
+                <a href="https://github.com/obsproject/obs-studio/blob/fe522d431e3f778808345776d46c1b3978db0399/libobs-winrt/winrt-capture.cpp">winrt-capture.cpp</a>,
+                <a href="https://github.com/obsproject/obs-studio/blob/fe522d431e3f778808345776d46c1b3978db0399/plugins/win-capture/window-capture.c">window-capture.c</a>,
+                <a href="https://github.com/obsproject/obs-studio/blob/fe522d431e3f778808345776d46c1b3978db0399/plugins/win-capture/dc-capture.c">dc-capture.c</a>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h3>Microsoft documentation</h3>
+        <ul>
+          <li><a href="https://learn.microsoft.com/en-us/windows/apps/develop/media-authoring-processing/screen-capture">Screen capture with Windows.Graphics.Capture</a></li>
+          <li><a href="https://learn.microsoft.com/en-us/uwp/api/windows.graphics.capture.direct3d11captureframepool.createfreethreaded">Direct3D11CaptureFramePool.CreateFreeThreaded</a></li>
+          <li><a href="https://learn.microsoft.com/en-us/uwp/api/windows.graphics.capture.graphicscapturesession">GraphicsCaptureSession</a></li>
+          <li><a href="https://learn.microsoft.com/en-us/uwp/api/windows.graphics.capture.graphicscapturesession.iscursorcaptureenabled">GraphicsCaptureSession.IsCursorCaptureEnabled</a></li>
+          <li><a href="https://learn.microsoft.com/en-us/uwp/api/windows.graphics.capture.graphicscapturesession.isborderrequired">GraphicsCaptureSession.IsBorderRequired</a></li>
+          <li><a href="https://learn.microsoft.com/en-us/uwp/api/windows.graphics.capture.graphicscaptureaccesskind">GraphicsCaptureAccessKind</a></li>
+          <li><a href="https://learn.microsoft.com/en-us/windows/win32/direct3ddxgi/desktop-dup-api">Desktop Duplication API</a></li>
+          <li><a href="https://learn.microsoft.com/en-us/windows/win32/api/dxgi1_2/nf-dxgi1_2-idxgioutputduplication-acquirenextframe">IDXGIOutputDuplication.AcquireNextFrame</a></li>
+          <li><a href="https://learn.microsoft.com/en-us/windows/win32/gdi/capturing-an-image">GDI image capture</a></li>
+          <li><a href="https://learn.microsoft.com/en-us/windows/win32/hidpi/high-dpi-desktop-application-development-on-windows">High DPI desktop app development</a></li>
+          <li><a href="https://learn.microsoft.com/en-us/windows/win32/hidpi/declaring-managed-apps-dpi-aware">Per-monitor DPI-aware WPF guidance</a></li>
+          <li><a href="https://learn.microsoft.com/en-us/dotnet/desktop/wpf/advanced/graphics-rendering-tiers">WPF graphics rendering tiers</a></li>
+          <li><a href="https://learn.microsoft.com/en-us/dotnet/api/system.windows.window.allowstransparency">Window.AllowsTransparency</a></li>
+        </ul>
+      </section>
+    </article>
+  </main>
+</body>
+</html>

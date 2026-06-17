@@ -1,0 +1,110 @@
+<Window x:Class="Scrcap.Windows.UI.Overlay.OverlayWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        WindowStyle="None"
+        AllowsTransparency="True"
+        Background="{StaticResource BrushOverlayDim}"
+        Topmost="True"
+        ShowInTaskbar="False"
+        KeyDown="Window_KeyDown"
+        MouseDown="Window_MouseDown"
+        MouseMove="Window_MouseMove"
+        MouseUp="Window_MouseUp">
+  <Canvas x:Name="Root">
+    <Canvas x:Name="MonitorLayer" />
+    <TextBlock x:Name="HintTag"
+               Canvas.Left="18"
+               Canvas.Top="18"
+               Background="{StaticResource BrushPanel}"
+               Foreground="{StaticResource BrushInk}"
+               FontFamily="{StaticResource FontUi}"
+               FontSize="{StaticResource FontSizeBody}"
+               Padding="{StaticResource MetricOverlayHintPadding}"
+               Text="Drag to capture a region. Press Esc to cancel."
+               Visibility="Collapsed" />
+    <Line x:Name="VerticalCrosshair"
+          Stroke="{StaticResource BrushAccent}"
+          StrokeThickness="1"
+          Visibility="Collapsed" />
+    <Line x:Name="HorizontalCrosshair"
+          Stroke="{StaticResource BrushAccent}"
+          StrokeThickness="1"
+          Visibility="Collapsed" />
+    <Rectangle x:Name="WindowHighlight"
+               Stroke="{StaticResource BrushAccent}"
+               StrokeThickness="3"
+               Fill="Transparent"
+               StrokeDashArray="8 4"
+               Visibility="Collapsed" />
+    <Rectangle x:Name="Selection"
+               Stroke="{StaticResource BrushAccent}"
+               StrokeThickness="2"
+               Fill="Transparent"
+               StrokeDashArray="6 4"
+               Visibility="Collapsed">
+      <Rectangle.Triggers>
+        <EventTrigger RoutedEvent="Loaded">
+          <BeginStoryboard>
+            <Storyboard RepeatBehavior="Forever">
+              <DoubleAnimation Storyboard.TargetName="Selection"
+                               Storyboard.TargetProperty="StrokeDashOffset"
+                               From="0"
+                               To="20"
+                               Duration="0:0:0.75" />
+            </Storyboard>
+          </BeginStoryboard>
+        </EventTrigger>
+      </Rectangle.Triggers>
+    </Rectangle>
+    <Border x:Name="CoordinateTag"
+            Background="{StaticResource BrushAccent}"
+            CornerRadius="{StaticResource MetricOverlayTagRadius}"
+            Padding="{StaticResource MetricOverlayTagPadding}"
+            Visibility="Collapsed">
+      <TextBlock x:Name="CoordinateText"
+                 Foreground="{StaticResource BrushOnAccent}"
+                 FontFamily="Consolas"
+                 FontSize="{StaticResource FontSizeSmall}" />
+    </Border>
+    <Border x:Name="OverlapTag"
+            Background="{StaticResource BrushPanel}"
+            CornerRadius="{StaticResource MetricOverlayTagRadius}"
+            Padding="{StaticResource MetricOverlayTagPadding}"
+            Visibility="Collapsed">
+      <TextBlock x:Name="OverlapText"
+                 Foreground="{StaticResource BrushInk}"
+                 FontFamily="{StaticResource FontUi}"
+                 FontSize="{StaticResource FontSizeSmall}" />
+    </Border>
+    <Border x:Name="WindowLabel"
+            Background="{StaticResource BrushAccent}"
+            CornerRadius="{StaticResource MetricOverlayTagRadius}"
+            Padding="{StaticResource MetricOverlayLabelPadding}"
+            Visibility="Collapsed">
+      <TextBlock x:Name="WindowLabelText"
+                 Foreground="{StaticResource BrushOnAccent}"
+                 FontFamily="{StaticResource FontUi}"
+                 FontSize="{StaticResource FontSizeSmall}" />
+    </Border>
+    <Grid x:Name="CountdownOverlay"
+          Width="{Binding ActualWidth, ElementName=Root}"
+          Height="{Binding ActualHeight, ElementName=Root}"
+          Background="{StaticResource BrushOverlayDim}"
+          Visibility="Collapsed">
+      <StackPanel HorizontalAlignment="Center"
+                  VerticalAlignment="Center">
+        <TextBlock x:Name="CountdownText"
+                   Foreground="{StaticResource BrushOnAccent}"
+                   FontFamily="{StaticResource FontUi}"
+                   FontSize="{StaticResource MetricOverlayCountdownFontSize}"
+                   FontWeight="SemiBold"
+                   TextAlignment="Center" />
+        <TextBlock Foreground="{StaticResource BrushOnAccent}"
+                   FontFamily="{StaticResource FontUi}"
+                   FontSize="{StaticResource FontSizeTitle}"
+                   Text="Capturing selected region"
+                   TextAlignment="Center" />
+      </StackPanel>
+    </Grid>
+  </Canvas>
+</Window>

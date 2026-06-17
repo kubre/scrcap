@@ -38,3 +38,10 @@ xcuserdata/
 # Shell session / tool artifacts
 .env
 .env.local
+
+# .NET / Windows port artifacts
+scrcap-windows/**/bin/
+scrcap-windows/**/obj/
+scrcap-windows/TestResults/
+scrcap-windows/artifacts/
+scrcap-windows/src/Scrcap.Windows.UI/*_wpftmp.csproj

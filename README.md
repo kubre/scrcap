@@ -144,3 +144,10 @@ Drag the toolbar's empty background to move the editor window.
 
 Settings live at `~/Library/Application Support/scrcap/settings.json` —
 versioned, human-readable, dotfiles-friendly.
+
+## Windows port
+
+The Windows port lives in `scrcap-windows/`. It is a C#/.NET 8 solution with a
+portable `Scrcap.Core` project and Windows-only WPF/platform projects. Build,
+test, guardrail, and remaining Windows verification gates are documented in
+`scrcap-windows/README.md`.

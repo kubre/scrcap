@@ -1,0 +1,184 @@
+<Window x:Class="Scrcap.Windows.UI.Preferences.PreferencesWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="scrcap Preferences"
+        Width="{StaticResource MetricPreferencesWidth}"
+        Height="{StaticResource MetricPreferencesHeight}"
+        MinWidth="{StaticResource MetricPreferencesMinWidth}"
+        MinHeight="{StaticResource MetricPreferencesMinHeight}"
+        WindowStyle="None"
+        ResizeMode="CanResizeWithGrip"
+        WindowStartupLocation="CenterOwner"
+        Background="{StaticResource BrushChrome}">
+  <Window.Resources>
+    <Style x:Key="RowLabel" TargetType="TextBlock">
+      <Setter Property="Foreground" Value="{StaticResource BrushMuted}" />
+      <Setter Property="Margin" Value="0,10,0,4" />
+    </Style>
+  </Window.Resources>
+  <Border BorderBrush="{StaticResource BrushRule}"
+          BorderThickness="{StaticResource MetricBorderThickness}"
+          CornerRadius="{StaticResource MetricPreferencesRadius}"
+          Background="{StaticResource BrushChrome}">
+    <DockPanel LastChildFill="True">
+      <Grid DockPanel.Dock="Top"
+            Height="{StaticResource MetricHeaderHeight}"
+            Background="{StaticResource BrushPanel}"
+            MouseLeftButtonDown="DragSurface_MouseLeftButtonDown">
+        <Grid.ColumnDefinitions>
+          <ColumnDefinition Width="*" />
+          <ColumnDefinition Width="Auto" />
+        </Grid.ColumnDefinitions>
+        <TextBlock Text="scrcap Preferences"
+                   VerticalAlignment="Center"
+                   Margin="{StaticResource MetricHeaderMargin}"
+                   FontFamily="{StaticResource FontUi}"
+                   FontSize="{StaticResource FontSizeTitle}"
+                   FontWeight="Bold"
+                   Foreground="{StaticResource BrushInk}" />
+        <Button Grid.Column="1"
+                AutomationProperties.AutomationId="ClosePreferences"
+                AutomationProperties.Name="Close preferences"
+                Content="X"
+                Width="{StaticResource MetricIconButtonWidth}"
+                Height="{StaticResource MetricIconButtonHeight}"
+                Margin="{StaticResource MetricButtonGapRight}"
+                Click="Close_Click" />
+      </Grid>
+
+      <StackPanel DockPanel.Dock="Bottom"
+                  Orientation="Horizontal"
+                  HorizontalAlignment="Right"
+                  Margin="{StaticResource MetricWindowMargin}">
+        <Button AutomationProperties.AutomationId="ResetAllPreferences"
+                AutomationProperties.Name="Reset all settings"
+                Content="Reset all"
+                MinWidth="{StaticResource MetricCommandButtonMinWidth}"
+                Margin="{StaticResource MetricButtonGapRight}"
+                BorderBrush="{StaticResource BrushDanger}"
+                Foreground="{StaticResource BrushDanger}"
+                Click="ResetAll_Click" />
+        <Button AutomationProperties.AutomationId="SavePreferences"
+                AutomationProperties.Name="Save preferences"
+                Content="Save"
+                MinWidth="{StaticResource MetricCommandButtonMinWidth}"
+                Click="Save_Click" />
+      </StackPanel>
+
+      <TabControl AutomationProperties.AutomationId="PreferencesTabs"
+                  Margin="{StaticResource MetricWindowMargin}">
+        <TabItem Header="General">
+          <ScrollViewer VerticalScrollBarVisibility="Auto">
+            <StackPanel Margin="{StaticResource MetricPanelMargin}">
+              <TextBlock Style="{StaticResource RowLabel}" Text="Theme" />
+              <ComboBox AutomationProperties.AutomationId="ThemeMode" ItemsSource="{Binding ThemeModes}" SelectedItem="{Binding SelectedThemeMode, Mode=TwoWay}" />
+              <CheckBox AutomationProperties.AutomationId="LaunchAtLogin" Content="Launch at login" IsChecked="{Binding LaunchAtLogin, Mode=TwoWay}" Margin="{StaticResource MetricTopGap}" />
+            </StackPanel>
+          </ScrollViewer>
+        </TabItem>
+
+        <TabItem Header="Capture">
+          <ScrollViewer VerticalScrollBarVisibility="Auto">
+            <StackPanel Margin="{StaticResource MetricPanelMargin}">
+              <TextBlock Style="{StaticResource RowLabel}" Text="Region after capture" />
+              <ComboBox AutomationProperties.AutomationId="RegionAfterCapture" ItemsSource="{Binding CaptureBehaviors}" SelectedItem="{Binding RegionAfterCapture, Mode=TwoWay}" />
+              <TextBlock Style="{StaticResource RowLabel}" Text="Window after capture" />
+              <ComboBox AutomationProperties.AutomationId="WindowAfterCapture" ItemsSource="{Binding CaptureBehaviors}" SelectedItem="{Binding WindowAfterCapture, Mode=TwoWay}" />
+              <TextBlock Style="{StaticResource RowLabel}" Text="Fullscreen after capture" />
+              <ComboBox AutomationProperties.AutomationId="FullscreenAfterCapture" ItemsSource="{Binding CaptureBehaviors}" SelectedItem="{Binding FullscreenAfterCapture, Mode=TwoWay}" />
+              <TextBlock Style="{StaticResource RowLabel}" Text="Scrolling after capture" />
+              <ComboBox AutomationProperties.AutomationId="ScrollingAfterCapture" ItemsSource="{Binding CaptureBehaviors}" SelectedItem="{Binding ScrollingAfterCapture, Mode=TwoWay}" />
+              <TextBlock Style="{StaticResource RowLabel}" Text="Window target" />
+              <ComboBox AutomationProperties.AutomationId="WindowCaptureTarget" ItemsSource="{Binding WindowTargets}" SelectedItem="{Binding WindowCaptureTarget, Mode=TwoWay}" />
+              <CheckBox AutomationProperties.AutomationId="IncludeCursor" Content="Include cursor" IsChecked="{Binding IncludeCursor, Mode=TwoWay}" Margin="{StaticResource MetricTopGap}" />
+              <CheckBox AutomationProperties.AutomationId="IncludeWindowShadow" Content="Include window shadow" IsChecked="{Binding IncludeWindowShadow, Mode=TwoWay}" />
+              <CheckBox AutomationProperties.AutomationId="WindowBackgroundTransparent" Content="Transparent window background" IsChecked="{Binding WindowBackgroundTransparent, Mode=TwoWay}" />
+              <TextBlock Style="{StaticResource RowLabel}" Text="Window background hex" />
+              <TextBox AutomationProperties.AutomationId="WindowBackgroundHex" Text="{Binding WindowBackgroundHex, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+              <TextBlock Style="{StaticResource RowLabel}" Text="Capture delay seconds" />
+              <Slider AutomationProperties.AutomationId="CaptureDelaySeconds" Minimum="1" Maximum="10" TickFrequency="1" IsSnapToTickEnabled="True" Value="{Binding CaptureDelaySeconds, Mode=TwoWay}" />
+              <TextBlock Style="{StaticResource RowLabel}" Text="Scrolling max height" />
+              <TextBox AutomationProperties.AutomationId="ScrollingMaxHeight" Text="{Binding ScrollingMaxHeight, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+            </StackPanel>
+          </ScrollViewer>
+        </TabItem>
+
+        <TabItem Header="Shortcuts">
+          <ScrollViewer VerticalScrollBarVisibility="Auto">
+            <StackPanel Margin="{StaticResource MetricPanelMargin}">
+              <TextBlock Style="{StaticResource RowLabel}" Text="Capture region" />
+              <TextBox AutomationProperties.AutomationId="CaptureRegionHotkey" Tag="CaptureRegion" Text="{Binding CaptureRegionHotkey, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" PreviewKeyDown="ShortcutTextBox_PreviewKeyDown" />
+              <TextBlock Style="{StaticResource RowLabel}" Text="Capture window" />
+              <TextBox AutomationProperties.AutomationId="CaptureWindowHotkey" Tag="CaptureWindow" Text="{Binding CaptureWindowHotkey, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" PreviewKeyDown="ShortcutTextBox_PreviewKeyDown" />
+              <TextBlock Style="{StaticResource RowLabel}" Text="Capture fullscreen" />
+              <TextBox AutomationProperties.AutomationId="CaptureFullscreenHotkey" Tag="CaptureFullscreen" Text="{Binding CaptureFullscreenHotkey, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" PreviewKeyDown="ShortcutTextBox_PreviewKeyDown" />
+              <TextBlock Style="{StaticResource RowLabel}" Text="Scrolling capture" />
+              <TextBox AutomationProperties.AutomationId="CaptureScrollingHotkey" Tag="CaptureScrolling" Text="{Binding CaptureScrollingHotkey, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" PreviewKeyDown="ShortcutTextBox_PreviewKeyDown" />
+              <TextBlock Style="{StaticResource RowLabel}" Text="Delayed capture" />
+              <TextBox AutomationProperties.AutomationId="CaptureDelayedHotkey" Tag="CaptureDelayed" Text="{Binding CaptureDelayedHotkey, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" PreviewKeyDown="ShortcutTextBox_PreviewKeyDown" />
+              <TextBlock Style="{StaticResource RowLabel}" Text="Repeat last" />
+              <TextBox AutomationProperties.AutomationId="RepeatLastHotkey" Tag="RepeatLast" Text="{Binding RepeatLastHotkey, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" PreviewKeyDown="ShortcutTextBox_PreviewKeyDown" />
+              <TextBlock AutomationProperties.AutomationId="ShortcutRecorderStatus"
+                         Margin="{StaticResource MetricSmallTopGap}"
+                         Foreground="{StaticResource BrushMuted}"
+                         Text="{Binding ShortcutRecorderStatus}" />
+            </StackPanel>
+          </ScrollViewer>
+        </TabItem>
+
+        <TabItem Header="Editor">
+          <ScrollViewer VerticalScrollBarVisibility="Auto">
+            <StackPanel Margin="{StaticResource MetricPanelMargin}">
+              <TextBlock Style="{StaticResource RowLabel}" Text="Palette" />
+              <UniformGrid Columns="5">
+                <TextBox AutomationProperties.AutomationId="Palette1" Text="{Binding Palette1, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Margin="{StaticResource MetricPaletteGapRight}" />
+                <TextBox AutomationProperties.AutomationId="Palette2" Text="{Binding Palette2, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Margin="{StaticResource MetricPaletteGapRight}" />
+                <TextBox AutomationProperties.AutomationId="Palette3" Text="{Binding Palette3, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Margin="{StaticResource MetricPaletteGapRight}" />
+                <TextBox AutomationProperties.AutomationId="Palette4" Text="{Binding Palette4, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Margin="{StaticResource MetricPaletteGapRight}" />
+                <TextBox AutomationProperties.AutomationId="Palette5" Text="{Binding Palette5, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+              </UniformGrid>
+              <TextBlock Style="{StaticResource RowLabel}" Text="Stroke width" />
+              <Slider AutomationProperties.AutomationId="StrokeWidth" Minimum="1" Maximum="8" Value="{Binding StrokeWidth, Mode=TwoWay}" />
+              <TextBlock Style="{StaticResource RowLabel}" Text="Text size" />
+              <Slider AutomationProperties.AutomationId="TextSize" Minimum="10" Maximum="36" Value="{Binding TextSize, Mode=TwoWay}" />
+              <TextBlock Style="{StaticResource RowLabel}" Text="Return behavior" />
+              <ComboBox AutomationProperties.AutomationId="TextEnterBehavior" ItemsSource="{Binding TextEnterBehaviors}" SelectedItem="{Binding TextEnterBehavior, Mode=TwoWay}" />
+              <TextBlock Style="{StaticResource RowLabel}" Text="Esc behavior" />
+              <ComboBox AutomationProperties.AutomationId="EscBehavior" ItemsSource="{Binding EscBehaviors}" SelectedItem="{Binding EscBehavior, Mode=TwoWay}" />
+              <CheckBox AutomationProperties.AutomationId="AutoExpandCanvas" Content="Auto-expand canvas" IsChecked="{Binding AutoExpandCanvas, Mode=TwoWay}" Margin="{StaticResource MetricTopGap}" />
+              <TextBlock Style="{StaticResource RowLabel}" Text="Canvas extension background hex" />
+              <TextBox AutomationProperties.AutomationId="CanvasExtensionBackgroundHex" Text="{Binding CanvasExtensionBackgroundHex, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+            </StackPanel>
+          </ScrollViewer>
+        </TabItem>
+
+        <TabItem Header="Output">
+          <ScrollViewer VerticalScrollBarVisibility="Auto">
+            <StackPanel Margin="{StaticResource MetricPanelMargin}">
+              <TextBlock Style="{StaticResource RowLabel}" Text="Save folder" />
+              <DockPanel>
+                <Button DockPanel.Dock="Right" AutomationProperties.AutomationId="PickSaveFolder" AutomationProperties.Name="Pick save folder" Content="Pick" Margin="{StaticResource MetricPickButtonMargin}" Click="PickSaveFolder_Click" />
+                <TextBox AutomationProperties.AutomationId="SaveFolder" Text="{Binding SaveFolder, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+              </DockPanel>
+              <TextBlock Style="{StaticResource RowLabel}" Text="Filename pattern" />
+              <TextBox AutomationProperties.AutomationId="FilenamePattern" Text="{Binding FilenamePattern, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+              <TextBlock Style="{StaticResource RowLabel}" Text="Export scale" />
+              <ComboBox AutomationProperties.AutomationId="ExportScale" ItemsSource="{Binding ExportScales}" SelectedItem="{Binding ExportScale, Mode=TwoWay}" />
+              <CheckBox AutomationProperties.AutomationId="SuppressCopyNotification" Content="Suppress copy notification" IsChecked="{Binding SuppressCopyNotification, Mode=TwoWay}" Margin="{StaticResource MetricTopGap}" />
+            </StackPanel>
+          </ScrollViewer>
+        </TabItem>
+
+        <TabItem Header="About">
+          <StackPanel Margin="{StaticResource MetricPanelMargin}">
+            <TextBlock Text="scrcap for Windows" FontWeight="Bold" Foreground="{StaticResource BrushInk}" />
+            <TextBlock Text="{Binding VersionText, StringFormat=Version {0}}" Margin="{StaticResource MetricSmallTopGap}" />
+            <TextBlock Text="{Binding BuildChannel, StringFormat=Build channel: {0}}" />
+            <TextBlock Text="{Binding SourceLink, StringFormat=Source: {0}}" />
+            <TextBlock Text="License and credits: scrcap project contributors." Margin="{StaticResource MetricSmallTopGap}" />
+          </StackPanel>
+        </TabItem>
+      </TabControl>
+    </DockPanel>
+  </Border>
+</Window>

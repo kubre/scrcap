@@ -1,0 +1,86 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                    xmlns:sys="clr-namespace:System;assembly=mscorlib">
+  <Color x:Key="ColorAccent">#FFE30E20</Color>
+  <Color x:Key="ColorAccentDeep">#FFA80513</Color>
+  <Color x:Key="ColorInk">#FF191A1C</Color>
+  <Color x:Key="ColorMuted">#FF666973</Color>
+  <Color x:Key="ColorChrome">#FFF7F7F8</Color>
+  <Color x:Key="ColorPanel">#FFFFFFFF</Color>
+  <Color x:Key="ColorRule">#FFC5C6CB</Color>
+  <Color x:Key="ColorCanvas">#FFFFFFFF</Color>
+  <Color x:Key="ColorOverlayDim">#61000000</Color>
+  <Color x:Key="ColorOnAccent">#FFFFFFFF</Color>
+  <Color x:Key="ColorDanger">#FFE30E20</Color>
+  <Color x:Key="ColorHover">#FFF0F0F2</Color>
+  <Color x:Key="ColorPressed">#FFE5E5E8</Color>
+
+  <SolidColorBrush x:Key="BrushAccent" Color="{StaticResource ColorAccent}" />
+  <SolidColorBrush x:Key="BrushAccentDeep" Color="{StaticResource ColorAccentDeep}" />
+  <SolidColorBrush x:Key="BrushInk" Color="{StaticResource ColorInk}" />
+  <SolidColorBrush x:Key="BrushMuted" Color="{StaticResource ColorMuted}" />
+  <SolidColorBrush x:Key="BrushChrome" Color="{StaticResource ColorChrome}" />
+  <SolidColorBrush x:Key="BrushPanel" Color="{StaticResource ColorPanel}" />
+  <SolidColorBrush x:Key="BrushRule" Color="{StaticResource ColorRule}" />
+  <SolidColorBrush x:Key="BrushCanvas" Color="{StaticResource ColorCanvas}" />
+  <SolidColorBrush x:Key="BrushOverlayDim" Color="{StaticResource ColorOverlayDim}" />
+  <SolidColorBrush x:Key="BrushOnAccent" Color="{StaticResource ColorOnAccent}" />
+  <SolidColorBrush x:Key="BrushDanger" Color="{StaticResource ColorDanger}" />
+  <SolidColorBrush x:Key="BrushHover" Color="{StaticResource ColorHover}" />
+  <SolidColorBrush x:Key="BrushPressed" Color="{StaticResource ColorPressed}" />
+
+  <FontFamily x:Key="FontUi">Segoe UI</FontFamily>
+  <sys:Double x:Key="FontSizeSmall">12</sys:Double>
+  <sys:Double x:Key="FontSizeBody">13</sys:Double>
+  <sys:Double x:Key="FontSizeTitle">15</sys:Double>
+
+  <sys:Double x:Key="MetricHeaderHeight">36</sys:Double>
+  <sys:Double x:Key="MetricToolbarHeight">42</sys:Double>
+  <sys:Double x:Key="MetricEditorWidth">980</sys:Double>
+  <sys:Double x:Key="MetricEditorHeight">680</sys:Double>
+  <sys:Double x:Key="MetricEditorMinWidth">600</sys:Double>
+  <sys:Double x:Key="MetricEditorMinHeight">278</sys:Double>
+  <sys:Double x:Key="MetricEditorRadius">10</sys:Double>
+  <sys:Double x:Key="MetricPreferencesWidth">720</sys:Double>
+  <sys:Double x:Key="MetricPreferencesHeight">540</sys:Double>
+  <sys:Double x:Key="MetricPreferencesMinWidth">680</sys:Double>
+  <sys:Double x:Key="MetricPreferencesMinHeight">480</sys:Double>
+  <sys:Double x:Key="MetricIconButtonWidth">34</sys:Double>
+  <sys:Double x:Key="MetricIconButtonHeight">28</sys:Double>
+  <sys:Double x:Key="MetricToolbarButtonMinWidth">34</sys:Double>
+  <sys:Double x:Key="MetricToolbarButtonHeight">30</sys:Double>
+  <sys:Double x:Key="MetricCommandButtonMinWidth">92</sys:Double>
+  <sys:Double x:Key="MetricSeparatorWidth">1</sys:Double>
+  <sys:Double x:Key="MetricSeparatorHeight">22</sys:Double>
+  <sys:Double x:Key="MetricTextInputWidth">150</sys:Double>
+  <sys:Double x:Key="MetricTextInputHeight">30</sys:Double>
+  <sys:Double x:Key="MetricOverlayCountdownFontSize">56</sys:Double>
+  <sys:Double x:Key="MetricScrollingHudWidth">220</sys:Double>
+  <sys:Double x:Key="MetricScrollingHudHeight">64</sys:Double>
+  <sys:Double x:Key="MetricScrollingHudDot">9</sys:Double>
+  <sys:Double x:Key="MetricScrollingHudStopMinWidth">54</sys:Double>
+  <Thickness x:Key="MetricEditorPadding">16</Thickness>
+  <Thickness x:Key="MetricBorderThickness">1</Thickness>
+  <Thickness x:Key="MetricHeaderMargin">12,0</Thickness>
+  <Thickness x:Key="MetricHeaderRightMargin">0,0,8,0</Thickness>
+  <Thickness x:Key="MetricWindowMargin">12</Thickness>
+  <Thickness x:Key="MetricPanelMargin">18</Thickness>
+  <Thickness x:Key="MetricTopGap">0,16,0,0</Thickness>
+  <Thickness x:Key="MetricSmallTopGap">0,10,0,0</Thickness>
+  <Thickness x:Key="MetricButtonGapRight">0,0,8,0</Thickness>
+  <Thickness x:Key="MetricPaletteGapRight">0,0,6,0</Thickness>
+  <Thickness x:Key="MetricPickButtonMargin">8,0,0,0</Thickness>
+  <Thickness x:Key="MetricTextInputMargin">8,0,0,0</Thickness>
+  <Thickness x:Key="MetricToolbarButtonMargin">0,0,6,0</Thickness>
+  <Thickness x:Key="MetricToolbarButtonPadding">8,0</Thickness>
+  <Thickness x:Key="MetricSeparatorMargin">6,0,10,0</Thickness>
+  <Thickness x:Key="MetricCanvasMargin">10</Thickness>
+  <Thickness x:Key="MetricOverlayHintPadding">10,6</Thickness>
+  <Thickness x:Key="MetricOverlayTagPadding">6,3</Thickness>
+  <Thickness x:Key="MetricOverlayLabelPadding">8,4</Thickness>
+  <Thickness x:Key="MetricScrollingHudPadding">12,9</Thickness>
+  <Thickness x:Key="MetricScrollingHudStopPadding">10,4</Thickness>
+  <CornerRadius x:Key="MetricPreferencesRadius">8</CornerRadius>
+  <CornerRadius x:Key="MetricOverlayTagRadius">4</CornerRadius>
+
+</ResourceDictionary>
