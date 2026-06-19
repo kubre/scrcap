@@ -86,8 +86,6 @@ echo "▸ building release (-Osize, whole-module, dead-strip)…"
 swift build -c release \
     -Xswiftc -Osize \
     -Xswiftc -whole-module-optimization \
-    -Xswiftc -Xfrontend \
-    -Xswiftc -disable-reflection-metadata \
     -Xlinker -dead_strip 2>&1 | tail -1
 
 echo "▸ assembling bundle (version $VERSION, build $BUILD_NUMBER)…"
