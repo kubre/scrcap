@@ -126,6 +126,11 @@ one 1920 by 1080 display at 100 percent / 96 DPI, idle CPU `0`, and private
 memory `14.23 MB`. Manual timing fields remain null because this thread did not
 collect three real hotkey/capture/pixelate trials.
 
+The hotkey-to-overlay budget remains open. It needs a resident Release app,
+real global-hotkey input, and either diagnostic trace capture or a
+high-frame-rate recording/ETW trace. Source-level hotkey hooks and in-process
+overlay tests are not accepted as this timing evidence.
+
 Evidence fields:
 
 | Field | Value |

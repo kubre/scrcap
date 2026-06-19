@@ -395,7 +395,10 @@ public partial class EditorWindow : Window
 
         try
         {
-            System.Windows.Clipboard.SetImage(DecodePng(bytes));
+            var data = new System.Windows.DataObject();
+            data.SetImage(DecodePng(bytes));
+            data.SetData("PNG", new MemoryStream(bytes));
+            System.Windows.Clipboard.SetDataObject(data, true);
             return true;
         }
         catch (Exception ex)
@@ -609,7 +612,7 @@ public partial class EditorWindow : Window
 
     private static void CleanupOldDragFiles()
     {
-        var folder = Path.Combine(Path.GetTempPath(), "scrcap-drag");
+        var folder = DragOutFolder();
         if (!Directory.Exists(folder))
         {
             return;
@@ -765,6 +768,17 @@ public partial class EditorWindow : Window
         }
     }
 
+    internal static void CleanupOldDragFilesForTests() => CleanupOldDragFiles();
+
+    internal string? CreateDragOutPngForTests()
+    {
+        Canvas.ViewModel ??= viewModel;
+        Canvas.SourceBitmap ??= sourceBitmap;
+        return CreateDragOutPng();
+    }
+
+    private static string DragOutFolder() => Path.Combine(Path.GetTempPath(), "scrcap-drag");
+
     private void InsertInlineNewline()
     {
         if (inlineTextBox is null)
@@ -875,19 +889,14 @@ public partial class EditorWindow : Window
 
     private void DragOutFlattened()
     {
-        CommitInlineText();
         try
         {
-            var bytes = Canvas.FlattenPng(settings.ResolvedExportScale);
-            if (bytes.Length == 0)
+            var path = CreateDragOutPng();
+            if (path is null)
             {
                 return;
             }
 
-            var folder = Path.Combine(Path.GetTempPath(), "scrcap-drag");
-            Directory.CreateDirectory(folder);
-            var path = Path.Combine(folder, FilenameGenerator.Filename(settings.FilenamePattern, DateTimeOffset.Now));
-            File.WriteAllBytes(path, bytes);
             var data = new System.Windows.DataObject();
             data.SetData(System.Windows.DataFormats.FileDrop, new[] { path });
             DragDrop.DoDragDrop(Canvas, data, System.Windows.DragDropEffects.Copy);
@@ -896,5 +905,21 @@ public partial class EditorWindow : Window
         {
             ShowRecoverableError("scrcap drag failed", ex);
         }
+    }
+
+    private string? CreateDragOutPng()
+    {
+        CommitInlineText();
+        var bytes = Canvas.FlattenPng(settings.ResolvedExportScale);
+        if (bytes.Length == 0)
+        {
+            return null;
+        }
+
+        var folder = DragOutFolder();
+        Directory.CreateDirectory(folder);
+        var path = Path.Combine(folder, FilenameGenerator.Filename(settings.FilenamePattern, DateTimeOffset.Now));
+        File.WriteAllBytes(path, bytes);
+        return path;
     }
 }

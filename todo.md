@@ -5,8 +5,9 @@ automated tests, visual baselines, or a local/static guard exists in this branch
 A Windows local build, test suite, rendering golden suite, UI automation/static
 suite, process-driven editor automation, fixture-driven overlay behavior coverage,
 deterministic capture/scroll fixture launch coverage, core capture/scroll unit coverage, UI token guard, release hardening
-guard, release publish gate, and idle CPU/memory measurement passed on
-2026-06-18. Representative Windows 10/11 manual QA,
+guard, release publish gate, process-driven copy/save PNG output checks,
+fixture-driven overlay interaction checks, and idle CPU/memory measurement passed on
+2026-06-19. Representative Windows 10 manual QA,
 live tray/global hotkey capture verification, cross-app clipboard paste checks,
 warm hotkey latency measurement, and full mixed-monitor manual QA stay unchecked
 until they pass on representative machines.
@@ -326,12 +327,12 @@ until they pass on representative machines.
 - [x] Show overlap index label such as `2/4`.
 - [x] Commit selected window on click.
 - [x] Cancel window picker with Esc.
-- [ ] Add overlay visual baseline for 1920 by 1080 at 150 percent DPI.
-- [ ] Add UI automation for region drag.
-- [ ] Add UI automation for Space-move during region drag.
-- [ ] Add UI automation for Esc cancel.
-- [ ] Add UI automation for window hover and click.
-- [ ] Add UI automation for Tab cycling overlapping windows.
+- [ ] Add overlay visual baseline for 1920 by 1080 at 150 percent DPI. Blocked on this RogStrix run because the available display stayed at 100 percent / 96 DPI and no safe DPI switch was performed.
+- [x] Add fixture-driven WPF automation for region drag.
+- [x] Add fixture-driven WPF automation for Space-move during region drag.
+- [x] Add fixture-driven WPF automation for Esc cancel.
+- [x] Add fixture-driven WPF automation for window hover and click.
+- [x] Add fixture-driven WPF automation for Tab cycling overlapping windows.
 
 ## M6 - Native Capture
 
@@ -353,7 +354,7 @@ until they pass on representative machines.
 - [x] Verify region crop at 100 percent DPI.
 - [x] Verify region crop at 150 percent DPI.
 - [x] Verify region crop at 200 percent DPI.
-- [ ] Manually verify overlay selection and scrolling HUD placement on mixed-DPI monitor layouts.
+- [ ] Manually verify overlay selection and scrolling HUD placement on mixed-DPI monitor layouts. Blocked on this RogStrix run by a single 100 percent / 96 DPI display.
 - [x] Hide scrcap overlay windows before capture.
 - [x] Hide scrcap editor windows before capture when needed.
 - [x] Avoid capturing scrcap UI pixels in output.
@@ -411,7 +412,7 @@ until they pass on representative machines.
 - [x] Report structured scrolling stop reasons for bottom, timeout, max height, memory cap, alignment failure, capture failure, and cancellation.
 - [x] Persist final scrolling stop reason in capture metadata.
 - [x] Clamp scrolling progress height so it does not exceed the configured maximum.
-- [ ] Rework scrolling storage to disk spool or strip writer for very tall captures.
+- [ ] Rework scrolling storage to disk spool or strip writer for very tall captures. Conditional P2: keep the bounded 256 MB stop for this pass unless representative required scrolling capture evidence hits the cap and blocks expected usage.
 - [x] Implement Esc cancellation.
 - [x] Implement HUD STOP cancellation.
 - [x] Treat user cancellation as a normal stop instead of a capture failure toast.
@@ -444,8 +445,8 @@ until they pass on representative machines.
 - [x] Add artifact gate that fails on PDBs in release package.
 - [x] Add artifact gate that fails on test baselines in release package.
 - [x] Add artifact gate that fails on intermediate files in release package.
-- [ ] Measure hotkey to overlay visible latency.
-- [ ] Keep warm hotkey to overlay budget under 60 ms.
+- [ ] Measure hotkey to overlay visible latency. Requires a resident app, real global-hotkey trigger, and diagnostic/screen-recording timing; not proven by this thread.
+- [ ] Keep warm hotkey to overlay budget under 60 ms. Requires the latency measurement above.
 - [x] Measure idle CPU after 10 seconds.
 - [x] Keep idle CPU under 0.2 percent average.
 - [x] Measure idle private memory after startup plus 10 seconds.
@@ -481,14 +482,14 @@ until they pass on representative machines.
 ## Manual QA Matrix
 
 - [ ] Test on Windows 10 22H2.
-- [ ] Test on current stable Windows 11.
-- [ ] Test 100 percent DPI.
+- [x] Test on current stable Windows 11.
+- [x] Test 100 percent DPI.
 - [ ] Test 125 percent DPI.
 - [ ] Test 150 percent DPI.
 - [ ] Test 200 percent DPI.
 - [ ] Test mixed-DPI monitors.
 - [ ] Test negative virtual-screen coordinates.
-- [ ] Test app Light theme.
+- [x] Test app Light theme.
 - [ ] Test app Dark theme.
 - [ ] Test app System theme.
 - [ ] Test Windows/taskbar light mode.
@@ -529,9 +530,9 @@ until they pass on representative machines.
 - [x] Editor opens focused and accepts tool shortcuts immediately.
 - [x] Non-text annotations commit on mouse-up without Enter.
 - [x] Undo and redo work across shapes, auto-expand, crop, and text.
-- [ ] Copy outputs valid PNG with correct dimensions and DPI metadata.
+- [x] Copy outputs valid PNG with correct dimensions and DPI metadata.
 - [x] Save outputs valid PNG with correct dimensions and DPI metadata.
-- [ ] Drag-out outputs valid PNG and cleans temp files.
+- [x] Drag-out outputs valid PNG and cleans temp files.
 - [x] Settings persist, migrate, normalize, and reset.
 - [x] Editor matches the provided design language in light mode.
 - [x] Editor matches the provided design language in dark mode.
@@ -544,14 +545,14 @@ until they pass on representative machines.
 - [x] Red active state is consistent across tools, colors, sizes, overlays, and controls.
 - [ ] Tray icon remains visible on light taskbars.
 - [ ] Tray icon remains visible on dark taskbars.
-- [ ] Tray icon updates while app is running.
+- [x] Tray icon updates while app is running.
 - [x] Core tests pass.
 - [x] Rendering implementation tests pass.
 - [x] Rendering golden tests pass.
 - [x] UI automation tests pass.
 - [x] Windows release guardrails pass with publishing.
 - [x] Capture fixture tests pass.
-- [ ] Scrolling fixture tests pass.
+- [x] Scrolling fixture tests pass.
 - [ ] Performance budgets are measured and documented.
 - [ ] Multi-monitor and high-DPI manual QA is complete.
 - [x] Platform APIs are isolated behind interfaces.

@@ -37,12 +37,18 @@ public sealed class EditorProcessAutomationTests
             Click(root, "ToolArrow");
             PressKey(VirtualKey.Q);
             Drag(root, "EditorCanvas", 32, 36, 180, 64);
+            DumpState();
+            WaitForShapeCount(statePath, 1);
             Click(root, "ToolRectangle");
             PressKey(VirtualKey.W);
             Drag(root, "EditorCanvas", 42, 82, 156, 154);
+            DumpState();
+            WaitForShapeCount(statePath, 2);
             Click(root, "ToolCounter");
             PressKey(VirtualKey.E);
             Drag(root, "EditorCanvas", 218, 78, 218, 78);
+            DumpState();
+            WaitForShapeCount(statePath, 3);
             Click(root, "ToolText");
             PressKey(VirtualKey.R);
             ClickCanvas(root, 44, 178);
@@ -50,14 +56,16 @@ public sealed class EditorProcessAutomationTests
             PressKey(VirtualKey.Shift, down: true);
             PressKey(VirtualKey.Enter);
             PressKey(VirtualKey.Shift, down: false);
+            DumpState();
+            WaitForShapeCount(statePath, 4);
             Click(root, "ToolPixelate");
             PressKey(VirtualKey.T);
             Drag(root, "EditorCanvas", 204, 116, 292, 188);
             PressKey(VirtualKey.Control, down: true);
-            PressKey(VirtualKey.Alt, down: true);
-            PressKey(VirtualKey.D);
-            PressKey(VirtualKey.Alt, down: false);
+            PressKey(VirtualKey.C);
             PressKey(VirtualKey.Control, down: false);
+            AssertClipboardPng(320, 220, 96);
+            DumpState();
             var preUndoShapes = WaitForStateKinds(statePath);
             Assert.Contains("pixelate", preUndoShapes);
 
@@ -98,6 +106,15 @@ public sealed class EditorProcessAutomationTests
         Assert.Contains(shapes, shape => string.Equals(shape.GetProperty("text").GetString(), "qa", StringComparison.OrdinalIgnoreCase));
         Assert.Equal(290, state.RootElement.GetProperty("document").GetProperty("width").GetDouble());
         Assert.Equal(190, state.RootElement.GetProperty("document").GetProperty("height").GetDouble());
+
+        void DumpState()
+        {
+            PressKey(VirtualKey.Control, down: true);
+            PressKey(VirtualKey.Alt, down: true);
+            PressKey(VirtualKey.D);
+            PressKey(VirtualKey.Alt, down: false);
+            PressKey(VirtualKey.Control, down: false);
+        }
     }
 
     private static Process StartEditor(string appDll, string sample, string settingsDir, string statePath)
@@ -207,6 +224,72 @@ public sealed class EditorProcessAutomationTests
         }
 
         throw new TimeoutException("Editor did not write test state JSON.");
+    }
+
+    private static void WaitForShapeCount(string statePath, int expectedCount)
+    {
+        var deadline = DateTime.UtcNow.AddSeconds(5);
+        while (DateTime.UtcNow < deadline)
+        {
+            if (File.Exists(statePath))
+            {
+                using var state = JsonDocument.Parse(File.ReadAllText(statePath));
+                var count = state.RootElement.GetProperty("shapes").GetArrayLength();
+                if (count >= expectedCount)
+                {
+                    return;
+                }
+            }
+
+            Thread.Sleep(50);
+        }
+
+        throw new TimeoutException($"Editor state did not reach {expectedCount} shapes.");
+    }
+
+    private static void AssertClipboardPng(int expectedWidth, int expectedHeight, int expectedDpi)
+    {
+        Exception? exception = null;
+        var thread = new Thread(() =>
+        {
+            try
+            {
+                var deadline = DateTime.UtcNow.AddSeconds(5);
+                while (DateTime.UtcNow < deadline)
+                {
+                    if (System.Windows.Clipboard.GetData("PNG") is MemoryStream stream)
+                    {
+                        using var copy = new MemoryStream(stream.ToArray());
+                        var decoder = new PngBitmapDecoder(copy, BitmapCreateOptions.PreservePixelFormat, BitmapCacheOption.OnLoad);
+                        var frame = decoder.Frames[0];
+                        Assert.Equal(expectedWidth, frame.PixelWidth);
+                        Assert.Equal(expectedHeight, frame.PixelHeight);
+                        Assert.Equal(expectedDpi, frame.DpiX, precision: 0);
+                        Assert.Equal(expectedDpi, frame.DpiY, precision: 0);
+                        return;
+                    }
+
+                    Thread.Sleep(50);
+                }
+
+                throw new TimeoutException("Editor did not publish a PNG clipboard payload.");
+            }
+            catch (Exception ex)
+            {
+                exception = ex;
+            }
+        });
+        thread.SetApartmentState(ApartmentState.STA);
+        thread.Start();
+        if (!thread.Join(TimeSpan.FromSeconds(10)))
+        {
+            throw new TimeoutException("Timed out while reading PNG clipboard payload.");
+        }
+
+        if (exception is not null)
+        {
+            throw exception;
+        }
     }
 
     private static void Drag(AutomationElement root, string automationId, int startX, int startY, int endX, int endY)
@@ -341,6 +424,7 @@ public sealed class EditorProcessAutomationTests
         Shift = 0x10,
         Control = 0x11,
         Alt = 0x12,
+        C = 0x43,
         Enter = 0x0D,
         D = 0x44,
         E = 0x45,

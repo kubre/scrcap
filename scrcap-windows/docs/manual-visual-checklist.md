@@ -76,6 +76,20 @@ QA issue.
 | Screenshots folder | `docs/windows-parity` |
 | Notes and defects | Current evidence covers editor and preferences full-HWND light captures, window chrome smoke, idle CPU/private memory, fixture capture tests, and process-driven editor Save. Windows 10, multi-monitor, mixed DPI, negative origin, high contrast, taskbar light/dark manual checks, Paint/Chromium paste, true drag-out, and physical overlay interaction checks remain open. Computer Use UI automation was not available in this thread because the Node REPL execution tool was not exposed after discovery. |
 
+## Current row disposition
+
+| Row group | Status | Reason |
+|---|---|---|
+| Windows 11 at 100 percent DPI, app light theme | Verified | Current full-HWND screenshots, chrome smoke, and process/editor tests were run on Windows 11 build 26200 with one 100 percent / 96 DPI display. |
+| Windows 10, 125/150/200 percent DPI, mixed DPI, negative origin | Open | This RogStrix session exposed one Windows 11 display at 100 percent DPI; no second OS, second monitor, or safe DPI switch was available in-thread. |
+| Taskbar light/dark visual tray checks and live tray theme switch | Open | Tray icon asset selection and update behavior are covered by service tests, but physical taskbar visibility and overflow-flyout contrast still require screenshots or recording. |
+| Paint, Word, Teams, Slack, Chromium, Outlook paste checks | Open | The process test proves a PNG clipboard payload and bitmap paste compatibility data are published, but cross-app paste requires Windows UI automation or manual app access. Computer Use Node execution was unavailable in this thread. |
+| Drag-out into another app | Open | The automated test proves the drag-out temp PNG dimensions/DPI metadata and stale-file cleanup. Dropping into a target app remains manual because no Windows UI automation target was available in this thread. |
+| Physical tray menu and global hotkey capture modes | Open | These require resident app interaction through the tray/hotkeys and physical overlay input. The current automated evidence covers command routing, fixtures, and editor/capture services, not full manual tray/hotkey capture runs. |
+| Window capture variants and protected/elevated/minimized/hidden cases | Open | Fixture and service tests cover deterministic HWND capture, own-process exclusion, hidden/minimized filtering behavior, and protected-content handling code paths; real app matrix windows remain manual. |
+| Scrolling browser/chat/sticky/non-scroll/lazy-loaded cases | Partially verified | Core stitcher tests cover sticky, no-scroll, lazy-load, bounce/bottom, and max-height behavior. The deterministic scroll fixture exposes HWND/stdout. Real browser/chat scrolling captures remain manual. |
+| Clipboard locked, missing save folder, disk write denied | Open | Recoverable error paths exist, but this thread did not safely lock the clipboard or alter filesystem permissions to force those failures. |
+
 ## Required release matrix
 
 Do not mark this matrix complete from code inspection alone. Each checked row

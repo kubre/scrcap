@@ -18,8 +18,8 @@
 - Runtime chrome smoke evidence: `window-chrome-smoke-current.json`.
 - Idle CPU/private-memory evidence: `windows-performance-current.json`.
 - Self-contained publish evidence: `self-contained-publish-current.json`.
-- Automated output proof added in `Scrcap.Rendering.Tests`: `FlattenPngWritesScaleDimensionsAndDpiMetadata` verifies 1x output at 96 DPI and 2x output at 192 DPI. `Scrcap.UiAutomation.Tests`: `ProcessDrivenEditorDrawsToolsSavesPngAndDumpsState` verifies process-driven Save output dimensions and 96-DPI metadata.
-- Process-driven editor automation covers tool shortcuts, mouse drawing, text entry, pre/post Ctrl+Z state, crop, and Save. Overlay region/window behavior added here is fixture-driven/in-process automation only; true physical overlay mouse/keyboard process rows remain open.
+- Automated output proof added in `Scrcap.Rendering.Tests`: `FlattenPngWritesScaleDimensionsAndDpiMetadata` verifies 1x output at 96 DPI and 2x output at 192 DPI. `Scrcap.UiAutomation.Tests`: `ProcessDrivenEditorDrawsToolsSavesPngAndDumpsState` verifies process-driven Ctrl+C publishes a PNG clipboard payload with dimensions and 96-DPI metadata, and verifies Save output dimensions and 96-DPI metadata. `DragOutWritesPngWithDpiMetadataAndCleansOldTempFiles` verifies drag-out temp PNG dimensions/DPI metadata and stale temp cleanup without claiming a cross-app drop.
+- Process-driven editor automation covers tool shortcuts, mouse drawing, text entry, pre/post Ctrl+Z state, crop, Ctrl+C copy, and Save. Overlay region/window behavior added here is fixture-driven WPF automation only; true physical overlay mouse/keyboard process rows remain open.
 - Capture fixture evidence covers deterministic colored-window HWND stdout and GDI window capture colored-corner validation. Scroll fixture launch/HWND/stdout is present; full process-driven scrolling capture fixture rows remain open.
 - Computer Use UI automation was not available in this thread because the Node REPL execution tool was not exposed after discovery; therefore Paint/Chromium paste, true drag-out into another app, and physical overlay interaction rows remain unverified here.
 

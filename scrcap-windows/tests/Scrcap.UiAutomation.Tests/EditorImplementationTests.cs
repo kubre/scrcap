@@ -1,8 +1,10 @@
 using System.IO;
 using System.Text.RegularExpressions;
+using System.Windows;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using Scrcap.Core;
+using Scrcap.Windows.Platform.Capture;
 using Scrcap.Windows.UI.Editor;
 
 namespace Scrcap.UiAutomation.Tests;
@@ -317,6 +319,53 @@ public sealed class EditorImplementationTests
         });
     }
 
+    [Fact]
+    public void DragOutWritesPngWithDpiMetadataAndCleansOldTempFiles()
+    {
+        RunSta(() =>
+        {
+            EnsureApplication();
+            var settings = Settings.Defaults();
+            settings.ExportScale = 2;
+            settings.FilenamePattern = "drag-proof";
+            var source = CreateGradientBitmap(80, 50);
+            var metadata = new CaptureMetadata(CaptureMode.Region, "drag-proof.png", null, DateTimeOffset.UnixEpoch);
+            var window = new EditorWindow(
+                new CaptureResult(EditorWindow.CapturedPixelsFromBitmapSource(source, metadata), metadata),
+                settings);
+            string? dragPath = null;
+            try
+            {
+                dragPath = window.CreateDragOutPngForTests();
+                Assert.True(File.Exists(dragPath));
+                using (var stream = File.OpenRead(dragPath))
+                {
+                    var decoder = new PngBitmapDecoder(stream, BitmapCreateOptions.PreservePixelFormat, BitmapCacheOption.OnLoad);
+                    var frame = decoder.Frames[0];
+                    Assert.Equal(160, frame.PixelWidth);
+                    Assert.Equal(100, frame.PixelHeight);
+                    Assert.Equal(192, frame.DpiX, precision: 0);
+                    Assert.Equal(192, frame.DpiY, precision: 0);
+                }
+
+                var oldPath = Path.Combine(Path.GetDirectoryName(dragPath)!, "old-drag-proof.png");
+                File.WriteAllBytes(oldPath, File.ReadAllBytes(dragPath));
+                File.SetCreationTimeUtc(oldPath, DateTime.UtcNow.AddHours(-25));
+                EditorWindow.CleanupOldDragFilesForTests();
+
+                Assert.False(File.Exists(oldPath));
+            }
+            finally
+            {
+                window.Close();
+                if (dragPath is not null)
+                {
+                    File.Delete(dragPath);
+                }
+            }
+        });
+    }
+
     private static void Commit(EditorViewModel viewModel, EditorTool tool, CorePoint start, CorePoint end, string? text = null)
     {
         viewModel.ActiveTool = tool;
@@ -406,6 +455,34 @@ public sealed class EditorImplementationTests
     {
         var index = ((y * width) + x) * 4;
         return pixels[index] < 230 && pixels[index + 1] < 230 && pixels[index + 2] < 230;
+    }
+
+    private static void EnsureApplication()
+    {
+        if (Application.Current is null)
+        {
+            _ = new Application
+            {
+                ShutdownMode = ShutdownMode.OnExplicitShutdown,
+            };
+        }
+
+        var app = Application.Current ?? throw new InvalidOperationException("WPF application was not created.");
+        if (app.Resources.MergedDictionaries.Count == 0)
+        {
+            app.Resources.MergedDictionaries.Add(new ResourceDictionary
+            {
+                Source = new Uri("/Scrcap.Windows.UI;component/Resources/ThemeTokens.xaml", UriKind.Relative),
+            });
+            app.Resources.MergedDictionaries.Add(new ResourceDictionary
+            {
+                Source = new Uri("/Scrcap.Windows.UI;component/Resources/IconGeometries.xaml", UriKind.Relative),
+            });
+            app.Resources.MergedDictionaries.Add(new ResourceDictionary
+            {
+                Source = new Uri("/Scrcap.Windows.UI;component/Chrome/ScrcapWindowChrome.xaml", UriKind.Relative),
+            });
+        }
     }
 
     private static void RunSta(Action action)
