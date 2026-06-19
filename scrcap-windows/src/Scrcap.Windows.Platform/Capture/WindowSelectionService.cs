@@ -29,23 +29,31 @@ public sealed class WindowSelectionService : IWindowSelectionService
 
     private static WindowCandidate? CandidateFor(IntPtr hwnd)
     {
-        if (hwnd == IntPtr.Zero
-            || !IsWindowVisible(hwnd)
-            || IsIconic(hwnd)
-            || IsShellWindow(hwnd)
-            || IsToolWindow(hwnd)
-            || IsCloaked(hwnd))
+        try
+        {
+            if (hwnd == IntPtr.Zero
+                || !IsWindowVisible(hwnd)
+                || IsIconic(hwnd)
+                || IsShellWindow(hwnd)
+                || IsToolWindow(hwnd)
+                || IsOwnProcessWindow(hwnd)
+                || IsCloaked(hwnd))
+            {
+                return null;
+            }
+
+            var bounds = WindowBounds(hwnd);
+            if (bounds.Width < 40 || bounds.Height < 40)
+            {
+                return null;
+            }
+
+            return new WindowCandidate(hwnd, bounds, WindowTitle(hwnd));
+        }
+        catch
         {
             return null;
         }
-
-        var bounds = WindowBounds(hwnd);
-        if (bounds.Width < 40 || bounds.Height < 40)
-        {
-            return null;
-        }
-
-        return new WindowCandidate(hwnd, bounds, WindowTitle(hwnd));
     }
 
     internal static PixelRect WindowBounds(IntPtr hwnd)
@@ -79,6 +87,12 @@ public sealed class WindowSelectionService : IWindowSelectionService
 
     private static bool IsToolWindow(IntPtr hwnd) =>
         (GetWindowLongPtr(hwnd, GwlExStyle).ToInt64() & WsExToolWindow) != 0;
+
+    internal static bool IsOwnProcessWindow(IntPtr hwnd)
+    {
+        _ = GetWindowThreadProcessId(hwnd, out var processId);
+        return processId == Environment.ProcessId;
+    }
 
     private static bool IsCloaked(IntPtr hwnd) =>
         DwmGetWindowAttribute(hwnd, DwmWindowAttributeCloaked, out int cloaked, sizeof(int)) == 0 && cloaked != 0;
@@ -135,6 +149,9 @@ public sealed class WindowSelectionService : IWindowSelectionService
 
     [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW", SetLastError = true)]
     private static extern IntPtr GetWindowLongPtr(IntPtr hwnd, int index);
+
+    [DllImport("user32.dll")]
+    private static extern uint GetWindowThreadProcessId(IntPtr hwnd, out int processId);
 
     [DllImport("dwmapi.dll")]
     private static extern int DwmGetWindowAttribute(IntPtr hwnd, int attribute, out NativeRect rect, int attributeSize);

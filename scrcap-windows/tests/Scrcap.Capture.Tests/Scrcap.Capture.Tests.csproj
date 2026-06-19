@@ -1,6 +1,8 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <TargetFramework>net8.0</TargetFramework>
+    <TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+    <UseWindowsForms>true</UseWindowsForms>
     <IsPackable>false</IsPackable>
   </PropertyGroup>
   <ItemGroup>
@@ -10,6 +12,10 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\src\Scrcap.Core\Scrcap.Core.csproj" />
+    <Compile Include="..\..\src\Scrcap.Windows.Platform\Capture\CaptureGeometry.cs" Link="Capture\CaptureGeometry.cs" />
+    <Compile Include="..\..\src\Scrcap.Windows.Platform\Capture\CaptureModels.cs" Link="Capture\CaptureModels.cs" />
     <Compile Include="..\..\src\Scrcap.Windows.Platform\Capture\ScrollingFramePlanner.cs" Link="Capture\ScrollingFramePlanner.cs" />
+    <Compile Include="..\..\src\Scrcap.Windows.Platform\Capture\ScrollingCaptureStitcher.cs" Link="Capture\ScrollingCaptureStitcher.cs" />
+    <Compile Include="..\..\src\Scrcap.Windows.Platform\Capture\WindowBitmapComposer.cs" Link="Capture\WindowBitmapComposer.cs" />
   </ItemGroup>
 </Project>

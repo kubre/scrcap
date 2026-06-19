@@ -21,12 +21,13 @@ public partial class EditorWindow : Window
     {
         this.settings = settings ?? Settings.Defaults();
         viewModel = new EditorViewModel(this.settings);
-        InitializeComponent();
-        DataContext = viewModel;
         if (System.Windows.Application.Current is { } app)
         {
             AppThemeService.Apply(app.Resources, this.settings.ThemeMode);
         }
+
+        InitializeComponent();
+        DataContext = viewModel;
 
         Canvas.CropCommitted += Canvas_CropCommitted;
         Canvas.DocumentChanged += (_, _) =>
@@ -38,7 +39,7 @@ public partial class EditorWindow : Window
 
         if (capture is not null)
         {
-            LoadBitmap(DecodePng(capture.PngBytes));
+            LoadBitmap(BitmapSourceFromPixels(capture.Pixels));
             Width = Math.Min(1200, Math.Max(720, capture.PixelWidth + 80));
             Height = Math.Min(900, Math.Max(520, capture.PixelHeight + 120));
         }
@@ -208,6 +209,27 @@ public partial class EditorWindow : Window
 
     private void SizeLarge_Click(object sender, RoutedEventArgs e) => SelectSize(ShapeSize.Large);
 
+    private void ZoomOut_Click(object sender, RoutedEventArgs e)
+    {
+        viewModel.ZoomOut();
+        Canvas.Focus();
+        Canvas.InvalidateVisual();
+    }
+
+    private void ZoomReset_Click(object sender, RoutedEventArgs e)
+    {
+        viewModel.ResetZoom();
+        Canvas.Focus();
+        Canvas.InvalidateVisual();
+    }
+
+    private void ZoomIn_Click(object sender, RoutedEventArgs e)
+    {
+        viewModel.ZoomIn();
+        Canvas.Focus();
+        Canvas.InvalidateVisual();
+    }
+
     private void Undo_Click(object sender, RoutedEventArgs e)
     {
         viewModel.Undo();
@@ -278,23 +300,32 @@ public partial class EditorWindow : Window
 
     private void Done()
     {
-        if (settings.EscBehavior == EscBehavior.CopyAndClose)
+        if (settings.EscBehavior == EscBehavior.CopyAndClose && !CopyFlattened())
         {
-            CopyFlattened();
+            return;
         }
 
         Close();
     }
 
-    private void CopyFlattened()
+    private bool CopyFlattened()
     {
         var bytes = Canvas.FlattenPng(settings.ResolvedExportScale);
         if (bytes.Length == 0)
         {
-            return;
+            return false;
         }
 
-        System.Windows.Clipboard.SetImage(DecodePng(bytes));
+        try
+        {
+            System.Windows.Clipboard.SetImage(DecodePng(bytes));
+            return true;
+        }
+        catch (Exception ex)
+        {
+            ShowRecoverableError("scrcap copy failed", ex);
+            return false;
+        }
     }
 
     private void SaveConfiguredAndClose()
@@ -305,10 +336,17 @@ public partial class EditorWindow : Window
             folder = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
         }
 
-        Directory.CreateDirectory(folder);
-        var path = Path.Combine(folder, FilenameGenerator.Filename(settings.FilenamePattern, DateTimeOffset.Now));
-        File.WriteAllBytes(path, Canvas.FlattenPng(settings.ResolvedExportScale));
-        Close();
+        try
+        {
+            Directory.CreateDirectory(folder);
+            var path = Path.Combine(folder, FilenameGenerator.Filename(settings.FilenamePattern, DateTimeOffset.Now));
+            File.WriteAllBytes(path, Canvas.FlattenPng(settings.ResolvedExportScale));
+            Close();
+        }
+        catch (Exception ex)
+        {
+            ShowRecoverableError("scrcap save failed", ex);
+        }
     }
 
     private void SaveAsAndClose()
@@ -324,10 +362,20 @@ public partial class EditorWindow : Window
 
         if (dialog.ShowDialog(this) == true)
         {
-            File.WriteAllBytes(dialog.FileName, Canvas.FlattenPng(settings.ResolvedExportScale));
-            Close();
+            try
+            {
+                File.WriteAllBytes(dialog.FileName, Canvas.FlattenPng(settings.ResolvedExportScale));
+                Close();
+            }
+            catch (Exception ex)
+            {
+                ShowRecoverableError("scrcap save failed", ex);
+            }
         }
     }
+
+    private void ShowRecoverableError(string title, Exception exception) =>
+        System.Windows.MessageBox.Show(this, exception.Message, title, MessageBoxButton.OK, MessageBoxImage.Warning);
 
     public static BitmapImage DecodePng(byte[] bytes)
     {
@@ -339,6 +387,34 @@ public partial class EditorWindow : Window
         image.EndInit();
         image.Freeze();
         return image;
+    }
+
+    public static BitmapSource BitmapSourceFromPixels(CapturedPixels pixels)
+    {
+        pixels.Validate();
+        var bytes = pixels.Bgra32.ToArray();
+        var bitmap = BitmapSource.Create(
+            pixels.PixelWidth,
+            pixels.PixelHeight,
+            96,
+            96,
+            PixelFormats.Bgra32,
+            null,
+            bytes,
+            pixels.Stride);
+        bitmap.Freeze();
+        return bitmap;
+    }
+
+    public static CapturedPixels CapturedPixelsFromBitmapSource(BitmapSource source, CaptureMetadata metadata)
+    {
+        BitmapSource bitmap = source.Format == PixelFormats.Bgra32
+            ? source
+            : new FormatConvertedBitmap(source, PixelFormats.Bgra32, null, 0);
+        var stride = bitmap.PixelWidth * 4;
+        var bytes = new byte[stride * bitmap.PixelHeight];
+        bitmap.CopyPixels(bytes, stride, 0);
+        return new CapturedPixels(bytes, bitmap.PixelWidth, bitmap.PixelHeight, stride, metadata);
     }
 
     private static BitmapSource CreateBlankBitmap(int width, int height)

@@ -17,6 +17,15 @@ public sealed class TrayIconServiceTests
         Assert.Equal("scrcap-tray-taskbar-dark.ico", tray.CurrentIconKey);
     }
 
+    [Fact]
+    public void TrayIconAssetsAreEmbedded()
+    {
+        var resources = typeof(NotifyIconTrayService).Assembly.GetManifestResourceNames();
+
+        Assert.Contains("Scrcap.Windows.Platform.Tray.Assets.scrcap-tray-taskbar-light.ico", resources);
+        Assert.Contains("Scrcap.Windows.Platform.Tray.Assets.scrcap-tray-taskbar-dark.ico", resources);
+    }
+
     private sealed class FakeThemeService(TaskbarTheme current) : ITaskbarThemeService
     {
         public event EventHandler<TaskbarTheme>? Changed;

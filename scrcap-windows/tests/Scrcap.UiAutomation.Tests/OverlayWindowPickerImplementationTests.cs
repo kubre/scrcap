@@ -1,4 +1,7 @@
 using System.IO;
+using System.Windows;
+using Scrcap.Windows.Platform.Capture;
+using Scrcap.Windows.UI.Overlay;
 
 namespace Scrcap.UiAutomation.Tests;
 
@@ -29,7 +32,10 @@ public sealed class OverlayWindowPickerImplementationTests
         Assert.Contains("OverlapTag", xaml, StringComparison.Ordinal);
         Assert.Contains("CountdownOverlay", xaml, StringComparison.Ordinal);
         Assert.Contains("StrokeDashArray", xaml, StringComparison.Ordinal);
-        Assert.Contains("DoubleAnimation", xaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("Storyboard RepeatBehavior=\"Forever\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("DispatcherTimer", source, StringComparison.Ordinal);
+        Assert.Contains("StartSelectionAnimation", source, StringComparison.Ordinal);
+        Assert.Contains("StopSelectionAnimation", source, StringComparison.Ordinal);
         Assert.Contains("RenderMonitorLayer", source, StringComparison.Ordinal);
         Assert.Contains("CountIntersectingMonitors", source, StringComparison.Ordinal);
         Assert.Contains("ShowCountdownAsync", source, StringComparison.Ordinal);
@@ -44,6 +50,103 @@ public sealed class OverlayWindowPickerImplementationTests
         Assert.Contains("SelectRegionAsync(countdownSeconds)", source, StringComparison.Ordinal);
         Assert.Contains("RequestFrom(settings, 0)", source, StringComparison.Ordinal);
         Assert.DoesNotContain("RequestFrom(settings, action == AppAction.CaptureDelayed", source, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void OverlayGeometryConvertsLogicalSelectionsToPhysicalPixelsAtCommonDpiScales()
+    {
+        foreach (var (scale, expected) in new[]
+                 {
+                     (1.0, new PixelRect(10, 20, 100, 50)),
+                     (1.5, new PixelRect(15, 30, 150, 75)),
+                     (2.0, new PixelRect(20, 40, 200, 100)),
+                 })
+        {
+            OverlayMonitorBounds[] monitors =
+            [
+                new(1, new PixelRect(0, 0, (int)(1920 * scale), (int)(1080 * scale)), true, scale, scale),
+            ];
+
+            var actual = OverlayGeometry.ToCapturePixelRect(new Rect(10, 20, 100, 50), monitors, 0, 0);
+
+            Assert.Equal(expected, actual);
+        }
+    }
+
+    [Fact]
+    public void OverlayGeometryFloorsAndCeilsFractionalDpiSelectionEdges()
+    {
+        OverlayMonitorBounds[] monitors =
+        [
+            new(1, new PixelRect(0, 0, 1920, 1080), true, 1.5, 1.5),
+        ];
+
+        var actual = OverlayGeometry.ToCapturePixelRect(new Rect(10.2, 20.2, 100.4, 50.4), monitors, 0, 0);
+
+        Assert.Equal(new PixelRect(15, 30, 151, 76), actual);
+    }
+
+    [Fact]
+    public void OverlayGeometryHandlesNegativeVirtualOriginsAndMixedDpiMonitors()
+    {
+        OverlayMonitorBounds[] monitors =
+        [
+            new(1, new PixelRect(-1280, 0, 1280, 720), false, 1, 1),
+            new(2, new PixelRect(0, 0, 3000, 2000), true, 2, 2),
+        ];
+        var overlay = OverlayGeometry.VirtualOverlayBounds(monitors);
+
+        Assert.Equal(-1280, overlay.Left);
+        Assert.Equal(0, overlay.Top);
+        Assert.Equal(2780, overlay.Width);
+        Assert.Equal(1000, overlay.Height);
+
+        var leftSelection = OverlayGeometry.ToCapturePixelRect(new Rect(40, 10, 100, 50), monitors, overlay.Left, overlay.Top);
+        var primarySelection = OverlayGeometry.ToCapturePixelRect(new Rect(1320, 10, 100, 50), monitors, overlay.Left, overlay.Top);
+
+        Assert.Equal(new PixelRect(-1240, 10, 100, 50), leftSelection);
+        Assert.Equal(new PixelRect(80, 20, 200, 100), primarySelection);
+    }
+
+    [Fact]
+    public void OverlayGeometryKeepsRightAndBelowMixedDpiDisplaysAdjacent()
+    {
+        OverlayMonitorBounds[] monitors =
+        [
+            new(1, new PixelRect(0, 0, 3840, 2160), true, 2, 2),
+            new(2, new PixelRect(3840, 0, 1920, 1080), false, 1, 1),
+            new(3, new PixelRect(0, 2160, 2560, 1440), false, 1, 1),
+        ];
+        var overlay = OverlayGeometry.VirtualOverlayBounds(monitors);
+
+        Assert.Equal(new Rect(0, 0, 3840, 2520), overlay);
+        Assert.Equal(new Rect(0, 0, 1920, 1080), OverlayGeometry.LogicalBoundsFor(monitors[0], monitors));
+        Assert.Equal(new Rect(1920, 0, 1920, 1080), OverlayGeometry.LogicalBoundsFor(monitors[1], monitors));
+        Assert.Equal(new Rect(0, 1080, 2560, 1440), OverlayGeometry.LogicalBoundsFor(monitors[2], monitors));
+
+        var rightSelection = OverlayGeometry.ToCapturePixelRect(new Rect(1930, 10, 100, 50), monitors, overlay.Left, overlay.Top);
+        var belowSelection = OverlayGeometry.ToCapturePixelRect(new Rect(10, 1090, 100, 50), monitors, overlay.Left, overlay.Top);
+
+        Assert.Equal(new PixelRect(3850, 10, 100, 50), rightSelection);
+        Assert.Equal(new PixelRect(10, 2170, 100, 50), belowSelection);
+    }
+
+    [Fact]
+    public void ScrollingHudPlacementUsesSelectedMonitorLogicalBounds()
+    {
+        OverlayMonitorBounds[] monitors =
+        [
+            new(1, new PixelRect(-1280, 0, 1280, 720), false, 1, 1),
+            new(2, new PixelRect(0, 0, 3000, 2000), true, 2, 2),
+        ];
+
+        var leftPlacement = ScrollingCaptureHud.PlacementFor(new PixelRect(-900, 100, 300, 200), monitors, 220, 64);
+        var primaryPlacement = ScrollingCaptureHud.PlacementFor(new PixelRect(800, 200, 500, 300), monitors, 220, 64);
+
+        Assert.Equal(-238, leftPlacement.X);
+        Assert.Equal(18, leftPlacement.Y);
+        Assert.Equal(1262, primaryPlacement.X);
+        Assert.Equal(18, primaryPlacement.Y);
     }
 
     private static string ReadRepoFile(string relativePath)

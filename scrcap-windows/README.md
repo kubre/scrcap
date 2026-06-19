@@ -28,17 +28,18 @@ dotnet restore .\Scrcap.sln
 dotnet test .\tests\Scrcap.Core.Tests\Scrcap.Core.Tests.csproj
 dotnet test .\tests\Scrcap.Windows.Platform.Tests\Scrcap.Windows.Platform.Tests.csproj
 dotnet build .\src\Scrcap.Windows.UI\Scrcap.Windows.UI.csproj
-pwsh .\tools\Check-HardcodedUiColors.ps1
+.\tools\Check-HardcodedUiColors.ps1
+.\tools\Test-ReleaseHardening.ps1
 ```
 
 On non-Windows hosts, `Scrcap.Windows.Platform.Tests` may compile but cannot run
 because it targets `Microsoft.WindowsDesktop.App`.
 
 The stricter release guard runs the UI token guard, restore, build, solution
-tests, and publish artifact gate:
+hardening checks, solution tests, and publish artifact gate:
 
 ```powershell
-pwsh .\tools\Test-ReleaseGuardrails.ps1
+.\tools\Test-ReleaseGuardrails.ps1
 ```
 
 Use `-SkipPublish` for a faster preflight while iterating.
@@ -48,18 +49,38 @@ Use `-SkipPublish` for a faster preflight while iterating.
 Framework-dependent Windows x64 single-file package:
 
 ```powershell
-pwsh .\tools\Publish-Windows.ps1 -Mode framework-dependent
+.\tools\Publish-Windows.ps1 -Mode framework-dependent
 ```
 
 Self-contained Windows x64 single-file package:
 
 ```powershell
-pwsh .\tools\Publish-Windows.ps1 -Mode self-contained
+.\tools\Publish-Windows.ps1 -Mode self-contained
 ```
 
 The publish script writes to `artifacts/`, cleans the previous output for that
 mode, strips debug symbols, and fails if the release output is missing the app
-executable or contains PDBs, test baselines, or intermediate build folders.
+executable or `LICENSE.txt`, or contains PDBs, test baselines, temporary files,
+or intermediate build folders.
+
+## Release and QA evidence
+
+- `docs/performance-and-release-qa.md` defines the Windows release performance
+  budgets, measurement commands, and QA evidence template.
+- `docs/manual-visual-checklist.md` contains the Windows 10/11 light and dark
+  taskbar visual checklist.
+- `docs/windows-differences.md` documents intentional Windows behavior
+  differences and their automated or manual coverage.
+
+Collect idle CPU and private-memory evidence with:
+
+```powershell
+.\tools\Measure-WindowsPerformance.ps1 -Configuration Release -IdleSeconds 10
+```
+
+Add manual latency, overlay timer, and 500-shape editor measurements to the same
+JSON evidence file with the optional `-Manual*` parameters documented in the QA
+guide.
 
 ## Current readiness
 
@@ -77,7 +98,11 @@ executable or contains PDBs, test baselines, or intermediate build folders.
   reports frame progress to a top-right HUD, and supports Stop/Esc cancellation.
 - Guardrails: `Check-HardcodedUiColors.ps1` now fails on hard-coded XAML colors,
   font sizes, and fixed visible layout metrics outside `ThemeTokens.xaml`.
-- Deferred verification: visual baselines, UI automation against a real desktop,
-  capture fixture pixel comparisons, performance budgets, release artifact
-  naming/assets/license checks, and Windows 10/11 manual QA must pass on a
-  Windows machine before release.
+- Packaging: release output is gated for `scrcap.exe`, `LICENSE.txt`, tray icon
+  assets, and absence of development artifacts.
+- Automated verification: rendering golden baselines, UI automation/static
+  scenario tests, deterministic capture/scroll fixture tests, overlay timer
+  source-level checks, and idle CPU/private-memory measurements are in place.
+- Deferred verification: live tray/global-hotkey capture flows, warm hotkey
+  latency, cross-app clipboard paste checks, high-contrast behavior, and
+  Windows 10/11 manual QA must pass on representative machines before release.

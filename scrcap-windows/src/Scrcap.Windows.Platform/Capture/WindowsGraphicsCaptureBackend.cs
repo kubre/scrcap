@@ -13,6 +13,18 @@ namespace Scrcap.Windows.Platform.Capture;
 
 internal sealed class WindowsGraphicsCaptureBackend
 {
+    private readonly IFrameConverter frameConverter;
+
+    public WindowsGraphicsCaptureBackend()
+        : this(new SoftwareBitmapFrameConverter())
+    {
+    }
+
+    internal WindowsGraphicsCaptureBackend(IFrameConverter frameConverter)
+    {
+        this.frameConverter = frameConverter;
+    }
+
     public async Task<Bitmap> CaptureWindowAsync(IntPtr hwnd, bool includeCursor, CancellationToken cancellationToken)
     {
         if (hwnd == IntPtr.Zero)
@@ -42,7 +54,7 @@ internal sealed class WindowsGraphicsCaptureBackend
             or InvalidOperationException
             or UnauthorizedAccessException;
 
-    private static async Task<Bitmap> CaptureItemAsync(GraphicsCaptureItem item, bool includeCursor, CancellationToken cancellationToken)
+    private async Task<Bitmap> CaptureItemAsync(GraphicsCaptureItem item, bool includeCursor, CancellationToken cancellationToken)
     {
         if (!OperatingSystem.IsWindowsVersionAtLeast(10, 0, 19041) || !GraphicsCaptureSession.IsSupported())
         {
@@ -78,7 +90,7 @@ internal sealed class WindowsGraphicsCaptureBackend
 
             session.StartCapture();
             using var frame = await frameReady.Task.WaitAsync(TimeSpan.FromSeconds(3), cancellationToken).ConfigureAwait(false);
-            return await BitmapFromSurfaceAsync(frame.Surface, cancellationToken).ConfigureAwait(false);
+            return await frameConverter.ConvertAsync(frame.Surface, cancellationToken).ConfigureAwait(false);
         }
         finally
         {
@@ -97,45 +109,6 @@ internal sealed class WindowsGraphicsCaptureBackend
         {
             // Older Windows builds can expose WGC without cursor toggling.
         }
-    }
-
-    private static async Task<Bitmap> BitmapFromSurfaceAsync(IDirect3DSurface surface, CancellationToken cancellationToken)
-    {
-        using var source = await SoftwareBitmap.CreateCopyFromSurfaceAsync(surface).AsTask(cancellationToken).ConfigureAwait(false);
-        using var bitmap = SoftwareBitmap.Convert(source, BitmapPixelFormat.Bgra8, BitmapAlphaMode.Premultiplied);
-        var width = bitmap.PixelWidth;
-        var height = bitmap.PixelHeight;
-        var bytes = new byte[width * height * 4];
-        var buffer = new global::Windows.Storage.Streams.Buffer((uint)bytes.Length);
-        bitmap.CopyToBuffer(buffer);
-        using (var reader = DataReader.FromBuffer(buffer))
-        {
-            reader.ReadBytes(bytes);
-        }
-
-        var result = new Bitmap(width, height, PixelFormat.Format32bppArgb);
-        var data = result.LockBits(new Rectangle(0, 0, width, height), ImageLockMode.WriteOnly, PixelFormat.Format32bppArgb);
-        try
-        {
-            var stride = Math.Abs(data.Stride);
-            if (stride == width * 4)
-            {
-                Marshal.Copy(bytes, 0, data.Scan0, bytes.Length);
-            }
-            else
-            {
-                for (var y = 0; y < height; y++)
-                {
-                    Marshal.Copy(bytes, y * width * 4, data.Scan0 + y * data.Stride, width * 4);
-                }
-            }
-        }
-        finally
-        {
-            result.UnlockBits(data);
-        }
-
-        return result;
     }
 
     private sealed class Direct3DDeviceFactory : IDisposable
@@ -337,5 +310,52 @@ internal sealed class WindowsGraphicsCaptureBackend
 
         [DllImport("combase.dll", PreserveSig = true)]
         private static extern int WindowsDeleteString(IntPtr hstring);
+    }
+}
+
+internal interface IFrameConverter
+{
+    Task<Bitmap> ConvertAsync(IDirect3DSurface surface, CancellationToken cancellationToken);
+}
+
+internal sealed class SoftwareBitmapFrameConverter : IFrameConverter
+{
+    public async Task<Bitmap> ConvertAsync(IDirect3DSurface surface, CancellationToken cancellationToken)
+    {
+        using var source = await SoftwareBitmap.CreateCopyFromSurfaceAsync(surface).AsTask(cancellationToken).ConfigureAwait(false);
+        using var bitmap = SoftwareBitmap.Convert(source, BitmapPixelFormat.Bgra8, BitmapAlphaMode.Straight);
+        var width = bitmap.PixelWidth;
+        var height = bitmap.PixelHeight;
+        var bytes = new byte[width * height * 4];
+        var buffer = new global::Windows.Storage.Streams.Buffer((uint)bytes.Length);
+        bitmap.CopyToBuffer(buffer);
+        using (var reader = DataReader.FromBuffer(buffer))
+        {
+            reader.ReadBytes(bytes);
+        }
+
+        var result = new Bitmap(width, height, PixelFormat.Format32bppArgb);
+        var data = result.LockBits(new Rectangle(0, 0, width, height), ImageLockMode.WriteOnly, PixelFormat.Format32bppArgb);
+        try
+        {
+            var stride = Math.Abs(data.Stride);
+            if (stride == width * 4)
+            {
+                Marshal.Copy(bytes, 0, data.Scan0, bytes.Length);
+            }
+            else
+            {
+                for (var y = 0; y < height; y++)
+                {
+                    Marshal.Copy(bytes, y * width * 4, data.Scan0 + y * data.Stride, width * 4);
+                }
+            }
+        }
+        finally
+        {
+            result.UnlockBits(data);
+        }
+
+        return result;
     }
 }

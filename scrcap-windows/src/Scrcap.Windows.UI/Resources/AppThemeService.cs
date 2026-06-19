@@ -11,25 +11,31 @@ public static class AppThemeService
     private static readonly IReadOnlyDictionary<string, WpfColor> LightPalette = new Dictionary<string, WpfColor>
     {
         ["ColorInk"] = WpfColor.FromRgb(25, 26, 28),
-        ["ColorMuted"] = WpfColor.FromRgb(102, 105, 115),
-        ["ColorChrome"] = WpfColor.FromRgb(247, 247, 248),
-        ["ColorPanel"] = Colors.White,
-        ["ColorRule"] = WpfColor.FromRgb(197, 198, 203),
-        ["ColorCanvas"] = Colors.White,
-        ["ColorHover"] = WpfColor.FromRgb(240, 240, 242),
-        ["ColorPressed"] = WpfColor.FromRgb(229, 229, 232),
+        ["ColorMuted"] = WpfColor.FromRgb(101, 105, 112),
+        ["ColorChrome"] = WpfColor.FromRgb(242, 242, 243),
+        ["ColorPanel"] = WpfColor.FromRgb(251, 251, 252),
+        ["ColorRule"] = WpfColor.FromRgb(168, 169, 174),
+        ["ColorHairline"] = WpfColor.FromArgb(28, 0, 0, 0),
+        ["ColorCanvas"] = WpfColor.FromRgb(214, 215, 218),
+        ["ColorWell"] = WpfColor.FromRgb(251, 251, 252),
+        ["ColorHover"] = WpfColor.FromArgb(31, 227, 14, 32),
+        ["ColorPressed"] = WpfColor.FromArgb(66, 227, 14, 32),
+        ["ColorActiveWash"] = WpfColor.FromArgb(51, 227, 14, 32),
     };
 
     private static readonly IReadOnlyDictionary<string, WpfColor> DarkPalette = new Dictionary<string, WpfColor>
     {
-        ["ColorInk"] = WpfColor.FromRgb(242, 243, 245),
-        ["ColorMuted"] = WpfColor.FromRgb(168, 171, 181),
-        ["ColorChrome"] = WpfColor.FromRgb(28, 29, 32),
-        ["ColorPanel"] = WpfColor.FromRgb(38, 39, 43),
-        ["ColorRule"] = WpfColor.FromRgb(74, 76, 84),
-        ["ColorCanvas"] = WpfColor.FromRgb(18, 19, 22),
-        ["ColorHover"] = WpfColor.FromRgb(50, 52, 58),
-        ["ColorPressed"] = WpfColor.FromRgb(62, 65, 72),
+        ["ColorInk"] = WpfColor.FromRgb(233, 233, 234),
+        ["ColorMuted"] = WpfColor.FromRgb(153, 154, 157),
+        ["ColorChrome"] = WpfColor.FromRgb(27, 27, 28),
+        ["ColorPanel"] = WpfColor.FromRgb(16, 16, 17),
+        ["ColorRule"] = WpfColor.FromRgb(63, 63, 65),
+        ["ColorHairline"] = WpfColor.FromArgb(26, 255, 255, 255),
+        ["ColorCanvas"] = WpfColor.FromRgb(25, 26, 27),
+        ["ColorWell"] = WpfColor.FromRgb(16, 16, 17),
+        ["ColorHover"] = WpfColor.FromArgb(31, 227, 14, 32),
+        ["ColorPressed"] = WpfColor.FromArgb(66, 227, 14, 32),
+        ["ColorActiveWash"] = WpfColor.FromArgb(51, 227, 14, 32),
     };
 
     public static ThemeMode Resolve(ThemeMode requested) =>
@@ -77,6 +83,12 @@ public static class AppThemeService
         {
             if (dictionary[key] is SolidColorBrush brush)
             {
+                if (brush.IsFrozen)
+                {
+                    dictionary[key] = new SolidColorBrush(color);
+                    return;
+                }
+
                 brush.Color = color;
                 return;
             }

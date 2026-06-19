@@ -12,16 +12,133 @@
         WindowStartupLocation="CenterScreen"
         Background="{StaticResource BrushChrome}">
   <Window.Resources>
+    <editor:BooleanResourceBrushConverter x:Key="ToolbarActiveBackground"
+                                          TrueResourceKey="BrushActiveWash" />
+    <editor:BooleanResourceBrushConverter x:Key="ToolbarIconForeground"
+                                          TrueResourceKey="BrushAccent"
+                                          FalseResourceKey="BrushInk" />
+    <editor:BooleanResourceBrushConverter x:Key="ToolbarKeyForeground"
+                                          TrueResourceKey="BrushAccent"
+                                          FalseResourceKey="BrushMuted" />
+
+    <Style x:Key="ChromeButton" TargetType="Button">
+      <Setter Property="MinWidth" Value="28" />
+      <Setter Property="Height" Value="24" />
+      <Setter Property="Padding" Value="8,0" />
+      <Setter Property="Margin" Value="0,0,6,0" />
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="BorderBrush" Value="{StaticResource BrushHairline}" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="Foreground" Value="{StaticResource BrushInk}" />
+      <Setter Property="FontFamily" Value="{StaticResource FontUi}" />
+      <Setter Property="FontSize" Value="{StaticResource FontSizeSmall}" />
+      <Setter Property="FontWeight" Value="SemiBold" />
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="Button">
+            <Border x:Name="ButtonChrome"
+                    Background="{TemplateBinding Background}"
+                    BorderBrush="{TemplateBinding BorderBrush}"
+                    BorderThickness="{TemplateBinding BorderThickness}"
+                    CornerRadius="{StaticResource MetricChromeButtonRadius}"
+                    SnapsToDevicePixels="True">
+              <ContentPresenter HorizontalAlignment="Center"
+                                VerticalAlignment="Center"
+                                Margin="{TemplateBinding Padding}" />
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsMouseOver" Value="True">
+                <Setter TargetName="ButtonChrome" Property="Background" Value="{StaticResource BrushHover}" />
+                <Setter TargetName="ButtonChrome" Property="BorderBrush" Value="{StaticResource BrushAccent}" />
+              </Trigger>
+              <Trigger Property="IsPressed" Value="True">
+                <Setter TargetName="ButtonChrome" Property="Background" Value="{StaticResource BrushPressed}" />
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+
     <Style x:Key="ToolbarButton" TargetType="Button">
       <Setter Property="MinWidth" Value="{StaticResource MetricToolbarButtonMinWidth}" />
       <Setter Property="Height" Value="{StaticResource MetricToolbarButtonHeight}" />
       <Setter Property="Margin" Value="{StaticResource MetricToolbarButtonMargin}" />
       <Setter Property="Padding" Value="{StaticResource MetricToolbarButtonPadding}" />
-      <Setter Property="Background" Value="{StaticResource BrushPanel}" />
-      <Setter Property="BorderBrush" Value="{StaticResource BrushRule}" />
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="BorderBrush" Value="Transparent" />
+      <Setter Property="BorderThickness" Value="0" />
       <Setter Property="Foreground" Value="{StaticResource BrushInk}" />
+      <Setter Property="FontFamily" Value="{StaticResource FontUi}" />
+      <Setter Property="FontSize" Value="{StaticResource FontSizeSmall}" />
+      <Setter Property="FontWeight" Value="SemiBold" />
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="Button">
+            <Border x:Name="ButtonChrome"
+                    Background="{Binding Tag, RelativeSource={RelativeSource TemplatedParent}, Converter={StaticResource ToolbarActiveBackground}}"
+                    BorderBrush="{TemplateBinding BorderBrush}"
+                    BorderThickness="{TemplateBinding BorderThickness}"
+                    SnapsToDevicePixels="True">
+              <ContentPresenter HorizontalAlignment="Center"
+                                VerticalAlignment="Center"
+                                Margin="{TemplateBinding Padding}" />
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsMouseOver" Value="True">
+                <Setter TargetName="ButtonChrome" Property="Background" Value="{StaticResource BrushHover}" />
+              </Trigger>
+              <Trigger Property="IsPressed" Value="True">
+                <Setter TargetName="ButtonChrome" Property="Background" Value="{StaticResource BrushPressed}" />
+                <Setter Property="Foreground" Value="{StaticResource BrushAccent}" />
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+
+    <Style x:Key="ToolbarKeyText" TargetType="TextBlock">
+      <Setter Property="FontFamily" Value="{StaticResource FontMono}" />
+      <Setter Property="FontSize" Value="11" />
+      <Setter Property="Foreground" Value="{Binding Tag, RelativeSource={RelativeSource AncestorType=Button}, Converter={StaticResource ToolbarKeyForeground}}" />
+      <Setter Property="Opacity" Value="0.72" />
+      <Setter Property="Margin" Value="6,0,0,0" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+
+    <Style x:Key="ToolbarIconText" TargetType="TextBlock">
+      <Setter Property="FontSize" Value="19" />
+      <Setter Property="Foreground" Value="{Binding Tag, RelativeSource={RelativeSource AncestorType=Button}, Converter={StaticResource ToolbarIconForeground}}" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+
+    <Style x:Key="ToolbarDot" TargetType="Ellipse">
+      <Setter Property="Fill" Value="{Binding Tag, RelativeSource={RelativeSource AncestorType=Button}, Converter={StaticResource ToolbarIconForeground}}" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+
+    <Style x:Key="ToolbarTextBox" TargetType="TextBox">
+      <Setter Property="Visibility" Value="Collapsed" />
+      <Setter Property="Width" Value="102" />
+      <Setter Property="Height" Value="24" />
+      <Setter Property="Margin" Value="14,0,0,0" />
+      <Setter Property="Padding" Value="8,1" />
+      <Setter Property="Background" Value="{StaticResource BrushWell}" />
+      <Setter Property="BorderBrush" Value="{StaticResource BrushHairline}" />
+      <Setter Property="Foreground" Value="{StaticResource BrushInk}" />
+      <Setter Property="CaretBrush" Value="{StaticResource BrushAccent}" />
+      <Setter Property="FontFamily" Value="{StaticResource FontUi}" />
+      <Setter Property="FontSize" Value="{StaticResource FontSizeSmall}" />
+      <Setter Property="VerticalContentAlignment" Value="Center" />
+      <Style.Triggers>
+        <DataTrigger Binding="{Binding IsTextToolActive}" Value="True">
+          <Setter Property="Visibility" Value="Visible" />
+        </DataTrigger>
+      </Style.Triggers>
     </Style>
   </Window.Resources>
+
   <Border BorderBrush="{StaticResource BrushRule}"
           BorderThickness="{StaticResource MetricBorderThickness}"
           CornerRadius="{StaticResource MetricEditorRadius}"
@@ -29,98 +146,197 @@
     <DockPanel LastChildFill="True">
       <Grid DockPanel.Dock="Top"
             Height="{StaticResource MetricHeaderHeight}"
-            Background="{StaticResource BrushPanel}"
+            Background="{StaticResource BrushChrome}"
             MouseLeftButtonDown="DragSurface_MouseLeftButtonDown">
         <Grid.ColumnDefinitions>
           <ColumnDefinition Width="Auto" />
           <ColumnDefinition Width="*" />
           <ColumnDefinition Width="Auto" />
         </Grid.ColumnDefinitions>
-        <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="{StaticResource MetricHeaderMargin}">
-          <TextBlock Text="scrcap"
+        <Rectangle Grid.ColumnSpan="3"
+                   VerticalAlignment="Bottom"
+                   Height="{StaticResource MetricSeparatorWidth}"
+                   Fill="{StaticResource BrushRule}" />
+        <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="{StaticResource MetricHeaderBrandMargin}">
+          <Border Width="{StaticResource MetricLogoGlyphSize}"
+                  Height="{StaticResource MetricLogoGlyphSize}"
+                  BorderBrush="{StaticResource BrushInk}"
+                  BorderThickness="{StaticResource MetricBorderThickness}"
+                  CornerRadius="{StaticResource MetricLogoRadius}"
+                  Margin="{StaticResource MetricLogoMargin}">
+            <Grid>
+              <Rectangle Width="{StaticResource MetricLogoDotSize}" Height="{StaticResource MetricLogoDotSize}" Fill="{StaticResource BrushInk}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+              <Rectangle Width="{StaticResource MetricLogoLineSize}" Fill="{StaticResource BrushInk}" HorizontalAlignment="Center" />
+              <Rectangle Height="{StaticResource MetricLogoLineSize}" Fill="{StaticResource BrushInk}" VerticalAlignment="Center" />
+            </Grid>
+          </Border>
+          <TextBlock Text="SCRCAP"
                      FontFamily="{StaticResource FontUi}"
-                     FontSize="{StaticResource FontSizeBody}"
-                     FontWeight="Bold"
+                     FontSize="{StaticResource FontSizeBrand}"
+                     FontWeight="Black"
                      Foreground="{StaticResource BrushInk}" />
         </StackPanel>
         <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center" Margin="{StaticResource MetricHeaderRightMargin}">
           <Button AutomationProperties.AutomationId="UndoButton"
                   AutomationProperties.Name="Undo"
-                  Style="{StaticResource ToolbarButton}"
-                  Content="↶"
+                  Style="{StaticResource ChromeButton}"
                   ToolTip="Undo"
-                  Click="Undo_Click" />
+                  Click="Undo_Click">
+            <StackPanel Orientation="Horizontal">
+              <TextBlock Text="&#xE7A7;" FontFamily="{StaticResource FontIcon}" FontSize="{StaticResource FontSizeChromeIcon}" />
+              <TextBlock Text="Ctrl+Z" FontFamily="{StaticResource FontMono}" Foreground="{StaticResource BrushMuted}" Margin="{StaticResource MetricShortcutTextMargin}" />
+            </StackPanel>
+          </Button>
           <Button AutomationProperties.AutomationId="SaveButton"
                   AutomationProperties.Name="Save"
-                  Style="{StaticResource ToolbarButton}"
-                  Content="💾"
+                  Style="{StaticResource ChromeButton}"
                   ToolTip="Save"
-                  Click="Save_Click" />
+                  Click="Save_Click">
+            <StackPanel Orientation="Horizontal">
+              <TextBlock Text="&#xE74E;" FontFamily="{StaticResource FontIcon}" FontSize="{StaticResource FontSizeChromeIcon}" />
+              <TextBlock Text="Ctrl+S" FontFamily="{StaticResource FontMono}" Foreground="{StaticResource BrushMuted}" Margin="{StaticResource MetricShortcutTextMargin}" />
+            </StackPanel>
+          </Button>
           <Button AutomationProperties.AutomationId="DoneButton"
                   AutomationProperties.Name="Copy and close"
-                  Style="{StaticResource ToolbarButton}"
-                  Content="{Binding DoneText}"
-                  Click="Done_Click" />
+                  Style="{StaticResource ChromeButton}"
+                  MinWidth="{StaticResource MetricDoneButtonMinWidth}"
+                  Click="Done_Click">
+            <StackPanel Orientation="Horizontal">
+              <TextBlock Text="{Binding DoneText}" FontFamily="{StaticResource FontMono}" FontWeight="Bold" />
+              <TextBlock Text="esc" FontFamily="{StaticResource FontMono}" Foreground="{StaticResource BrushMuted}" Margin="{StaticResource MetricDoneShortcutMargin}" />
+            </StackPanel>
+          </Button>
           <Button AutomationProperties.AutomationId="CloseButton"
                   AutomationProperties.Name="Close"
-                  Style="{StaticResource ToolbarButton}"
-                  Content="×"
-                  Click="Close_Click" />
+                  Style="{StaticResource ChromeButton}"
+                  Width="{StaticResource MetricIconButtonWidth}"
+                  Padding="{StaticResource MetricNoThickness}"
+                  Click="Close_Click">
+            <TextBlock Text="&#xE711;" FontFamily="{StaticResource FontIcon}" FontSize="{StaticResource FontSizeCloseIcon}" />
+          </Button>
         </StackPanel>
       </Grid>
 
       <Grid DockPanel.Dock="Bottom"
             Height="{StaticResource MetricToolbarHeight}"
-            Background="{StaticResource BrushPanel}"
+            Background="{StaticResource BrushChrome}"
             MouseLeftButtonDown="DragSurface_MouseLeftButtonDown">
         <Grid.ColumnDefinitions>
           <ColumnDefinition Width="*" />
           <ColumnDefinition Width="Auto" />
         </Grid.ColumnDefinitions>
-        <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="{StaticResource MetricHeaderMargin}">
-          <Button AutomationProperties.AutomationId="ToolArrow" AutomationProperties.Name="Arrow tool" Style="{StaticResource ToolbarButton}" Content="↗ Q" Click="ToolArrow_Click" />
-          <Button AutomationProperties.AutomationId="ToolRectangle" AutomationProperties.Name="Rectangle tool" Style="{StaticResource ToolbarButton}" Content="▭ W" Click="ToolRectangle_Click" />
-          <Button AutomationProperties.AutomationId="ToolCounter" AutomationProperties.Name="Counter tool" Style="{StaticResource ToolbarButton}" Content="① E" Click="ToolCounter_Click" />
-          <Button AutomationProperties.AutomationId="ToolText" AutomationProperties.Name="Text tool" Style="{StaticResource ToolbarButton}" Content="T R" Click="ToolText_Click" />
-          <Button AutomationProperties.AutomationId="ToolPixelate" AutomationProperties.Name="Pixelate tool" Style="{StaticResource ToolbarButton}" Content="▦ T" Click="ToolPixelate_Click" />
-          <Button AutomationProperties.AutomationId="ToolCrop" AutomationProperties.Name="Crop tool" Style="{StaticResource ToolbarButton}" Content="⌗ Y" Click="ToolCrop_Click" />
-          <Rectangle Width="{StaticResource MetricSeparatorWidth}" Height="{StaticResource MetricSeparatorHeight}" Fill="{StaticResource BrushRule}" Margin="{StaticResource MetricSeparatorMargin}" />
-          <Button AutomationProperties.AutomationId="Color1" AutomationProperties.Name="Palette color 1" Style="{StaticResource ToolbarButton}" Content="1" Click="Color1_Click" />
-          <Button AutomationProperties.AutomationId="Color2" AutomationProperties.Name="Palette color 2" Style="{StaticResource ToolbarButton}" Content="2" Click="Color2_Click" />
-          <Button AutomationProperties.AutomationId="Color3" AutomationProperties.Name="Palette color 3" Style="{StaticResource ToolbarButton}" Content="3" Click="Color3_Click" />
-          <Button AutomationProperties.AutomationId="Color4" AutomationProperties.Name="Palette color 4" Style="{StaticResource ToolbarButton}" Content="4" Click="Color4_Click" />
-          <Button AutomationProperties.AutomationId="Color5" AutomationProperties.Name="Palette color 5" Style="{StaticResource ToolbarButton}" Content="5" Click="Color5_Click" />
-          <Rectangle Width="{StaticResource MetricSeparatorWidth}" Height="{StaticResource MetricSeparatorHeight}" Fill="{StaticResource BrushRule}" Margin="{StaticResource MetricSeparatorMargin}" />
-          <Button AutomationProperties.AutomationId="SizeSmall" AutomationProperties.Name="Small annotation size" Style="{StaticResource ToolbarButton}" Content="S Z" Click="SizeSmall_Click" />
-          <Button AutomationProperties.AutomationId="SizeMedium" AutomationProperties.Name="Medium annotation size" Style="{StaticResource ToolbarButton}" Content="M X" Click="SizeMedium_Click" />
-          <Button AutomationProperties.AutomationId="SizeLarge" AutomationProperties.Name="Large annotation size" Style="{StaticResource ToolbarButton}" Content="L C" Click="SizeLarge_Click" />
+        <Rectangle Grid.ColumnSpan="2"
+                   VerticalAlignment="Top"
+                   Height="{StaticResource MetricSeparatorWidth}"
+                   Fill="{StaticResource BrushRule}" />
+        <StackPanel Orientation="Horizontal" VerticalAlignment="Stretch" Margin="{StaticResource MetricToolbarInnerMargin}">
+          <Button AutomationProperties.AutomationId="ToolArrow" AutomationProperties.Name="Arrow tool" Style="{StaticResource ToolbarButton}" Tag="{Binding IsArrowToolActive}" Click="ToolArrow_Click">
+            <StackPanel Orientation="Horizontal"><TextBlock Text="&#x2196;" Style="{StaticResource ToolbarIconText}" /><TextBlock Text="Q" Style="{StaticResource ToolbarKeyText}" /></StackPanel>
+          </Button>
+          <Button AutomationProperties.AutomationId="ToolRectangle" AutomationProperties.Name="Rectangle tool" Style="{StaticResource ToolbarButton}" Tag="{Binding IsRectangleToolActive}" Click="ToolRectangle_Click">
+            <StackPanel Orientation="Horizontal"><TextBlock Text="&#x25AD;" Style="{StaticResource ToolbarIconText}" /><TextBlock Text="W" Style="{StaticResource ToolbarKeyText}" /></StackPanel>
+          </Button>
+          <Button AutomationProperties.AutomationId="ToolCounter" AutomationProperties.Name="Counter tool" Style="{StaticResource ToolbarButton}" Tag="{Binding IsCounterToolActive}" Click="ToolCounter_Click">
+            <StackPanel Orientation="Horizontal"><TextBlock Text="1" FontWeight="Bold" Style="{StaticResource ToolbarIconText}" /><TextBlock Text="E" Style="{StaticResource ToolbarKeyText}" /></StackPanel>
+          </Button>
+          <Button AutomationProperties.AutomationId="ToolText" AutomationProperties.Name="Text tool" Style="{StaticResource ToolbarButton}" Tag="{Binding IsTextToolActive}" Click="ToolText_Click">
+            <StackPanel Orientation="Horizontal"><TextBlock Text="Aa" FontSize="{StaticResource FontSizeToolbarTextIcon}" Foreground="{Binding Tag, RelativeSource={RelativeSource AncestorType=Button}, Converter={StaticResource ToolbarIconForeground}}" VerticalAlignment="Center" /><TextBlock Text="R" Style="{StaticResource ToolbarKeyText}" /></StackPanel>
+          </Button>
+          <Button AutomationProperties.AutomationId="ToolPixelate" AutomationProperties.Name="Pixelate tool" Style="{StaticResource ToolbarButton}" Tag="{Binding IsPixelateToolActive}" Click="ToolPixelate_Click">
+            <StackPanel Orientation="Horizontal"><TextBlock Text="&#x25A6;" Style="{StaticResource ToolbarIconText}" /><TextBlock Text="T" Style="{StaticResource ToolbarKeyText}" /></StackPanel>
+          </Button>
+          <Button AutomationProperties.AutomationId="ToolCrop" AutomationProperties.Name="Crop tool" Style="{StaticResource ToolbarButton}" Tag="{Binding IsCropToolActive}" Click="ToolCrop_Click">
+            <StackPanel Orientation="Horizontal"><TextBlock Text="&#x2317;" Style="{StaticResource ToolbarIconText}" /><TextBlock Text="Y" Style="{StaticResource ToolbarKeyText}" /></StackPanel>
+          </Button>
+          <Rectangle Width="{StaticResource MetricSeparatorWidth}" Height="{StaticResource MetricSeparatorHeight}" Fill="{StaticResource BrushHairline}" Margin="{StaticResource MetricSeparatorMargin}" VerticalAlignment="Center" />
+          <Button AutomationProperties.AutomationId="Color1" AutomationProperties.Name="Palette color 1" Style="{StaticResource ToolbarButton}" Tag="{Binding IsColor1Active}" Click="Color1_Click">
+            <StackPanel Orientation="Horizontal"><Rectangle Width="{StaticResource MetricSwatchSize}" Height="{StaticResource MetricSwatchSize}" Fill="{Binding PaletteBrushes[0]}" Stroke="{StaticResource BrushRule}" StrokeThickness="1" /><TextBlock Text="1" Style="{StaticResource ToolbarKeyText}" /></StackPanel>
+          </Button>
+          <Button AutomationProperties.AutomationId="Color2" AutomationProperties.Name="Palette color 2" Style="{StaticResource ToolbarButton}" Tag="{Binding IsColor2Active}" Click="Color2_Click">
+            <StackPanel Orientation="Horizontal"><Rectangle Width="{StaticResource MetricSwatchSize}" Height="{StaticResource MetricSwatchSize}" Fill="{Binding PaletteBrushes[1]}" Stroke="{StaticResource BrushRule}" StrokeThickness="1" /><TextBlock Text="2" Style="{StaticResource ToolbarKeyText}" /></StackPanel>
+          </Button>
+          <Button AutomationProperties.AutomationId="Color3" AutomationProperties.Name="Palette color 3" Style="{StaticResource ToolbarButton}" Tag="{Binding IsColor3Active}" Click="Color3_Click">
+            <StackPanel Orientation="Horizontal"><Rectangle Width="{StaticResource MetricSwatchSize}" Height="{StaticResource MetricSwatchSize}" Fill="{Binding PaletteBrushes[2]}" Stroke="{StaticResource BrushRule}" StrokeThickness="1" /><TextBlock Text="3" Style="{StaticResource ToolbarKeyText}" /></StackPanel>
+          </Button>
+          <Button AutomationProperties.AutomationId="Color4" AutomationProperties.Name="Palette color 4" Style="{StaticResource ToolbarButton}" Tag="{Binding IsColor4Active}" Click="Color4_Click">
+            <StackPanel Orientation="Horizontal"><Rectangle Width="{StaticResource MetricSwatchSize}" Height="{StaticResource MetricSwatchSize}" Fill="{Binding PaletteBrushes[3]}" Stroke="{StaticResource BrushRule}" StrokeThickness="1" /><TextBlock Text="4" Style="{StaticResource ToolbarKeyText}" /></StackPanel>
+          </Button>
+          <Button AutomationProperties.AutomationId="Color5" AutomationProperties.Name="Palette color 5" Style="{StaticResource ToolbarButton}" Tag="{Binding IsColor5Active}" Click="Color5_Click">
+            <StackPanel Orientation="Horizontal"><Rectangle Width="{StaticResource MetricSwatchSize}" Height="{StaticResource MetricSwatchSize}" Fill="{Binding PaletteBrushes[4]}" Stroke="{StaticResource BrushRule}" StrokeThickness="1" /><TextBlock Text="5" Style="{StaticResource ToolbarKeyText}" /></StackPanel>
+          </Button>
+          <Rectangle Width="{StaticResource MetricSeparatorWidth}" Height="{StaticResource MetricSeparatorHeight}" Fill="{StaticResource BrushHairline}" Margin="{StaticResource MetricSeparatorMargin}" VerticalAlignment="Center" />
+          <Button AutomationProperties.AutomationId="SizeSmall" AutomationProperties.Name="Small annotation size" Style="{StaticResource ToolbarButton}" Tag="{Binding IsSmallSizeActive}" Click="SizeSmall_Click">
+            <StackPanel Orientation="Horizontal"><Ellipse Width="{StaticResource MetricSmallDotSize}" Height="{StaticResource MetricSmallDotSize}" Style="{StaticResource ToolbarDot}" /><TextBlock Text="Z" Style="{StaticResource ToolbarKeyText}" /></StackPanel>
+          </Button>
+          <Button AutomationProperties.AutomationId="SizeMedium" AutomationProperties.Name="Medium annotation size" Style="{StaticResource ToolbarButton}" Tag="{Binding IsMediumSizeActive}" Click="SizeMedium_Click">
+            <StackPanel Orientation="Horizontal"><Ellipse Width="{StaticResource MetricMediumDotSize}" Height="{StaticResource MetricMediumDotSize}" Style="{StaticResource ToolbarDot}" /><TextBlock Text="X" Style="{StaticResource ToolbarKeyText}" /></StackPanel>
+          </Button>
+          <Button AutomationProperties.AutomationId="SizeLarge" AutomationProperties.Name="Large annotation size" Style="{StaticResource ToolbarButton}" Tag="{Binding IsLargeSizeActive}" Click="SizeLarge_Click">
+            <StackPanel Orientation="Horizontal"><Ellipse Width="{StaticResource MetricLargeDotSize}" Height="{StaticResource MetricLargeDotSize}" Style="{StaticResource ToolbarDot}" /><TextBlock Text="C" Style="{StaticResource ToolbarKeyText}" /></StackPanel>
+          </Button>
           <TextBox x:Name="TextValue"
                    AutomationProperties.AutomationId="TextValue"
-                   Width="{StaticResource MetricTextInputWidth}"
-                   Height="{StaticResource MetricTextInputHeight}"
-                   Margin="{StaticResource MetricTextInputMargin}"
+                   Style="{StaticResource ToolbarTextBox}"
                    AcceptsReturn="True"
-                   VerticalContentAlignment="Center"
                    Text="{Binding PendingText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
                    KeyDown="TextValue_KeyDown" />
         </StackPanel>
-        <TextBlock Grid.Column="1"
-                   AutomationProperties.AutomationId="ZoomStatus"
-                   VerticalAlignment="Center"
-                   Margin="{StaticResource MetricHeaderMargin}"
-                   Foreground="{StaticResource BrushMuted}"
-                   Text="{Binding ZoomPercent}" />
       </Grid>
 
       <Border Margin="{StaticResource MetricEditorPadding}"
-              CornerRadius="{StaticResource MetricEditorRadius}"
               BorderBrush="{StaticResource BrushRule}"
               BorderThickness="{StaticResource MetricBorderThickness}"
-              Background="{StaticResource BrushPanel}">
-        <editor:EditorCanvas x:Name="Canvas"
-                             Focusable="True"
-                             Margin="{StaticResource MetricCanvasMargin}"
-                             ViewModel="{Binding}" />
+              Background="{StaticResource BrushWell}">
+        <Grid>
+          <editor:EditorCanvas x:Name="Canvas"
+                               Focusable="True"
+                               Margin="{StaticResource MetricCanvasMargin}"
+                               ViewModel="{Binding}" />
+          <Border HorizontalAlignment="Right"
+                  VerticalAlignment="Bottom"
+                  Margin="{StaticResource MetricZoomPillMargin}"
+                  Padding="{StaticResource MetricZoomPillPadding}"
+                  Background="{StaticResource BrushChrome}"
+                  BorderBrush="{StaticResource BrushRule}"
+                  BorderThickness="{StaticResource MetricBorderThickness}"
+                  CornerRadius="{StaticResource MetricZoomPillRadius}">
+            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+              <Button AutomationProperties.AutomationId="ZoomOutButton"
+                      AutomationProperties.Name="Zoom out"
+                      Style="{StaticResource ChromeButton}"
+                      Width="{StaticResource MetricZoomButtonWidth}"
+                      Padding="{StaticResource MetricNoThickness}"
+                      Click="ZoomOut_Click">
+                <TextBlock Text="&#xE71F;" FontFamily="{StaticResource FontIcon}" FontSize="{StaticResource FontSizeToolbarTextIcon}" />
+              </Button>
+              <Button AutomationProperties.AutomationId="ZoomResetButton"
+                      AutomationProperties.Name="Reset zoom"
+                      Style="{StaticResource ChromeButton}"
+                      MinWidth="{StaticResource MetricZoomResetMinWidth}"
+                      Click="ZoomReset_Click">
+                <TextBlock Text="{Binding ZoomPercent}" FontFamily="{StaticResource FontMono}" FontSize="{StaticResource FontSizeZoomText}" FontWeight="Bold" />
+              </Button>
+              <Button AutomationProperties.AutomationId="ZoomInButton"
+                      AutomationProperties.Name="Zoom in"
+                      Style="{StaticResource ChromeButton}"
+                      Width="{StaticResource MetricZoomButtonWidth}"
+                      Padding="{StaticResource MetricNoThickness}"
+                      Margin="{StaticResource MetricZoomInMargin}"
+                      Click="ZoomIn_Click">
+                <TextBlock Text="&#xE8A3;" FontFamily="{StaticResource FontIcon}" FontSize="{StaticResource FontSizeToolbarTextIcon}" />
+              </Button>
+              <Rectangle Width="{StaticResource MetricSeparatorWidth}" Height="{StaticResource MetricSeparatorHeight}" Fill="{StaticResource BrushHairline}" Margin="{StaticResource MetricZoomDividerMargin}" />
+              <TextBlock AutomationProperties.AutomationId="ZoomStatus"
+                         VerticalAlignment="Center"
+                         MinWidth="{StaticResource MetricDocumentSizeMinWidth}"
+                         FontFamily="{StaticResource FontMono}"
+                         FontSize="{StaticResource FontSizeSmall}"
+                         Foreground="{StaticResource BrushMuted}"
+                         Text="{Binding DocumentSizeText}" />
+            </StackPanel>
+          </Border>
+        </Grid>
       </Border>
     </DockPanel>
   </Border>

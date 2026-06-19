@@ -3,6 +3,7 @@ using System.Windows;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using Scrcap.Core;
+using Scrcap.Windows.Platform.Capture;
 using Scrcap.Windows.UI.Editor;
 
 namespace Scrcap.Rendering.Tests;
@@ -47,6 +48,44 @@ public sealed class EditorRenderingImplementationTests
     }
 
     [Fact]
+    public void FlattenPngRendersFiveHundredShapesWithoutPerShapeControls()
+    {
+        RunSta(() =>
+        {
+            var settings = Settings.Defaults();
+            settings.PaletteHex = ["#FF0000", "#00AA00", "#0066CC", "#111111", "#FF00FF"];
+            var viewModel = new EditorViewModel(settings);
+            viewModel.LoadDocument(480, 360);
+            var canvas = new EditorCanvas
+            {
+                ViewModel = viewModel,
+                SourceBitmap = SolidBitmap(480, 360, Colors.White),
+                Width = 480,
+                Height = 360,
+            };
+
+            for (var index = 0; index < 500; index++)
+            {
+                var x = 4 + index % 40 * 12;
+                var y = 4 + index / 40 * 24;
+                viewModel.ColorIndex = index % settings.PaletteHex.Count;
+                viewModel.ActiveSize = index % 3 == 0 ? ShapeSize.Small : index % 3 == 1 ? ShapeSize.Medium : ShapeSize.Large;
+                viewModel.ActiveTool = index % 2 == 0 ? EditorTool.Rectangle : EditorTool.Arrow;
+                viewModel.CommitShape(new CorePoint(x, y), new CorePoint(Math.Min(476, x + 10), Math.Min(356, y + 12)));
+            }
+
+            var bytes = canvas.FlattenPng(scale: 1);
+            var pixels = DecodeBgra(bytes, out var width, out var height);
+
+            Assert.Equal(480, width);
+            Assert.Equal(360, height);
+            Assert.Equal(500, viewModel.VisibleShapes.Count);
+            Assert.True(CountNonWhitePixels(pixels) > 5_000);
+            Assert.Equal(0, VisualTreeHelper.GetChildrenCount(canvas));
+        });
+    }
+
+    [Fact]
     public void FlattenPngAppliesPixelationToSourceRegion()
     {
         RunSta(() =>
@@ -79,6 +118,119 @@ public sealed class EditorRenderingImplementationTests
             }
 
             Assert.True(uniqueColorsInRegion.Count < 40);
+        });
+    }
+
+    [Fact]
+    public void FlattenPngRendersPixelateWithoutAnnotationBorder()
+    {
+        RunSta(() =>
+        {
+            var settings = Settings.Defaults();
+            settings.PaletteHex = ["#FF0000", "#00AA00", "#0066CC", "#111111", "#FF00FF"];
+            var viewModel = new EditorViewModel(settings);
+            viewModel.LoadDocument(48, 48);
+            var canvas = new EditorCanvas
+            {
+                ViewModel = viewModel,
+                SourceBitmap = SolidBitmap(48, 48, Colors.White),
+                Width = 48,
+                Height = 48,
+            };
+
+            viewModel.ActiveTool = EditorTool.Pixelate;
+            viewModel.CommitShape(new CorePoint(4, 4), new CorePoint(40, 40));
+
+            var pixels = DecodeBgra(canvas.FlattenPng(scale: 1), out _, out _);
+
+            Assert.Equal(0, CountNonWhitePixels(pixels));
+        });
+    }
+
+    [Fact]
+    public void CapturedPixelsRoundTripPreservesSourcePixels()
+    {
+        RunSta(() =>
+        {
+            var source = CheckerBitmap(24, 18);
+            var metadata = new CaptureMetadata(CaptureMode.Region, null, new PixelRect(2, 4, 24, 18), DateTimeOffset.Now);
+
+            var pixels = EditorWindow.CapturedPixelsFromBitmapSource(source, metadata);
+            var roundTrip = EditorWindow.BitmapSourceFromPixels(pixels);
+            var sourceBytes = CopyBgra(source);
+            var roundTripBytes = CopyBgra(roundTrip);
+
+            Assert.Equal(source.PixelWidth, pixels.PixelWidth);
+            Assert.Equal(source.PixelHeight, pixels.PixelHeight);
+            Assert.Equal(sourceBytes, roundTripBytes);
+            Assert.Equal(metadata, pixels.Metadata);
+        });
+    }
+
+    [Fact]
+    public void BitmapSourceFromPixelsPreservesBgraAndAlphaBytes()
+    {
+        RunSta(() =>
+        {
+            var metadata = new CaptureMetadata(CaptureMode.Region, null, new PixelRect(0, 0, 2, 2), DateTimeOffset.Now);
+            byte[] bgra =
+            [
+                10, 20, 30, 40,
+                50, 60, 70, 80,
+                90, 100, 110, 120,
+                130, 140, 150, 160,
+            ];
+
+            var bitmap = EditorWindow.BitmapSourceFromPixels(new CapturedPixels(bgra, 2, 2, 8, metadata));
+            var output = CopyBgra(bitmap);
+
+            Assert.Equal(bgra, output);
+        });
+    }
+
+    [Fact]
+    public void BitmapSourceFromPixelsRejectsInvalidContracts()
+    {
+        RunSta(() =>
+        {
+            var metadata = new CaptureMetadata(CaptureMode.Region, null, null, DateTimeOffset.Now);
+
+            Assert.Throws<ArgumentOutOfRangeException>(() =>
+                EditorWindow.BitmapSourceFromPixels(new CapturedPixels(new byte[4], 0, 1, 4, metadata)));
+            Assert.Throws<ArgumentOutOfRangeException>(() =>
+                EditorWindow.BitmapSourceFromPixels(new CapturedPixels(new byte[4], 1, 1, 3, metadata)));
+            Assert.Throws<ArgumentException>(() =>
+                EditorWindow.BitmapSourceFromPixels(new CapturedPixels(new byte[4], 2, 1, 8, metadata)));
+        });
+    }
+
+    [Fact]
+    public void PixelateOutputInvalidatesWhenSourceBitmapChanges()
+    {
+        RunSta(() =>
+        {
+            var settings = Settings.Defaults();
+            settings.PaletteHex = ["#FF0000", "#00AA00", "#0066CC", "#111111", "#FF00FF"];
+            var viewModel = new EditorViewModel(settings);
+            viewModel.LoadDocument(32, 32);
+            var canvas = new EditorCanvas
+            {
+                ViewModel = viewModel,
+                SourceBitmap = SolidBitmap(32, 32, Colors.Red),
+                Width = 32,
+                Height = 32,
+            };
+
+            viewModel.ActiveTool = EditorTool.Pixelate;
+            viewModel.CommitShape(new CorePoint(0, 0), new CorePoint(32, 32));
+
+            var redOutput = DecodeBgra(canvas.FlattenPng(scale: 1), out var width, out _);
+            canvas.SourceBitmap = SolidBitmap(32, 32, Colors.Blue);
+            var blueOutput = DecodeBgra(canvas.FlattenPng(scale: 1), out _, out _);
+            var center = ((16 * width) + 16) * 4;
+
+            Assert.True(redOutput[center + 2] > 200);
+            Assert.True(blueOutput[center] > 200);
         });
     }
 
@@ -132,6 +284,17 @@ public sealed class EditorRenderingImplementationTests
         height = converted.PixelHeight;
         var pixels = new byte[width * height * 4];
         converted.CopyPixels(pixels, width * 4, 0);
+        return pixels;
+    }
+
+    private static byte[] CopyBgra(BitmapSource source)
+    {
+        var converted = source.Format == PixelFormats.Bgra32
+            ? source
+            : new FormatConvertedBitmap(source, PixelFormats.Bgra32, null, 0);
+        var stride = converted.PixelWidth * 4;
+        var pixels = new byte[stride * converted.PixelHeight];
+        converted.CopyPixels(pixels, stride, 0);
         return pixels;
     }
 

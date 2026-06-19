@@ -1005,6 +1005,42 @@
           This order keeps changes small and testable. It makes behavior visible first, then removes wasteful conversion, then improves the known hot paths.
         </p>
 
+        <h3>Sub-agent execution policy</h3>
+        <p>
+          Use sub-agents deliberately by effort level, with the main thread retaining ownership of integration, final decisions, and the user-facing result.
+        </p>
+        <table class="wide-table">
+          <thead>
+            <tr>
+              <th>Effort</th>
+              <th>Sub-agent role</th>
+              <th>How to apply it here</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Low</td>
+              <td>No sub-agent by default.</td>
+              <td>Handle narrow edits directly unless a quick independent lookup would materially reduce uncertainty.</td>
+            </tr>
+            <tr>
+              <td>Medium</td>
+              <td>Use sub-agents to execute narrow implementation slices.</td>
+              <td>Assign a bounded task such as a resolver, fixture helper, cache helper, or focused test file. The main thread reviews, integrates, and verifies the patch.</td>
+            </tr>
+            <tr>
+              <td>High</td>
+              <td>Use sub-agents selectively for parallel exploration or isolated prototypes.</td>
+              <td>Keep architecture and sequencing in the main thread; use sub-agent output as evidence, not as an automatic merge.</td>
+            </tr>
+            <tr>
+              <td>Extra high</td>
+              <td>Use sub-agents only as judges.</td>
+              <td>Have them critique the proposed design, patch, tests, and risks after the main implementation plan exists. Do not delegate primary execution for extra-high-risk changes.</td>
+            </tr>
+          </tbody>
+        </table>
+
         <h3><span class="priority p0">P0</span> Keep the current architecture</h3>
         <table>
           <tbody>

@@ -15,75 +15,67 @@
     <TextBlock x:Name="HintTag"
                Canvas.Left="18"
                Canvas.Top="18"
-               Background="{StaticResource BrushPanel}"
-               Foreground="{StaticResource BrushInk}"
-               FontFamily="{StaticResource FontUi}"
-               FontSize="{StaticResource FontSizeBody}"
+               Background="{StaticResource BrushTagBackground}"
+               Foreground="{StaticResource BrushTagText}"
+               FontFamily="{StaticResource FontMono}"
+               FontSize="{StaticResource FontSizeSmall}"
                Padding="{StaticResource MetricOverlayHintPadding}"
                Text="Drag to capture a region. Press Esc to cancel."
                Visibility="Collapsed" />
     <Line x:Name="VerticalCrosshair"
-          Stroke="{StaticResource BrushAccent}"
+          Stroke="{StaticResource BrushTagRule}"
           StrokeThickness="1"
           Visibility="Collapsed" />
     <Line x:Name="HorizontalCrosshair"
-          Stroke="{StaticResource BrushAccent}"
+          Stroke="{StaticResource BrushTagRule}"
           StrokeThickness="1"
           Visibility="Collapsed" />
     <Rectangle x:Name="WindowHighlight"
                Stroke="{StaticResource BrushAccent}"
-               StrokeThickness="3"
-               Fill="Transparent"
-               StrokeDashArray="8 4"
+               StrokeThickness="2"
+               Fill="{StaticResource BrushActiveWash}"
+               StrokeDashArray="6 6"
                Visibility="Collapsed" />
     <Rectangle x:Name="Selection"
                Stroke="{StaticResource BrushAccent}"
                StrokeThickness="2"
                Fill="Transparent"
                StrokeDashArray="6 4"
-               Visibility="Collapsed">
-      <Rectangle.Triggers>
-        <EventTrigger RoutedEvent="Loaded">
-          <BeginStoryboard>
-            <Storyboard RepeatBehavior="Forever">
-              <DoubleAnimation Storyboard.TargetName="Selection"
-                               Storyboard.TargetProperty="StrokeDashOffset"
-                               From="0"
-                               To="20"
-                               Duration="0:0:0.75" />
-            </Storyboard>
-          </BeginStoryboard>
-        </EventTrigger>
-      </Rectangle.Triggers>
-    </Rectangle>
+               Visibility="Collapsed" />
     <Border x:Name="CoordinateTag"
-            Background="{StaticResource BrushAccent}"
+            Background="{StaticResource BrushTagBackground}"
+            BorderBrush="{StaticResource BrushTagRule}"
+              BorderThickness="{StaticResource MetricBorderThickness}"
             CornerRadius="{StaticResource MetricOverlayTagRadius}"
             Padding="{StaticResource MetricOverlayTagPadding}"
             Visibility="Collapsed">
       <TextBlock x:Name="CoordinateText"
-                 Foreground="{StaticResource BrushOnAccent}"
-                 FontFamily="Consolas"
+                 Foreground="{StaticResource BrushTagText}"
+                 FontFamily="{StaticResource FontMono}"
                  FontSize="{StaticResource FontSizeSmall}" />
     </Border>
     <Border x:Name="OverlapTag"
-            Background="{StaticResource BrushPanel}"
+            Background="{StaticResource BrushTagBackground}"
+            BorderBrush="{StaticResource BrushTagRule}"
+              BorderThickness="{StaticResource MetricBorderThickness}"
             CornerRadius="{StaticResource MetricOverlayTagRadius}"
             Padding="{StaticResource MetricOverlayTagPadding}"
             Visibility="Collapsed">
       <TextBlock x:Name="OverlapText"
-                 Foreground="{StaticResource BrushInk}"
-                 FontFamily="{StaticResource FontUi}"
+                 Foreground="{StaticResource BrushTagDimText}"
+                 FontFamily="{StaticResource FontMono}"
                  FontSize="{StaticResource FontSizeSmall}" />
     </Border>
     <Border x:Name="WindowLabel"
-            Background="{StaticResource BrushAccent}"
+            Background="{StaticResource BrushTagBackground}"
+            BorderBrush="{StaticResource BrushTagRule}"
+              BorderThickness="{StaticResource MetricBorderThickness}"
             CornerRadius="{StaticResource MetricOverlayTagRadius}"
             Padding="{StaticResource MetricOverlayLabelPadding}"
             Visibility="Collapsed">
       <TextBlock x:Name="WindowLabelText"
-                 Foreground="{StaticResource BrushOnAccent}"
-                 FontFamily="{StaticResource FontUi}"
+                 Foreground="{StaticResource BrushTagText}"
+                 FontFamily="{StaticResource FontMono}"
                  FontSize="{StaticResource FontSizeSmall}" />
     </Border>
     <Grid x:Name="CountdownOverlay"

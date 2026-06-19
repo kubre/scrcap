@@ -9,8 +9,8 @@ $ErrorActionPreference = "Stop"
 
 $root = Split-Path -Parent $PSScriptRoot
 $solution = Join-Path $root "Scrcap.sln"
-$uiProject = Join-Path $root "src/Scrcap.Windows.UI/Scrcap.Windows.UI.csproj"
 $guardScript = Join-Path $PSScriptRoot "Check-HardcodedUiColors.ps1"
+$hardeningScript = Join-Path $PSScriptRoot "Test-ReleaseHardening.ps1"
 $publishScript = Join-Path $PSScriptRoot "Publish-Windows.ps1"
 
 function Invoke-Step {
@@ -20,19 +20,27 @@ function Invoke-Step {
   )
 
   Write-Host "==> $Name"
+  $global:LASTEXITCODE = 0
   & $Command
+  if ($global:LASTEXITCODE -ne 0) {
+    throw "$Name failed with exit code $global:LASTEXITCODE."
+  }
 }
 
 Invoke-Step "UI token guard" {
   & $guardScript
 }
 
+Invoke-Step "Release hardening checks" {
+  & $hardeningScript
+}
+
 Invoke-Step "Restore solution" {
   dotnet restore $solution
 }
 
-Invoke-Step "Build Windows UI" {
-  dotnet build $uiProject -c $Configuration --no-restore
+Invoke-Step "Build solution" {
+  dotnet build $solution -c $Configuration --no-restore
 }
 
 Invoke-Step "Run solution tests" {

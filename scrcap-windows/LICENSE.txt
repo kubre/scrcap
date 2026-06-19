@@ -1,0 +1,9 @@
+scrcap Windows port license notice
+
+Copyright (c) scrcap contributors. All rights reserved.
+
+No open-source license has been declared in this repository as of this Windows
+port package. Distribution, modification, or redistribution rights are not
+granted by this notice unless the project owner provides a separate license or
+written permission.
+

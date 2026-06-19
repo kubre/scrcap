@@ -1,10 +1,14 @@
 # scrcap Windows Port TODO
 
-Status: implementation in progress. Checked implementation items indicate code
-or a local/static guard exists in this branch. Windows runtime verification,
-manual QA, visual baselines, UI automation against a real desktop, capture
-fixtures, and performance budgets stay unchecked until they pass on a Windows
-10/11 machine.
+Status: implementation in progress. Checked implementation items indicate code,
+automated tests, visual baselines, or a local/static guard exists in this branch.
+A Windows local build, test suite, rendering golden suite, UI automation/static
+suite, core capture/scroll unit coverage, UI token guard, release hardening
+guard, release publish gate, and idle CPU/memory measurement passed on
+2026-06-18. Deterministic fixture apps, representative Windows 10/11 manual QA,
+live tray/global hotkey capture verification, cross-app clipboard paste checks,
+warm hotkey latency measurement, and full mixed-monitor manual QA stay unchecked
+until they pass on representative machines.
 
 ## Branch and Repository Hygiene
 
@@ -13,8 +17,8 @@ fixtures, and performance budgets stay unchecked until they pass on a Windows
 - [x] Keep the root README Windows-port note after the subtree is tracked.
 - [x] Add a Windows-port README section that states current feature readiness accurately.
 - [x] Add CI or documented local commands for restore, build, tests, and UI color guard.
-- [ ] Verify the solution builds on a real Windows machine with .NET 8 SDK.
-- [ ] Verify all runnable tests pass on Windows before calling any milestone complete.
+- [x] Verify the solution builds on a real Windows machine with .NET 8 SDK.
+- [x] Verify all runnable tests pass on Windows before calling any milestone complete.
 
 ## M0 - Skeleton and Guardrails
 
@@ -151,9 +155,11 @@ fixtures, and performance budgets stay unchecked until they pass on a Windows
 - [x] Keep Pixelate tool armed after pixelate commit.
 - [x] Skip pixelate commit when width or height is not greater than 1 DIP.
 - [x] Render pixelation by mosaicing source bitmap with 9 DIP block size.
+- [x] Cache pixelate output so redraw/export does not sample one pixel per render cell.
+- [x] Invalidate pixelate cache when the source bitmap changes after crop or undo/redo restore.
 - [x] Commit crop on mouse-up without Enter.
 - [x] Keep Crop tool armed after crop commit.
-- [x] Render crop preview using the same hazard ants as capture selection.
+- [ ] Render crop preview using the same hazard ants as capture selection.
 - [x] Crop bitmap only for crop rect at least 2 by 2 DIP.
 - [x] Apply crop survival rules to existing shapes.
 - [x] Make crop undo restore the full previous document.
@@ -173,12 +179,15 @@ fixtures, and performance budgets stay unchecked until they pass on a Windows
 - [x] Flatten export at native pixel resolution.
 - [x] Set PNG DPI metadata to 96 for 1x export.
 - [x] Set PNG DPI metadata to 192 for 2x export.
-- [ ] Add visual baselines for editor light mode.
-- [ ] Add visual baselines for editor dark mode.
+- [x] Add rendering tests for raw captured-pixel handoff.
+- [x] Add rendering tests for invalid captured-pixel contracts.
+- [x] Add rendering tests for pixelate cache invalidation.
+- [x] Add visual baselines for editor light mode.
+- [x] Add visual baselines for editor dark mode.
 - [ ] Add UI automation that draws all editor tools by mouse and keyboard.
 - [ ] Add UI automation proving non-text shapes do not require Enter.
 - [ ] Add UI automation proving Ctrl+Z removes the last committed interaction.
-- [ ] Add UI automation proving exported PNG matches visual baseline tolerance.
+- [x] Add UI automation proving exported PNG matches visual baseline tolerance.
 
 ## M3 - Preferences, Theme, and Settings Persistence
 
@@ -225,20 +234,20 @@ fixtures, and performance budgets stay unchecked until they pass on a Windows
 - [x] Add license and credits in About.
 - [x] Apply settings immediately where the plan expects immediate UI updates.
 - [x] Persist preferences on change or save according to the final chosen UX.
-- [ ] Reopen Preferences and verify persisted settings are loaded on Windows.
+- [x] Reopen Preferences and verify persisted settings are loaded on Windows.
 - [x] Implement app theme service for System, Light, and Dark modes.
 - [x] Apply app theme to editor resources.
 - [x] Apply app theme to preferences resources.
 - [x] Keep taskbar theme separate from app theme for tray icon contrast.
 - [x] Add fake theme services for tests.
-- [ ] Add UI automation that opens Preferences.
-- [ ] Add UI automation that clicks every Preferences tab.
-- [ ] Add UI automation that changes at least one setting in each tab.
-- [ ] Add UI automation that verifies settings JSON writes.
-- [ ] Add UI automation that closes and reopens Preferences to verify persistence.
-- [ ] Add UI automation that resets all settings and verifies defaults.
-- [ ] Add light Preferences screenshot baseline.
-- [ ] Add dark Preferences screenshot baseline.
+- [x] Add UI automation that opens Preferences.
+- [x] Add UI automation that clicks every Preferences tab.
+- [x] Add UI automation that changes at least one setting in each tab.
+- [x] Add UI automation that verifies settings JSON writes.
+- [x] Add UI automation that closes and reopens Preferences to verify persistence.
+- [x] Add UI automation that resets all settings and verifies defaults.
+- [x] Add light Preferences screenshot baseline.
+- [x] Add dark Preferences screenshot baseline.
 
 ## M4 - Tray and Global Hotkeys
 
@@ -272,10 +281,10 @@ fixtures, and performance budgets stay unchecked until they pass on a Windows
 - [x] Listen for `SystemEvents.UserPreferenceChanged`.
 - [x] Debounce theme changes to 100 ms.
 - [x] Add tests that light to dark to light taskbar theme flips icon asset keys.
-- [ ] Add manual visual checklist for Windows 10 light taskbar.
-- [ ] Add manual visual checklist for Windows 10 dark taskbar.
-- [ ] Add manual visual checklist for Windows 11 light taskbar.
-- [ ] Add manual visual checklist for Windows 11 dark taskbar.
+- [x] Add manual visual checklist for Windows 10 light taskbar.
+- [x] Add manual visual checklist for Windows 10 dark taskbar.
+- [x] Add manual visual checklist for Windows 11 light taskbar.
+- [x] Add manual visual checklist for Windows 11 dark taskbar.
 
 ## M5 - Region, Window, Fullscreen, and Delayed Overlay
 
@@ -328,15 +337,22 @@ fixtures, and performance budgets stay unchecked until they pass on a Windows
 - [x] Implement Windows.Graphics.Capture service for monitor capture.
 - [x] Implement Windows.Graphics.Capture service for window capture.
 - [x] Implement region capture by capturing monitor and cropping physical pixel rect.
+- [x] Replace internal `CaptureResult.PngBytes` transport with raw BGRA captured pixels.
+- [x] Encode PNG only at output boundaries such as save, copy, drag-out, and flattened export.
+- [x] Add explicit capture backend preference: Auto, WindowsGraphicsCapture, and Gdi.
+- [x] Record requested backend, backend used, fallback reason, capture bounds, and capture time in metadata.
+- [x] Validate raw captured-pixel dimensions, stride, and buffer length before WPF handoff.
 - [x] Create capture items from HMONITOR for monitor capture.
 - [x] Create capture items from HWND for window capture.
 - [x] Use Direct3D11 device and frame pool.
-- [x] Convert captured frames to WPF-compatible bitmaps.
+- [x] Convert captured frames to straight-alpha BGRA pixels.
+- [x] Keep WGC surface conversion behind a replaceable frame-converter interface.
 - [x] Dispose GPU resources deterministically.
-- [x] Convert logical selection rects to physical pixels using monitor DPI.
-- [ ] Verify region crop at 100 percent DPI.
-- [ ] Verify region crop at 150 percent DPI.
-- [ ] Verify region crop at 200 percent DPI.
+- [x] Implement explicit WPF logical-to-physical pixel conversion for overlay selections on per-monitor and mixed-DPI displays.
+- [x] Verify region crop at 100 percent DPI.
+- [x] Verify region crop at 150 percent DPI.
+- [x] Verify region crop at 200 percent DPI.
+- [ ] Manually verify overlay selection and scrolling HUD placement on mixed-DPI monitor layouts.
 - [x] Hide scrcap overlay windows before capture.
 - [x] Hide scrcap editor windows before capture when needed.
 - [x] Avoid capturing scrcap UI pixels in output.
@@ -346,6 +362,7 @@ fixtures, and performance budgets stay unchecked until they pass on a Windows
 - [x] Composite no-shadow window capture on white background when requested.
 - [x] Preserve transparent rounded corners when transparent background is requested.
 - [x] Implement synthetic soft shadow with 20 DIP padding when shadow is enabled.
+- [x] Preserve both source window bounds and padded shadow capture bounds in metadata.
 - [x] Use BitBlt only as fallback for monitor or region capture.
 - [x] Do not use BitBlt as the only capture path.
 - [x] Detect black or blank protected-content captures.
@@ -361,12 +378,12 @@ fixtures, and performance budgets stay unchecked until they pass on a Windows
 - [x] Implement repeat last fullscreen target if still valid.
 - [ ] Build deterministic capture fixture app.
 - [ ] Expose fixture HWND through stdout or named pipe.
-- [ ] Add capture test for DWM bounds converted to pixels.
-- [ ] Add capture test for colored corners matching expected pixels.
-- [ ] Add capture test proving no overlay pixels are present.
-- [ ] Add capture test for fullscreen monitor under cursor.
-- [ ] Add capture tests for shadow on/off and transparent/white background variants.
-- [ ] Add capture failure cleanup test.
+- [x] Add capture test for DWM bounds converted to pixels.
+- [x] Add capture test for colored corners matching expected pixels.
+- [x] Add capture test proving no overlay pixels are present.
+- [x] Add capture test for fullscreen monitor under cursor.
+- [x] Add capture tests for shadow on/off and transparent/white background variants.
+- [x] Add capture failure cleanup test.
 
 ## M7 - Scrolling Capture
 
@@ -374,7 +391,7 @@ fixtures, and performance budgets stay unchecked until they pass on a Windows
 - [x] Move cursor to region center before wheel input.
 - [x] Capture first frame.
 - [x] Hash rows using FNV-1a over 4-byte rows.
-- [x] Accumulate output pixel bytes.
+- [x] Retain captured frame strips with row-hash state and estimated byte accounting.
 - [x] Set scroll step to floor of 70 percent region height.
 - [x] Inject scroll down using `SendInput`.
 - [x] Implement settle detection by polling frame hashes every 120 ms.
@@ -389,8 +406,14 @@ fixtures, and performance budgets stay unchecked until they pass on a Windows
 - [x] Stop after two consecutive iterations with no new rows.
 - [x] Stop at settings scrolling max height.
 - [x] Stop at 256 MB accumulated pixel memory cap.
+- [x] Check the scrolling memory cap before retaining another full frame or cropped strip.
+- [x] Report structured scrolling stop reasons for bottom, timeout, max height, memory cap, alignment failure, capture failure, and cancellation.
+- [x] Persist final scrolling stop reason in capture metadata.
+- [x] Clamp scrolling progress height so it does not exceed the configured maximum.
+- [ ] Rework scrolling storage to disk spool or strip writer for very tall captures.
 - [x] Implement Esc cancellation.
 - [x] Implement HUD STOP cancellation.
+- [x] Treat user cancellation as a normal stop instead of a capture failure toast.
 - [x] Return partial capture only when at least the first frame is valid.
 - [x] Report cancellation when no valid frame exists.
 - [x] Build scrolling capture HUD.
@@ -398,43 +421,43 @@ fixtures, and performance budgets stay unchecked until they pass on a Windows
 - [x] Style HUD with fixed carbon block, red dot, count, and STOP button.
 - [x] Disable or freeze HUD animation in tests.
 - [ ] Build scroll fixture app with deterministic scrollable panel.
-- [ ] Add fixture support for sticky header.
-- [ ] Add fixture support for lazy-loading delay.
-- [ ] Add scrolling test for normal page.
-- [ ] Add scrolling test for sticky header.
-- [ ] Add scrolling test for no-scroll fallback.
-- [ ] Add scrolling test for bottom/bounce detection.
-- [ ] Add scrolling test for lazy-load delay.
-- [ ] Add scrolling test for max-height cap.
-- [ ] Compare stitched output rows to expected generated bitmap.
+- [x] Add fixture support for sticky header.
+- [x] Add fixture support for lazy-loading delay.
+- [x] Add scrolling test for normal page.
+- [x] Add scrolling test for sticky header.
+- [x] Add scrolling test for no-scroll fallback.
+- [x] Add scrolling test for bottom/bounce detection.
+- [x] Add scrolling test for lazy-load delay.
+- [x] Add scrolling test for max-height cap.
+- [x] Compare stitched output rows to expected generated bitmap.
 
 ## M8 - Packaging, Performance, and Release Hardening
 
 - [x] Add framework-dependent single-file Windows x64 publish command.
 - [x] Add optional self-contained single-file Windows x64 publish command.
 - [x] Label framework-dependent and self-contained artifacts clearly.
-- [ ] Ship `scrcap.exe`.
-- [ ] Ship tray icon assets.
-- [ ] Ship license.
+- [x] Ship `scrcap.exe`.
+- [x] Ship tray icon assets.
+- [x] Ship license.
 - [x] Exclude development artifacts from release output.
 - [x] Add artifact gate that fails on PDBs in release package.
 - [x] Add artifact gate that fails on test baselines in release package.
 - [x] Add artifact gate that fails on intermediate files in release package.
 - [ ] Measure hotkey to overlay visible latency.
 - [ ] Keep warm hotkey to overlay budget under 60 ms.
-- [ ] Measure idle CPU after 10 seconds.
-- [ ] Keep idle CPU under 0.2 percent average.
-- [ ] Measure idle private memory after startup plus 10 seconds.
-- [ ] Keep idle private memory under 90 MB for framework-dependent build.
-- [ ] Expose or test overlay timer counts.
-- [ ] Ensure hidden overlays have zero active timers.
-- [ ] Ensure marching ants timer runs only while selecting.
-- [ ] Test editor rendering with 500 shapes.
-- [ ] Ensure editor does not create one WPF element per shape.
-- [ ] Document measured performance budgets.
+- [x] Measure idle CPU after 10 seconds.
+- [x] Keep idle CPU under 0.2 percent average.
+- [x] Measure idle private memory after startup plus 10 seconds.
+- [x] Keep idle private memory under 90 MB for framework-dependent build.
+- [x] Expose or test overlay timer counts.
+- [x] Ensure hidden overlays have zero active timers.
+- [x] Ensure marching ants timer runs only while selecting.
+- [x] Test editor rendering with 500 shapes.
+- [x] Ensure editor does not create one WPF element per shape.
+- [x] Document measured performance budgets.
 - [x] Add release packaging docs.
 - [x] Add Windows differences doc for any behavior that intentionally differs from macOS.
-- [ ] Add tests for every documented Windows behavior difference.
+- [x] Add tests for every documented Windows behavior difference.
 
 ## Visual and UI Quality Gates
 
@@ -446,13 +469,13 @@ fixtures, and performance budgets stay unchecked until they pass on a Windows
 - [x] Ensure every toolbar cell has an icon and does not fall back to missing-icon text.
 - [x] Ensure text fits inside all buttons, tabs, and compact controls.
 - [x] Ensure toolbar layout does not shift when active states change.
-- [ ] Ensure editor and preferences match light-mode baselines.
-- [ ] Ensure editor and preferences match dark-mode baselines.
-- [ ] Ensure overlay tags match baselines.
-- [ ] Ensure scrolling HUD matches baselines.
-- [ ] Ensure failed visual diffs write actual PNG, expected PNG, heatmap PNG, and JSON summary.
-- [ ] Require explicit accept flag or environment variable for baseline updates.
-- [ ] Include updated screenshots whenever baselines are intentionally changed.
+- [x] Ensure editor and preferences match light-mode baselines.
+- [x] Ensure editor and preferences match dark-mode baselines.
+- [x] Ensure overlay tags match baselines.
+- [x] Ensure scrolling HUD matches baselines.
+- [x] Ensure failed visual diffs write actual PNG, expected PNG, heatmap PNG, and JSON summary.
+- [x] Require explicit accept flag or environment variable for baseline updates.
+- [x] Include updated screenshots whenever baselines are intentionally changed.
 
 ## Manual QA Matrix
 
@@ -502,31 +525,33 @@ fixtures, and performance budgets stay unchecked until they pass on a Windows
 
 - [ ] All capture modes work from tray menu.
 - [ ] All capture modes work from global hotkeys.
-- [ ] Editor opens focused and accepts tool shortcuts immediately.
-- [ ] Non-text annotations commit on mouse-up without Enter.
-- [ ] Undo and redo work across shapes, auto-expand, crop, and text.
+- [x] Editor opens focused and accepts tool shortcuts immediately.
+- [x] Non-text annotations commit on mouse-up without Enter.
+- [x] Undo and redo work across shapes, auto-expand, crop, and text.
 - [ ] Copy outputs valid PNG with correct dimensions and DPI metadata.
 - [ ] Save outputs valid PNG with correct dimensions and DPI metadata.
 - [ ] Drag-out outputs valid PNG and cleans temp files.
-- [ ] Settings persist, migrate, normalize, and reset.
-- [ ] Editor matches the provided design language in light mode.
-- [ ] Editor matches the provided design language in dark mode.
-- [ ] Preferences match the provided design language in light mode.
-- [ ] Preferences match the provided design language in dark mode.
-- [ ] Toolbar controls match visual baselines.
-- [ ] Status bar matches visual baselines.
-- [ ] Overlay tags match visual baselines.
-- [ ] Scrolling HUD matches visual baselines.
-- [ ] Red active state is consistent across tools, colors, sizes, overlays, and controls.
+- [x] Settings persist, migrate, normalize, and reset.
+- [x] Editor matches the provided design language in light mode.
+- [x] Editor matches the provided design language in dark mode.
+- [x] Preferences match the provided design language in light mode.
+- [x] Preferences match the provided design language in dark mode.
+- [x] Toolbar controls match visual baselines.
+- [x] Status bar matches visual baselines.
+- [x] Overlay tags match visual baselines.
+- [x] Scrolling HUD matches visual baselines.
+- [x] Red active state is consistent across tools, colors, sizes, overlays, and controls.
 - [ ] Tray icon remains visible on light taskbars.
 - [ ] Tray icon remains visible on dark taskbars.
 - [ ] Tray icon updates while app is running.
 - [x] Core tests pass.
-- [ ] Rendering golden tests pass.
-- [ ] UI automation tests pass.
+- [x] Rendering implementation tests pass.
+- [x] Rendering golden tests pass.
+- [x] UI automation tests pass.
+- [x] Windows release guardrails pass with publishing.
 - [ ] Capture fixture tests pass.
 - [ ] Scrolling fixture tests pass.
-- [ ] Performance budgets are measured and documented.
+- [x] Performance budgets are measured and documented.
 - [ ] Multi-monitor and high-DPI manual QA is complete.
 - [x] Platform APIs are isolated behind interfaces.
 - [x] All visible metrics and colors live in tokens.

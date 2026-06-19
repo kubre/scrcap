@@ -3,6 +3,7 @@ using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Input;
 using System.Windows.Shapes;
+using System.Windows.Threading;
 using Scrcap.Windows.Platform.Capture;
 using WpfKeyEventArgs = System.Windows.Input.KeyEventArgs;
 using WpfMouseEventArgs = System.Windows.Input.MouseEventArgs;
@@ -19,6 +20,7 @@ public partial class OverlayWindow : Window
 {
     private readonly IWindowSelectionService windowSelectionService;
     private readonly IReadOnlyList<OverlayMonitorBounds> monitorBounds;
+    private readonly DispatcherTimer selectionAntTimer;
     private readonly TaskCompletionSource<PixelRect?> rectCompletion = new();
     private readonly TaskCompletionSource<PixelPoint?> pointCompletion = new();
     private IReadOnlyList<WindowCandidate> windowCandidates = [];
@@ -40,10 +42,16 @@ public partial class OverlayWindow : Window
         this.windowSelectionService = windowSelectionService;
         this.monitorBounds = monitorBounds;
         InitializeComponent();
-        Left = SystemParameters.VirtualScreenLeft;
-        Top = SystemParameters.VirtualScreenTop;
-        Width = SystemParameters.VirtualScreenWidth;
-        Height = SystemParameters.VirtualScreenHeight;
+        selectionAntTimer = new DispatcherTimer(TimeSpan.FromMilliseconds(75), DispatcherPriority.Render, (_, _) =>
+        {
+            Selection.StrokeDashOffset = (Selection.StrokeDashOffset + 1) % 20;
+        }, Dispatcher);
+        selectionAntTimer.Stop();
+        var overlayBounds = OverlayGeometry.VirtualOverlayBounds(monitorBounds);
+        Left = overlayBounds.Left;
+        Top = overlayBounds.Top;
+        Width = overlayBounds.Width;
+        Height = overlayBounds.Height;
         Cursor = System.Windows.Input.Cursors.Cross;
         Loaded += (_, _) =>
         {
@@ -86,10 +94,12 @@ public partial class OverlayWindow : Window
         if (pointMode)
         {
             var point = highlightedWindow is { } candidate
-                ? OverlayGeometry.CandidateCenter(candidate)
-                : e.GetPosition(Root) + new Vector(Left, Top);
+                ? new PixelPoint(
+                    (int)Math.Round(OverlayGeometry.CandidateCenter(candidate).X),
+                    (int)Math.Round(OverlayGeometry.CandidateCenter(candidate).Y))
+                : OverlayGeometry.ToCapturePixelPoint(e.GetPosition(Root), monitorBounds, Left, Top);
             Hide();
-            pointCompletion.TrySetResult(new PixelPoint((int)Math.Round(point.X), (int)Math.Round(point.Y)));
+            pointCompletion.TrySetResult(point);
             return;
         }
 
@@ -97,6 +107,7 @@ public partial class OverlayWindow : Window
         currentSelection = new Rect(dragStart.Value, dragStart.Value);
         HintTag.Visibility = Visibility.Collapsed;
         Selection.Visibility = Visibility.Visible;
+        StartSelectionAnimation();
         CaptureMouse();
         UpdateSelection(currentSelection);
     }
@@ -141,6 +152,7 @@ public partial class OverlayWindow : Window
 
         ReleaseMouseCapture();
         dragStart = null;
+        StopSelectionAnimation();
 
         if (currentSelection.Width < 2 || currentSelection.Height < 2)
         {
@@ -159,11 +171,7 @@ public partial class OverlayWindow : Window
         }
 
         Hide();
-        rectCompletion.TrySetResult(new PixelRect(
-            (int)Math.Round(Left + currentSelection.X),
-            (int)Math.Round(Top + currentSelection.Y),
-            (int)Math.Round(currentSelection.Width),
-            (int)Math.Round(currentSelection.Height)));
+        rectCompletion.TrySetResult(OverlayGeometry.ToCapturePixelRect(currentSelection, monitorBounds, Left, Top));
     }
 
     private void Window_KeyDown(object sender, WpfKeyEventArgs e)
@@ -191,10 +199,17 @@ public partial class OverlayWindow : Window
 
         isCancelled = true;
         ReleaseMouseCapture();
+        StopSelectionAnimation();
         Hide();
         rectCompletion.TrySetResult(null);
         pointCompletion.TrySetResult(null);
         e.Handled = true;
+    }
+
+    protected override void OnClosed(EventArgs e)
+    {
+        StopSelectionAnimation();
+        base.OnClosed(e);
     }
 
     private void UpdateCrosshair(WpfPoint point)
@@ -236,17 +251,24 @@ public partial class OverlayWindow : Window
 
     private void HighlightWindowAt(WpfPoint point)
     {
-        var screenPoint = new PixelPoint((int)Math.Round(Left + point.X), (int)Math.Round(Top + point.Y));
-        var candidate = windowSelectionService.WindowFromPoint(screenPoint)
-            ?? windowCandidates.FirstOrDefault(window => Contains(window.Bounds, screenPoint));
-        if (candidate is null)
+        try
+        {
+            var screenPoint = OverlayGeometry.ToCapturePixelPoint(point, monitorBounds, Left, Top);
+            var candidate = windowSelectionService.WindowFromPoint(screenPoint)
+                ?? windowCandidates.FirstOrDefault(window => Contains(window.Bounds, screenPoint));
+            if (candidate is null)
+            {
+                ClearWindowHighlight();
+                return;
+            }
+
+            highlightedWindow = candidate;
+            DrawWindowHighlight(candidate);
+        }
+        catch
         {
             ClearWindowHighlight();
-            return;
         }
-
-        highlightedWindow = candidate;
-        DrawWindowHighlight(candidate);
     }
 
     private void CycleWindowHighlight(int direction)
@@ -266,7 +288,7 @@ public partial class OverlayWindow : Window
 
     private void DrawWindowHighlight(WindowCandidate candidate)
     {
-        var rect = OverlayGeometry.ToOverlayRect(candidate.Bounds, Left, Top);
+        var rect = OverlayGeometry.ToOverlayRect(candidate.Bounds, monitorBounds, Left, Top);
         WindowHighlight.Visibility = Visibility.Visible;
         Canvas.SetLeft(WindowHighlight, rect.X);
         Canvas.SetTop(WindowHighlight, rect.Y);
@@ -313,7 +335,7 @@ public partial class OverlayWindow : Window
         MonitorLayer.Children.Clear();
         foreach (var monitor in monitorBounds)
         {
-            var rect = OverlayGeometry.ToOverlayRect(monitor.Bounds, Left, Top);
+            var rect = OverlayGeometry.ToOverlayRect(monitor, monitorBounds, Left, Top);
             var border = new WpfRectangle
             {
                 Width = rect.Width,
@@ -360,4 +382,21 @@ public partial class OverlayWindow : Window
 
     private static Rect Normalize(WpfPoint start, WpfPoint end) =>
         new(Math.Min(start.X, end.X), Math.Min(start.Y, end.Y), Math.Abs(start.X - end.X), Math.Abs(start.Y - end.Y));
+
+    private void StartSelectionAnimation()
+    {
+        Selection.StrokeDashOffset = 0;
+        if (!selectionAntTimer.IsEnabled)
+        {
+            selectionAntTimer.Start();
+        }
+    }
+
+    private void StopSelectionAnimation()
+    {
+        if (selectionAntTimer.IsEnabled)
+        {
+            selectionAntTimer.Stop();
+        }
+    }
 }

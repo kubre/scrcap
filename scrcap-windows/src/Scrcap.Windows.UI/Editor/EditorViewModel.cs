@@ -1,7 +1,8 @@
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
 using Scrcap.Core;
-using System.Windows.Media;
+using WpfBrush = System.Windows.Media.Brush;
+using WpfSolidColorBrush = System.Windows.Media.SolidColorBrush;
 
 namespace Scrcap.Windows.UI.Editor;
 
@@ -32,19 +33,56 @@ public sealed class EditorViewModel : INotifyPropertyChanged
     public EditorTool ActiveTool
     {
         get => activeTool;
-        set => Set(ref activeTool, value);
+        set
+        {
+            if (!Set(ref activeTool, value))
+            {
+                return;
+            }
+
+            OnPropertyChanged(nameof(IsArrowToolActive));
+            OnPropertyChanged(nameof(IsRectangleToolActive));
+            OnPropertyChanged(nameof(IsCounterToolActive));
+            OnPropertyChanged(nameof(IsTextToolActive));
+            OnPropertyChanged(nameof(IsPixelateToolActive));
+            OnPropertyChanged(nameof(IsCropToolActive));
+        }
     }
 
     public int ColorIndex
     {
         get => colorIndex;
-        set => Set(ref colorIndex, Math.Clamp(value, 0, Settings.PaletteSlotCount - 1));
+        set
+        {
+            if (!Set(ref colorIndex, Math.Clamp(value, 0, Settings.PaletteSlotCount - 1)))
+            {
+                return;
+            }
+
+            OnPropertyChanged(nameof(ActiveColor));
+            OnPropertyChanged(nameof(IsColor1Active));
+            OnPropertyChanged(nameof(IsColor2Active));
+            OnPropertyChanged(nameof(IsColor3Active));
+            OnPropertyChanged(nameof(IsColor4Active));
+            OnPropertyChanged(nameof(IsColor5Active));
+        }
     }
 
     public ShapeSize ActiveSize
     {
         get => activeSize;
-        set => Set(ref activeSize, value);
+        set
+        {
+            if (!Set(ref activeSize, value))
+            {
+                return;
+            }
+
+            OnPropertyChanged(nameof(StrokeWidth));
+            OnPropertyChanged(nameof(IsSmallSizeActive));
+            OnPropertyChanged(nameof(IsMediumSizeActive));
+            OnPropertyChanged(nameof(IsLargeSizeActive));
+        }
     }
 
     public double Zoom
@@ -82,15 +120,58 @@ public sealed class EditorViewModel : INotifyPropertyChanged
 
     public IReadOnlyList<string> Palette => Settings.PaletteHex;
 
+    public IReadOnlyList<WpfBrush> PaletteBrushes { get; private set; } = [];
+
     public System.Windows.Media.Color ActiveColor =>
         (System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString(Settings.PaletteHex[Math.Clamp(ColorIndex, 0, Settings.PaletteSlotCount - 1)]);
 
     public double StrokeWidth => Settings.StrokeWidth * ActiveSize.Scale();
 
+    public string DocumentSizeText => Document is null
+        ? string.Empty
+        : $"{Math.Round(Document.Size.Width):0} x {Math.Round(Document.Size.Height):0}";
+
+    public bool IsArrowToolActive => ActiveTool == EditorTool.Arrow;
+
+    public bool IsRectangleToolActive => ActiveTool == EditorTool.Rectangle;
+
+    public bool IsCounterToolActive => ActiveTool == EditorTool.Counter;
+
+    public bool IsTextToolActive => ActiveTool == EditorTool.Text;
+
+    public bool IsPixelateToolActive => ActiveTool == EditorTool.Pixelate;
+
+    public bool IsCropToolActive => ActiveTool == EditorTool.Crop;
+
+    public bool IsColor1Active => ColorIndex == 0;
+
+    public bool IsColor2Active => ColorIndex == 1;
+
+    public bool IsColor3Active => ColorIndex == 2;
+
+    public bool IsColor4Active => ColorIndex == 3;
+
+    public bool IsColor5Active => ColorIndex == 4;
+
+    public bool IsSmallSizeActive => ActiveSize == ShapeSize.Small;
+
+    public bool IsMediumSizeActive => ActiveSize == ShapeSize.Medium;
+
+    public bool IsLargeSizeActive => ActiveSize == ShapeSize.Large;
+
     public void LoadDocument(double width, double height)
     {
         Document = new AnnotationDocument(width, height);
         HasSource = true;
+        PaletteBrushes = Settings.PaletteHex
+            .Take(Settings.PaletteSlotCount)
+            .Select(hex => (WpfBrush)new WpfSolidColorBrush((System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString(hex)))
+            .ToArray();
+        foreach (var brush in PaletteBrushes.OfType<WpfSolidColorBrush>())
+        {
+            brush.Freeze();
+        }
+
         OnDocumentChanged();
     }
 
@@ -113,7 +194,6 @@ public sealed class EditorViewModel : INotifyPropertyChanged
         if (int.TryParse(key, out var value) && value is >= 1 and <= Settings.PaletteSlotCount)
         {
             ColorIndex = value - 1;
-            OnPropertyChanged(nameof(ActiveColor));
         }
     }
 
@@ -226,6 +306,8 @@ public sealed class EditorViewModel : INotifyPropertyChanged
     {
         OnPropertyChanged(nameof(Document));
         OnPropertyChanged(nameof(VisibleShapes));
+        OnPropertyChanged(nameof(DocumentSizeText));
+        OnPropertyChanged(nameof(PaletteBrushes));
         OnPropertyChanged(nameof(CanUndo));
         OnPropertyChanged(nameof(CanRedo));
     }

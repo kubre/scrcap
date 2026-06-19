@@ -1,5 +1,6 @@
 using System.IO;
 using System.Windows;
+using System.Windows.Threading;
 using Scrcap.Core;
 using Scrcap.Windows.Platform.Capture;
 using Scrcap.Windows.Platform.Hotkeys;
@@ -22,40 +23,45 @@ public partial class App : System.Windows.Application
     protected override void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
-        ShutdownMode = ShutdownMode.OnExplicitShutdown;
+        var options = StartupOptions.Parse(e.Args);
+        ShutdownMode = options.TestMode ? ShutdownMode.OnLastWindowClose : ShutdownMode.OnExplicitShutdown;
 
-        settingsStore = new SettingsStore(SettingsStore.DefaultDirectory());
-        captureService = new WindowsCaptureService();
-        windowSelectionService = new WindowSelectionService();
-        hotkeys = new GlobalHotkeyService();
-        RegisterHotkeys();
-        hotkeys.Pressed += (_, action) => HandleCaptureAction(action);
+        settingsStore = new SettingsStore(options.SettingsDirectory ?? SettingsStore.DefaultDirectory());
+        if (options.AppTheme is { } appTheme)
+        {
+            settingsStore.Settings.ThemeMode = appTheme;
+        }
 
-        tray = new NotifyIconTrayService(new TaskbarThemeService());
-        tray.CaptureRequested += (_, action) => HandleCaptureAction(action);
-        tray.PreferencesRequested += (_, _) => OpenPreferences();
-        tray.QuitRequested += (_, _) => Shutdown();
-        tray.Show();
+        if (!options.TestMode)
+        {
+            captureService = new WindowsCaptureService();
+            windowSelectionService = new WindowSelectionService();
+            hotkeys = new GlobalHotkeyService();
+            RegisterHotkeys();
+            hotkeys.Pressed += (_, action) => HandleCaptureAction(action);
 
-        var dumpPath = TryGetOptionValue(e.Args, "--dump-window-png");
-        _ = TryGetOptionValue(e.Args, "--test-app-theme");
-        _ = TryGetOptionValue(e.Args, "--test-taskbar-theme");
+            tray = new NotifyIconTrayService(new TaskbarThemeService());
+            tray.CaptureRequested += (_, action) => HandleCaptureAction(action);
+            tray.PreferencesRequested += (_, _) => OpenPreferences();
+            tray.QuitRequested += (_, _) => Shutdown();
+            tray.Show();
+        }
 
         if (e.Args.Contains("--open-preferences", StringComparer.OrdinalIgnoreCase))
         {
-            OpenPreferences(dumpPath);
+            OpenPreferences(options.DumpPath, options.TestMode);
             return;
         }
 
         if (TryGetOptionValue(e.Args, "--open-sample-editor") is { } samplePath)
         {
-            OpenSampleEditor(samplePath, dumpPath);
+            OpenSampleEditor(samplePath, options.DumpPath, settingsStore.Settings, options.TestMode);
             return;
         }
 
-        if (e.Args.Contains("--test-mode", StringComparer.OrdinalIgnoreCase))
+        if (options.TestMode)
         {
-            OpenSampleEditor(null, dumpPath);
+            OpenSampleEditor(null, options.DumpPath, settingsStore.Settings, options.TestMode);
         }
     }
 
@@ -84,13 +90,16 @@ public partial class App : System.Windows.Application
             var behavior = BehaviorFor(action, settingsStore.Settings);
             if (behavior is AfterCaptureBehavior.CopyOnly or AfterCaptureBehavior.Both)
             {
-                System.Windows.Clipboard.SetImage(EditorWindow.DecodePng(capture.PngBytes));
+                System.Windows.Clipboard.SetImage(EditorWindow.BitmapSourceFromPixels(capture.Pixels));
             }
 
             if (behavior is AfterCaptureBehavior.OpenEditor or AfterCaptureBehavior.Both)
             {
                 OpenEditor(capture);
             }
+        }
+        catch (OperationCanceledException)
+        {
         }
         catch (Exception ex)
         {
@@ -129,20 +138,36 @@ public partial class App : System.Windows.Application
     private async Task<CaptureTarget?> RegionTargetAsync(AppAction action, int countdownSeconds, CancellationToken cancellationToken)
     {
         var overlay = new OverlayWindow();
-        var rect = await overlay.SelectRegionAsync(countdownSeconds).WaitAsync(cancellationToken).ConfigureAwait(true);
-        return rect is null ? null : new CaptureTarget(action, rect.Value);
+        try
+        {
+            var rect = await overlay.SelectRegionAsync(countdownSeconds).WaitAsync(cancellationToken).ConfigureAwait(true);
+            return rect is null ? null : new CaptureTarget(action, rect.Value);
+        }
+        finally
+        {
+            overlay.Close();
+            await WaitForOverlayDismissalAsync(cancellationToken).ConfigureAwait(true);
+        }
     }
 
     private async Task<CaptureTarget?> WindowTargetAsync(CancellationToken cancellationToken)
     {
         var overlay = new OverlayWindow();
-        var point = await overlay.SelectPointAsync().WaitAsync(cancellationToken).ConfigureAwait(true);
-        if (point is null || windowSelectionService?.WindowFromPoint(point.Value) is not { } candidate)
+        try
         {
-            return null;
-        }
+            var point = await overlay.SelectPointAsync().WaitAsync(cancellationToken).ConfigureAwait(true);
+            if (point is null || windowSelectionService?.WindowFromPoint(point.Value) is not { } candidate)
+            {
+                return null;
+            }
 
-        return new CaptureTarget(AppAction.CaptureWindow, candidate.Bounds, candidate.Hwnd);
+            return new CaptureTarget(AppAction.CaptureWindow, candidate.Bounds, candidate.Hwnd);
+        }
+        finally
+        {
+            overlay.Close();
+            await WaitForOverlayDismissalAsync(cancellationToken).ConfigureAwait(true);
+        }
     }
 
     private async Task<CaptureResult> CaptureTargetAsync(CaptureTarget target, CaptureRequest request, CancellationToken cancellationToken)
@@ -155,16 +180,20 @@ public partial class App : System.Windows.Application
         if (target.Action == AppAction.CaptureScrolling && target.Region is { } scrollingRegion)
         {
             using var scrollingCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            using var hiddenWindows = HideAppWindowsForCapture();
             var hud = ScrollingCaptureHud.ShowFor(scrollingRegion, scrollingCancellation.Cancel);
             var progress = new Progress<ScrollingCaptureProgress>(hud.UpdateProgress);
             try
             {
+                await WaitForOverlayDismissalAsync(scrollingCancellation.Token).ConfigureAwait(true);
                 return await captureService.CaptureScrollingRegionAsync(
                     scrollingRegion,
                     request,
                     new ScrollingCaptureOptions(
                         settingsStore?.Settings.ScrollingMaxHeight ?? Settings.MaxScrollingMaxHeight,
-                        Progress: progress),
+                        Progress: progress,
+                        BeforeScreenCapture: hud.HideForCaptureAsync,
+                        AfterScreenCapture: hud.ShowAfterCaptureAsync),
                     scrollingCancellation.Token).ConfigureAwait(true);
             }
             finally
@@ -173,14 +202,45 @@ public partial class App : System.Windows.Application
             }
         }
 
-        return await (target.Action switch
+        using (HideAppWindowsForCapture())
         {
-            AppAction.CaptureRegion or AppAction.CaptureDelayed
-                when target.Region is { } region => captureService.CaptureRegionAsync(region, request, cancellationToken),
-            AppAction.CaptureWindow when target.WindowHandle is { } hwnd => captureService.CaptureWindowAsync(hwnd, request, cancellationToken),
-            AppAction.CaptureFullscreen => captureService.CaptureMonitorUnderCursorAsync(request, cancellationToken),
-            _ => throw new InvalidOperationException("No repeatable capture target is available."),
-        }).ConfigureAwait(true);
+            await WaitForOverlayDismissalAsync(cancellationToken).ConfigureAwait(true);
+            return await (target.Action switch
+            {
+                AppAction.CaptureRegion or AppAction.CaptureDelayed
+                    when target.Region is { } region => captureService.CaptureRegionAsync(region, request, cancellationToken),
+                AppAction.CaptureWindow when target.WindowHandle is { } hwnd => captureService.CaptureWindowAsync(hwnd, request, cancellationToken),
+                AppAction.CaptureFullscreen => captureService.CaptureMonitorUnderCursorAsync(request, cancellationToken),
+                _ => throw new InvalidOperationException("No repeatable capture target is available."),
+            }).ConfigureAwait(true);
+        }
+    }
+
+    private async Task WaitForOverlayDismissalAsync(CancellationToken cancellationToken)
+    {
+        await Dispatcher.InvokeAsync(() => { }, DispatcherPriority.Render, cancellationToken);
+        await Dispatcher.InvokeAsync(() => { }, DispatcherPriority.ApplicationIdle, cancellationToken);
+        await Task.Delay(TimeSpan.FromMilliseconds(50), cancellationToken).ConfigureAwait(true);
+    }
+
+    private IDisposable HideAppWindowsForCapture()
+    {
+        var windows = Windows
+            .OfType<Window>()
+            .Where(window => window.IsVisible && window is not OverlayWindow and not ScrollingCaptureHud)
+            .ToArray();
+        foreach (var window in windows)
+        {
+            window.Hide();
+        }
+
+        return new Scope(() =>
+        {
+            foreach (var window in windows.Where(window => !window.IsVisible))
+            {
+                window.Show();
+            }
+        });
     }
 
     private static CaptureRequest RequestFrom(Settings settings, int delaySeconds) =>
@@ -214,11 +274,11 @@ public partial class App : System.Windows.Application
         window.Activate();
     }
 
-    private void OpenPreferences(string? dumpPath = null)
+    private void OpenPreferences(string? dumpPath = null, bool shutdownAfterDump = false)
     {
         var window = new PreferencesWindow(settingsStore ?? new SettingsStore(SettingsStore.DefaultDirectory()));
         window.Closed += (_, _) => RegisterHotkeys();
-        AttachDumpHook(window, dumpPath);
+        AttachDumpHook(window, dumpPath, shutdownAfterDump);
         window.Show();
         window.Activate();
     }
@@ -237,29 +297,28 @@ public partial class App : System.Windows.Application
         }
     }
 
-    private static void OpenSampleEditor(string? samplePath, string? dumpPath = null)
+    private static void OpenSampleEditor(string? samplePath, string? dumpPath, Settings settings, bool shutdownAfterDump)
     {
         var window = samplePath is { Length: > 0 }
-            ? OpenSampleCapture(samplePath)
-            : new EditorWindow(settings: Settings.Defaults())
+            ? OpenSampleCapture(samplePath, settings)
+            : new EditorWindow(settings: settings)
             {
                 Title = "scrcap",
             };
-        AttachDumpHook(window, dumpPath);
+        AttachDumpHook(window, dumpPath, shutdownAfterDump);
         window.Show();
         window.Activate();
     }
 
-    private static EditorWindow OpenSampleCapture(string samplePath)
+    private static EditorWindow OpenSampleCapture(string samplePath, Settings settings)
     {
         var bytes = File.ReadAllBytes(samplePath);
         var image = EditorWindow.DecodePng(bytes);
+        var metadata = new CaptureMetadata(CaptureMode.Region, Path.GetFileName(samplePath), null, DateTimeOffset.Now);
         return new EditorWindow(new CaptureResult(
-            bytes,
-            image.PixelWidth,
-            image.PixelHeight,
-            new CaptureMetadata(CaptureMode.Region, Path.GetFileName(samplePath), null, DateTimeOffset.Now)),
-            Settings.Defaults())
+            EditorWindow.CapturedPixelsFromBitmapSource(image, metadata),
+            metadata),
+            settings)
         {
             Title = "scrcap",
         };
@@ -278,7 +337,7 @@ public partial class App : System.Windows.Application
         return null;
     }
 
-    private static void AttachDumpHook(Window window, string? dumpPath)
+    private static void AttachDumpHook(Window window, string? dumpPath, bool shutdownAfterDump)
     {
         if (string.IsNullOrWhiteSpace(dumpPath))
         {
@@ -298,9 +357,52 @@ public partial class App : System.Windows.Application
                 Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(dumpPath))!);
                 using var stream = File.Create(dumpPath);
                 encoder.Save(stream);
+                if (shutdownAfterDump)
+                {
+                    window.Close();
+                }
             });
         };
     }
 
     private sealed record CaptureTarget(AppAction Action, PixelRect? Region, IntPtr? WindowHandle = null);
+
+    private sealed class Scope(Action dispose) : IDisposable
+    {
+        private bool disposed;
+
+        public void Dispose()
+        {
+            if (disposed)
+            {
+                return;
+            }
+
+            disposed = true;
+            dispose();
+        }
+    }
+
+    private sealed record StartupOptions(
+        bool TestMode,
+        string? DumpPath,
+        string? SettingsDirectory,
+        ThemeMode? AppTheme)
+    {
+        public static StartupOptions Parse(IReadOnlyList<string> args) =>
+            new(
+                args.Contains("--test-mode", StringComparer.OrdinalIgnoreCase),
+                TryGetOptionValue(args, "--dump-window-png"),
+                TryGetOptionValue(args, "--test-settings-dir"),
+                TryGetThemeMode(TryGetOptionValue(args, "--test-app-theme")));
+
+        private static ThemeMode? TryGetThemeMode(string? value) =>
+            value?.ToLowerInvariant() switch
+            {
+                "light" => ThemeMode.Light,
+                "dark" => ThemeMode.Dark,
+                "system" => ThemeMode.System,
+                _ => null,
+            };
+    }
 }

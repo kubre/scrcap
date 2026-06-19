@@ -43,5 +43,6 @@ xcuserdata/
 scrcap-windows/**/bin/
 scrcap-windows/**/obj/
 scrcap-windows/TestResults/
+scrcap-windows/**/TestResults/
 scrcap-windows/artifacts/
 scrcap-windows/src/Scrcap.Windows.UI/*_wpftmp.csproj

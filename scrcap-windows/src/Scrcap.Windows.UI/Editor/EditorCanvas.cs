@@ -16,6 +16,7 @@ namespace Scrcap.Windows.UI.Editor;
 
 public sealed class EditorCanvas : FrameworkElement
 {
+    private readonly PixelateRenderer pixelateRenderer = new();
     private WpfPoint? dragStart;
     private WpfPoint? dragCurrent;
     private Rect imageRect;
@@ -32,7 +33,7 @@ public sealed class EditorCanvas : FrameworkElement
             nameof(SourceBitmap),
             typeof(BitmapSource),
             typeof(EditorCanvas),
-            new FrameworkPropertyMetadata(null, FrameworkPropertyMetadataOptions.AffectsRender));
+            new FrameworkPropertyMetadata(null, FrameworkPropertyMetadataOptions.AffectsRender, SourceBitmapChanged));
 
     public EditorViewModel? ViewModel
     {
@@ -52,6 +53,7 @@ public sealed class EditorCanvas : FrameworkElement
 
     public CorePoint WindowPointToImagePoint(WpfPoint point)
     {
+        EnsureImageRect();
         if (ViewModel?.Document is null || imageRect.Width <= 0 || imageRect.Height <= 0)
         {
             return new CorePoint(0, 0);
@@ -64,7 +66,8 @@ public sealed class EditorCanvas : FrameworkElement
 
     public byte[] FlattenPng(int scale)
     {
-        if (ViewModel?.Document is not { } document || SourceBitmap is null)
+        var viewModel = ViewModel;
+        if (viewModel?.Document is not { } document || SourceBitmap is null)
         {
             return [];
         }
@@ -77,6 +80,11 @@ public sealed class EditorCanvas : FrameworkElement
         {
             context.PushTransform(new ScaleTransform(scale, scale));
             DrawDocument(context, document.Size, zoom: 1, includeBackground: true);
+            foreach (var shape in document.Shapes)
+            {
+                DrawShape(context, shape, viewModel, zoom: 1, exportScale: scale);
+            }
+
             context.Pop();
         }
 
@@ -92,6 +100,11 @@ public sealed class EditorCanvas : FrameworkElement
 
     protected override void OnMouseDown(MouseButtonEventArgs e)
     {
+        if (e.ChangedButton != MouseButton.Left || !IsImageHit(e.GetPosition(this)))
+        {
+            return;
+        }
+
         Focus();
         CaptureMouse();
         dragStart = e.GetPosition(this);
@@ -101,22 +114,22 @@ public sealed class EditorCanvas : FrameworkElement
 
     protected override void OnMouseMove(System.Windows.Input.MouseEventArgs e)
     {
-        if (dragStart is not null)
+        if (dragStart is not null && IsMouseCaptured)
         {
-            dragCurrent = e.GetPosition(this);
+            dragCurrent = AdjustWindowEndPoint(dragStart.Value, e.GetPosition(this), Keyboard.Modifiers);
             InvalidateVisual();
         }
     }
 
     protected override void OnMouseUp(MouseButtonEventArgs e)
     {
-        if (dragStart is not { } start || ViewModel is null)
+        if (e.ChangedButton != MouseButton.Left || dragStart is not { } start || ViewModel is null)
         {
             return;
         }
 
-        var end = e.GetPosition(this);
         ReleaseMouseCapture();
+        var end = AdjustWindowEndPoint(start, e.GetPosition(this), Keyboard.Modifiers);
         dragStart = null;
         dragCurrent = null;
 
@@ -204,10 +217,10 @@ public sealed class EditorCanvas : FrameworkElement
             viewModel.ActiveSize,
             start,
             end);
-        DrawShape(context, preview, viewModel, zoom: 1, isPreview: true);
+        DrawShape(context, preview, viewModel, zoom: 1);
     }
 
-    private void DrawShape(DrawingContext context, Shape shape, EditorViewModel viewModel, double zoom, bool isPreview = false)
+    private void DrawShape(DrawingContext context, Shape shape, EditorViewModel viewModel, double zoom, double exportScale = 1)
     {
         var color = ColorForShape(shape, viewModel);
         var brush = new SolidColorBrush(color);
@@ -217,11 +230,6 @@ public sealed class EditorCanvas : FrameworkElement
             EndLineCap = PenLineCap.Round,
             LineJoin = PenLineJoin.Round,
         };
-
-        if (isPreview)
-        {
-            pen.DashStyle = DashStyles.Dash;
-        }
 
         var start = ToPoint(shape.Start);
         var end = ToPoint(shape.End);
@@ -235,8 +243,7 @@ public sealed class EditorCanvas : FrameworkElement
                 context.DrawRoundedRectangle(null, pen, Normalize(start, end), 5, 5);
                 break;
             case ShapeKind.Pixelate:
-                DrawPixelate(context, Normalize(start, end));
-                context.DrawRoundedRectangle(null, pen, Normalize(start, end), 4, 4);
+                DrawPixelate(context, Normalize(start, end), exportScale);
                 break;
             case ShapeKind.Counter counter:
                 DrawCounter(context, brush, color, end, counter.Number, shape.Size.Scale());
@@ -249,7 +256,6 @@ public sealed class EditorCanvas : FrameworkElement
 
     private static void DrawArrow(DrawingContext context, WpfPen pen, WpfPoint start, WpfPoint end, double scale)
     {
-        context.DrawLine(pen, start, end);
         var dx = end.X - start.X;
         var dy = end.Y - start.Y;
         var length = Math.Sqrt(dx * dx + dy * dy);
@@ -260,22 +266,41 @@ public sealed class EditorCanvas : FrameworkElement
 
         var unitX = dx / length;
         var unitY = dy / length;
-        var headLength = Math.Clamp(length * 0.25, 10 * scale, 28 * scale);
-        const double spread = Math.PI / 7;
-        DrawArrowHeadLine(context, pen, end, unitX, unitY, headLength, spread);
-        DrawArrowHeadLine(context, pen, end, unitX, unitY, headLength, -spread);
+        var headLength = Math.Clamp(length * 0.18, 9 * scale, 26 * scale);
+        var shaftEnd = new WpfPoint(end.X - unitX * headLength * 0.6, end.Y - unitY * headLength * 0.6);
+        context.DrawLine(pen, start, shaftEnd);
+
+        var angle = Math.Atan2(unitY, unitX);
+        const double spread = 0.46;
+        var figure = new PathFigure { StartPoint = end, IsClosed = true, IsFilled = true };
+        figure.Segments.Add(new LineSegment(new WpfPoint(
+            end.X - headLength * Math.Cos(angle - spread),
+            end.Y - headLength * Math.Sin(angle - spread)), true));
+        figure.Segments.Add(new LineSegment(new WpfPoint(
+            end.X - headLength * Math.Cos(angle + spread),
+            end.Y - headLength * Math.Sin(angle + spread)), true));
+        context.DrawGeometry(pen.Brush, null, new PathGeometry([figure]));
     }
 
-    private static void DrawArrowHeadLine(DrawingContext context, WpfPen pen, WpfPoint end, double unitX, double unitY, double length, double angle)
+    private WpfPoint AdjustWindowEndPoint(WpfPoint start, WpfPoint end, ModifierKeys modifiers)
     {
-        var cos = Math.Cos(angle);
-        var sin = Math.Sin(angle);
-        var x = unitX * cos - unitY * sin;
-        var y = unitX * sin + unitY * cos;
-        context.DrawLine(pen, end, new WpfPoint(end.X - x * length, end.Y - y * length));
+        if (ViewModel is null || !modifiers.HasFlag(ModifierKeys.Shift))
+        {
+            return end;
+        }
+
+        var startImage = WindowPointToImagePoint(start);
+        var endImage = WindowPointToImagePoint(end);
+        endImage = ViewModel.ActiveTool switch
+        {
+            EditorTool.Rectangle => ConstrainToSquare(startImage, endImage),
+            EditorTool.Arrow => SnapTo45Degrees(startImage, endImage),
+            _ => endImage,
+        };
+        return ImagePointToWindowPoint(endImage);
     }
 
-    private void DrawPixelate(DrawingContext context, Rect rect)
+    private void DrawPixelate(DrawingContext context, Rect rect, double exportScale)
     {
         if (SourceBitmap is null || rect.Width <= 1 || rect.Height <= 1)
         {
@@ -283,26 +308,13 @@ public sealed class EditorCanvas : FrameworkElement
         }
 
         var clipped = Rect.Intersect(rect, new Rect(0, 0, SourceBitmap.PixelWidth, SourceBitmap.PixelHeight));
-        if (clipped.IsEmpty)
+        if (clipped.IsEmpty || !PixelateRenderer.TryGetPixelBounds(clipped, SourceBitmap, out var bounds))
         {
             return;
         }
 
-        context.PushClip(new RectangleGeometry(clipped));
-        for (var y = clipped.Top; y < clipped.Bottom; y += 9)
-        {
-            for (var x = clipped.Left; x < clipped.Right; x += 9)
-            {
-                var sampleX = Math.Clamp((int)Math.Round(x), 0, SourceBitmap.PixelWidth - 1);
-                var sampleY = Math.Clamp((int)Math.Round(y), 0, SourceBitmap.PixelHeight - 1);
-                var pixels = new byte[4];
-                SourceBitmap.CopyPixels(new Int32Rect(sampleX, sampleY, 1, 1), pixels, 4, 0);
-                var color = WpfColor.FromArgb(255, pixels[2], pixels[1], pixels[0]);
-                context.DrawRectangle(new SolidColorBrush(color), null, new Rect(x, y, Math.Min(9, clipped.Right - x), Math.Min(9, clipped.Bottom - y)));
-            }
-        }
-
-        context.Pop();
+        var bitmap = pixelateRenderer.Render(SourceBitmap, bounds, blockSize: 9, exportScale);
+        context.DrawImage(bitmap, new Rect(bounds.X, bounds.Y, bounds.Width, bounds.Height));
     }
 
     private void DrawCounter(DrawingContext context, WpfBrush brush, WpfColor color, WpfPoint center, int number, double scale)
@@ -366,6 +378,55 @@ public sealed class EditorCanvas : FrameworkElement
         return new Rect(Math.Max(0, (available.Width - width) / 2), Math.Max(0, (available.Height - height) / 2), width, height);
     }
 
+    private bool IsImageHit(WpfPoint point)
+    {
+        EnsureImageRect();
+        return ViewModel?.Document is not null && SourceBitmap is not null && imageRect.Contains(point);
+    }
+
+    private void EnsureImageRect()
+    {
+        if (ViewModel?.Document is not { } document)
+        {
+            return;
+        }
+
+        var width = RenderSize.Width > 0 ? RenderSize.Width : ActualWidth > 0 ? ActualWidth : Width;
+        var height = RenderSize.Height > 0 ? RenderSize.Height : ActualHeight > 0 ? ActualHeight : Height;
+        if (width > 0 && height > 0)
+        {
+            imageRect = ImageRect(document.Size, new WpfSize(width, height), ViewModel.Zoom);
+        }
+    }
+
+    private WpfPoint ImagePointToWindowPoint(CorePoint point) =>
+        new(imageRect.X + point.X * (ViewModel?.Zoom ?? 1), imageRect.Y + point.Y * (ViewModel?.Zoom ?? 1));
+
+    private static CorePoint ConstrainToSquare(CorePoint start, CorePoint end)
+    {
+        var side = Math.Max(Math.Abs(end.X - start.X), Math.Abs(end.Y - start.Y));
+        return new CorePoint(
+            start.X + side * (end.X >= start.X ? 1 : -1),
+            start.Y + side * (end.Y >= start.Y ? 1 : -1));
+    }
+
+    private static CorePoint SnapTo45Degrees(CorePoint start, CorePoint end)
+    {
+        var dx = end.X - start.X;
+        var dy = end.Y - start.Y;
+        var length = Math.Sqrt(dx * dx + dy * dy);
+        if (length < 0.001)
+        {
+            return end;
+        }
+
+        var angle = Math.Atan2(dy, dx);
+        var snapped = Math.Round(angle / (Math.PI / 4)) * (Math.PI / 4);
+        return new CorePoint(
+            start.X + Math.Cos(snapped) * length,
+            start.Y + Math.Sin(snapped) * length);
+    }
+
     private static WpfPoint ToPoint(CorePoint point) => new(point.X, point.Y);
 
     private static Rect Normalize(WpfPoint a, WpfPoint b) =>
@@ -373,4 +434,12 @@ public sealed class EditorCanvas : FrameworkElement
 
     private static double Luma(WpfColor color) =>
         ((0.2126 * color.R) + (0.7152 * color.G) + (0.0722 * color.B)) / 255;
+
+    private static void SourceBitmapChanged(DependencyObject dependencyObject, DependencyPropertyChangedEventArgs eventArgs)
+    {
+        if (dependencyObject is EditorCanvas canvas)
+        {
+            canvas.pixelateRenderer.Clear();
+        }
+    }
 }

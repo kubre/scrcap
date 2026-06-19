@@ -11,12 +11,13 @@ public partial class PreferencesWindow : Window
 {
     public PreferencesWindow(SettingsStore store)
     {
-        InitializeComponent();
-        DataContext = new PreferencesViewModel(store);
         if (System.Windows.Application.Current is { } app)
         {
             AppThemeService.Apply(app.Resources, store.Settings.ThemeMode);
         }
+
+        InitializeComponent();
+        DataContext = new PreferencesViewModel(store);
     }
 
     private void Save_Click(object sender, RoutedEventArgs e)

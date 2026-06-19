@@ -11,9 +11,230 @@
         WindowStartupLocation="CenterOwner"
         Background="{StaticResource BrushChrome}">
   <Window.Resources>
+    <Style TargetType="TextBlock">
+      <Setter Property="Foreground" Value="{StaticResource BrushInk}" />
+      <Setter Property="FontFamily" Value="{StaticResource FontUi}" />
+      <Setter Property="FontSize" Value="{StaticResource FontSizeBody}" />
+    </Style>
     <Style x:Key="RowLabel" TargetType="TextBlock">
+      <Setter Property="FontFamily" Value="{StaticResource FontUi}" />
+      <Setter Property="FontSize" Value="11" />
+      <Setter Property="FontWeight" Value="Bold" />
       <Setter Property="Foreground" Value="{StaticResource BrushMuted}" />
-      <Setter Property="Margin" Value="0,10,0,4" />
+      <Setter Property="Margin" Value="0,12,0,5" />
+    </Style>
+    <Style TargetType="Button">
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="BorderBrush" Value="{StaticResource BrushHairline}" />
+      <Setter Property="BorderThickness" Value="{StaticResource MetricBorderThickness}" />
+      <Setter Property="Foreground" Value="{StaticResource BrushInk}" />
+      <Setter Property="FontFamily" Value="{StaticResource FontUi}" />
+      <Setter Property="FontSize" Value="{StaticResource FontSizeBody}" />
+      <Setter Property="Padding" Value="{StaticResource MetricToolbarButtonPadding}" />
+      <Setter Property="Height" Value="26" />
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="Button">
+            <Border x:Name="Chrome"
+                    Background="{TemplateBinding Background}"
+                    BorderBrush="{TemplateBinding BorderBrush}"
+                    BorderThickness="{TemplateBinding BorderThickness}"
+                    CornerRadius="{StaticResource MetricChromeButtonRadius}">
+              <ContentPresenter HorizontalAlignment="Center"
+                                VerticalAlignment="Center"
+                                Margin="{TemplateBinding Padding}" />
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsMouseOver" Value="True">
+                <Setter TargetName="Chrome" Property="Background" Value="{StaticResource BrushHover}" />
+                <Setter TargetName="Chrome" Property="BorderBrush" Value="{StaticResource BrushAccent}" />
+              </Trigger>
+              <Trigger Property="IsPressed" Value="True">
+                <Setter TargetName="Chrome" Property="Background" Value="{StaticResource BrushPressed}" />
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+    <Style TargetType="TextBox">
+      <Setter Property="Background" Value="{StaticResource BrushWell}" />
+      <Setter Property="BorderBrush" Value="{StaticResource BrushHairline}" />
+      <Setter Property="BorderThickness" Value="{StaticResource MetricBorderThickness}" />
+      <Setter Property="Foreground" Value="{StaticResource BrushInk}" />
+      <Setter Property="FontFamily" Value="{StaticResource FontUi}" />
+      <Setter Property="FontSize" Value="{StaticResource FontSizeBody}" />
+      <Setter Property="Height" Value="28" />
+      <Setter Property="Padding" Value="8,2" />
+      <Setter Property="VerticalContentAlignment" Value="Center" />
+    </Style>
+    <Style TargetType="ComboBox">
+      <Setter Property="Background" Value="{StaticResource BrushWell}" />
+      <Setter Property="BorderBrush" Value="{StaticResource BrushHairline}" />
+      <Setter Property="BorderThickness" Value="{StaticResource MetricBorderThickness}" />
+      <Setter Property="Foreground" Value="{StaticResource BrushInk}" />
+      <Setter Property="FontFamily" Value="{StaticResource FontUi}" />
+      <Setter Property="FontSize" Value="{StaticResource FontSizeBody}" />
+      <Setter Property="Height" Value="28" />
+      <Setter Property="Padding" Value="9,0,30,0" />
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="ComboBox">
+            <Grid>
+              <Border x:Name="Chrome"
+                      Background="{TemplateBinding Background}"
+                      BorderBrush="{TemplateBinding BorderBrush}"
+                      BorderThickness="{TemplateBinding BorderThickness}"
+                      SnapsToDevicePixels="True">
+                <Grid>
+                  <ContentPresenter x:Name="ContentSite"
+                                    Content="{TemplateBinding SelectionBoxItem}"
+                                    ContentTemplate="{TemplateBinding SelectionBoxItemTemplate}"
+                                    ContentStringFormat="{TemplateBinding SelectionBoxItemStringFormat}"
+                                    IsHitTestVisible="False"
+                                    Margin="{TemplateBinding Padding}"
+                                    VerticalAlignment="Center" />
+                  <Path Width="{StaticResource MetricComboArrowWidth}"
+                        Height="{StaticResource MetricComboArrowHeight}"
+                        HorizontalAlignment="Right"
+                        VerticalAlignment="Center"
+                        Margin="{StaticResource MetricComboArrowMargin}"
+                        Data="M 0 0 L 4 4 L 8 0 Z"
+                        Fill="{TemplateBinding Foreground}" />
+                </Grid>
+              </Border>
+              <ToggleButton Background="Transparent"
+                            BorderThickness="{StaticResource MetricNoThickness}"
+                            Focusable="False"
+                            IsChecked="{Binding IsDropDownOpen, RelativeSource={RelativeSource TemplatedParent}, Mode=TwoWay}"
+                            ClickMode="Press" />
+              <Popup x:Name="PART_Popup"
+                     AllowsTransparency="True"
+                     Focusable="False"
+                     IsOpen="{TemplateBinding IsDropDownOpen}"
+                     Placement="Bottom"
+                     PopupAnimation="Fade">
+                <Border MinWidth="{Binding ActualWidth, RelativeSource={RelativeSource TemplatedParent}}"
+                        MaxHeight="{TemplateBinding MaxDropDownHeight}"
+                        Background="{StaticResource BrushWell}"
+                        BorderBrush="{StaticResource BrushRule}"
+                        BorderThickness="{StaticResource MetricBorderThickness}"
+                        SnapsToDevicePixels="True">
+                  <ScrollViewer CanContentScroll="True">
+                    <ItemsPresenter />
+                  </ScrollViewer>
+                </Border>
+              </Popup>
+            </Grid>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsMouseOver" Value="True">
+                <Setter TargetName="Chrome" Property="BorderBrush" Value="{StaticResource BrushAccent}" />
+              </Trigger>
+              <Trigger Property="IsKeyboardFocusWithin" Value="True">
+                <Setter TargetName="Chrome" Property="BorderBrush" Value="{StaticResource BrushAccent}" />
+              </Trigger>
+              <Trigger Property="IsEnabled" Value="False">
+                <Setter Property="Opacity" Value="0.55" />
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+    <Style TargetType="ComboBoxItem">
+      <Setter Property="Background" Value="{StaticResource BrushWell}" />
+      <Setter Property="Foreground" Value="{StaticResource BrushInk}" />
+      <Setter Property="FontFamily" Value="{StaticResource FontUi}" />
+      <Setter Property="FontSize" Value="{StaticResource FontSizeBody}" />
+      <Setter Property="Padding" Value="9,5" />
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="ComboBoxItem">
+            <Border x:Name="Chrome"
+                    Background="{TemplateBinding Background}"
+                    Padding="{TemplateBinding Padding}">
+              <ContentPresenter />
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsHighlighted" Value="True">
+                <Setter TargetName="Chrome" Property="Background" Value="{StaticResource BrushHover}" />
+              </Trigger>
+              <Trigger Property="IsSelected" Value="True">
+                <Setter TargetName="Chrome" Property="Background" Value="{StaticResource BrushActiveWash}" />
+                <Setter Property="Foreground" Value="{StaticResource BrushAccent}" />
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+    <Style TargetType="CheckBox">
+      <Setter Property="Foreground" Value="{StaticResource BrushInk}" />
+      <Setter Property="FontFamily" Value="{StaticResource FontUi}" />
+      <Setter Property="FontSize" Value="{StaticResource FontSizeBody}" />
+    </Style>
+    <Style TargetType="ScrollViewer">
+      <Setter Property="Background" Value="{StaticResource BrushWell}" />
+    </Style>
+    <Style TargetType="TabControl">
+      <Setter Property="Background" Value="{StaticResource BrushWell}" />
+      <Setter Property="BorderBrush" Value="Transparent" />
+      <Setter Property="Foreground" Value="{StaticResource BrushInk}" />
+      <Setter Property="FontFamily" Value="{StaticResource FontUi}" />
+      <Setter Property="FontSize" Value="{StaticResource FontSizeBody}" />
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="TabControl">
+            <DockPanel LastChildFill="True">
+              <Border DockPanel.Dock="Top"
+                      Height="{StaticResource MetricToolbarHeight}"
+                      Background="{StaticResource BrushChrome}"
+                      BorderBrush="{StaticResource BrushRule}"
+                      BorderThickness="0,0,0,1">
+                <TabPanel IsItemsHost="True"
+                          VerticalAlignment="Stretch"
+                          KeyboardNavigation.TabIndex="1" />
+              </Border>
+              <Border Background="{StaticResource BrushWell}">
+                <ContentPresenter ContentSource="SelectedContent" />
+              </Border>
+            </DockPanel>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+    <Style TargetType="TabItem">
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="BorderBrush" Value="Transparent" />
+      <Setter Property="Foreground" Value="{StaticResource BrushInk}" />
+      <Setter Property="FontWeight" Value="SemiBold" />
+      <Setter Property="Padding" Value="14,0" />
+      <Setter Property="Height" Value="{StaticResource MetricToolbarHeight}" />
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="TabItem">
+            <Border x:Name="Chrome"
+                    Background="{TemplateBinding Background}"
+                    BorderBrush="{TemplateBinding BorderBrush}"
+                    BorderThickness="0,0,1,0"
+                    MinWidth="{StaticResource MetricPreferencesTabMinWidth}">
+              <ContentPresenter ContentSource="Header"
+                                HorizontalAlignment="Center"
+                                VerticalAlignment="Center"
+                                Margin="{TemplateBinding Padding}" />
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsMouseOver" Value="True">
+                <Setter TargetName="Chrome" Property="Background" Value="{StaticResource BrushHover}" />
+              </Trigger>
+              <Trigger Property="IsSelected" Value="True">
+                <Setter TargetName="Chrome" Property="Background" Value="{StaticResource BrushActiveWash}" />
+                <Setter Property="Foreground" Value="{StaticResource BrushAccent}" />
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
     </Style>
   </Window.Resources>
   <Border BorderBrush="{StaticResource BrushRule}"
@@ -23,38 +244,67 @@
     <DockPanel LastChildFill="True">
       <Grid DockPanel.Dock="Top"
             Height="{StaticResource MetricHeaderHeight}"
-            Background="{StaticResource BrushPanel}"
+            Background="{StaticResource BrushChrome}"
             MouseLeftButtonDown="DragSurface_MouseLeftButtonDown">
         <Grid.ColumnDefinitions>
           <ColumnDefinition Width="*" />
           <ColumnDefinition Width="Auto" />
         </Grid.ColumnDefinitions>
-        <TextBlock Text="scrcap Preferences"
-                   VerticalAlignment="Center"
-                   Margin="{StaticResource MetricHeaderMargin}"
-                   FontFamily="{StaticResource FontUi}"
-                   FontSize="{StaticResource FontSizeTitle}"
-                   FontWeight="Bold"
-                   Foreground="{StaticResource BrushInk}" />
+        <Rectangle Grid.ColumnSpan="2"
+                   VerticalAlignment="Bottom"
+                   Height="{StaticResource MetricSeparatorWidth}"
+                   Fill="{StaticResource BrushRule}" />
+        <StackPanel Orientation="Horizontal"
+                    VerticalAlignment="Center"
+                    Margin="{StaticResource MetricHeaderBrandMargin}">
+          <Border Width="{StaticResource MetricLogoGlyphSize}"
+                  Height="{StaticResource MetricLogoGlyphSize}"
+                  BorderBrush="{StaticResource BrushInk}"
+                  BorderThickness="{StaticResource MetricBorderThickness}"
+                  CornerRadius="{StaticResource MetricLogoRadius}"
+                  Margin="{StaticResource MetricLogoMargin}">
+            <Grid>
+              <Rectangle Width="{StaticResource MetricLogoDotSize}" Height="{StaticResource MetricLogoDotSize}" Fill="{StaticResource BrushInk}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+              <Rectangle Width="{StaticResource MetricLogoLineSize}" Fill="{StaticResource BrushInk}" HorizontalAlignment="Center" />
+              <Rectangle Height="{StaticResource MetricLogoLineSize}" Fill="{StaticResource BrushInk}" VerticalAlignment="Center" />
+            </Grid>
+          </Border>
+          <TextBlock Text="SCRCAP"
+                     VerticalAlignment="Center"
+                     FontFamily="{StaticResource FontUi}"
+                     FontSize="{StaticResource FontSizeBrand}"
+                     FontWeight="Black"
+                     Foreground="{StaticResource BrushInk}" />
+          <TextBlock Text="Preferences"
+                     VerticalAlignment="Center"
+                     Margin="{StaticResource MetricPreferencesSubtitleMargin}"
+                     FontFamily="{StaticResource FontUi}"
+                     FontSize="{StaticResource FontSizeSmall}"
+                     FontWeight="SemiBold"
+                     Foreground="{StaticResource BrushMuted}" />
+        </StackPanel>
         <Button Grid.Column="1"
                 AutomationProperties.AutomationId="ClosePreferences"
                 AutomationProperties.Name="Close preferences"
-                Content="X"
+                Content="&#xE711;"
+                FontFamily="{StaticResource FontIcon}"
                 Width="{StaticResource MetricIconButtonWidth}"
                 Height="{StaticResource MetricIconButtonHeight}"
-                Margin="{StaticResource MetricButtonGapRight}"
+                Margin="{StaticResource MetricPreferencesCloseMargin}"
                 Click="Close_Click" />
       </Grid>
 
       <StackPanel DockPanel.Dock="Bottom"
                   Orientation="Horizontal"
                   HorizontalAlignment="Right"
-                  Margin="{StaticResource MetricWindowMargin}">
+                  Background="{StaticResource BrushChrome}"
+                  Margin="{StaticResource MetricToolbarButtonMargin}"
+                  Height="{StaticResource MetricToolbarHeight}">
         <Button AutomationProperties.AutomationId="ResetAllPreferences"
                 AutomationProperties.Name="Reset all settings"
                 Content="Reset all"
                 MinWidth="{StaticResource MetricCommandButtonMinWidth}"
-                Margin="{StaticResource MetricButtonGapRight}"
+                Margin="{StaticResource MetricPreferencesResetMargin}"
                 BorderBrush="{StaticResource BrushDanger}"
                 Foreground="{StaticResource BrushDanger}"
                 Click="ResetAll_Click" />
@@ -62,11 +312,12 @@
                 AutomationProperties.Name="Save preferences"
                 Content="Save"
                 MinWidth="{StaticResource MetricCommandButtonMinWidth}"
+                Margin="{StaticResource MetricPreferencesSaveMargin}"
                 Click="Save_Click" />
       </StackPanel>
 
       <TabControl AutomationProperties.AutomationId="PreferencesTabs"
-                  Margin="{StaticResource MetricWindowMargin}">
+                  Margin="{StaticResource MetricToolbarButtonMargin}">
         <TabItem Header="General">
           <ScrollViewer VerticalScrollBarVisibility="Auto">
             <StackPanel Margin="{StaticResource MetricPanelMargin}">

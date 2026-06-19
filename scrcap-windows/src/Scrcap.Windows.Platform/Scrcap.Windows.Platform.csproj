@@ -7,4 +7,7 @@
   <ItemGroup>
     <ProjectReference Include="..\Scrcap.Core\Scrcap.Core.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="Tray\Assets\*.ico" LogicalName="Scrcap.Windows.Platform.Tray.Assets.%(Filename)%(Extension)" />
+  </ItemGroup>
 </Project>

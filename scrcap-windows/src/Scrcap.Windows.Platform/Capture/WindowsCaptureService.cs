@@ -10,6 +10,8 @@ public sealed class WindowsCaptureService : IWindowsCaptureService
 {
     private readonly WindowsGraphicsCaptureBackend graphicsCapture;
     private readonly GdiCaptureFallback gdiFallback;
+    private readonly Func<PixelRect, CaptureRequest, CancellationToken, Task<BackendCapture>>? captureRegionBitmapOverride;
+    private readonly Action<PixelRect, int>? scrollDownOverride;
 
     public WindowsCaptureService()
         : this(new WindowsGraphicsCaptureBackend(), new GdiCaptureFallback())
@@ -22,15 +24,22 @@ public sealed class WindowsCaptureService : IWindowsCaptureService
         this.gdiFallback = gdiFallback;
     }
 
+    internal WindowsCaptureService(
+        Func<PixelRect, CaptureRequest, CancellationToken, Task<Bitmap>> captureRegionBitmap,
+        Action<PixelRect, int>? scrollDown = null)
+        : this(new WindowsGraphicsCaptureBackend(), new GdiCaptureFallback())
+    {
+        captureRegionBitmapOverride = async (rect, request, token) =>
+            new BackendCapture(await captureRegionBitmap(rect, request, token).ConfigureAwait(false), CaptureBackendUsed.Gdi, null);
+        scrollDownOverride = scrollDown;
+    }
+
     public async Task<CaptureResult> CaptureRegionAsync(PixelRect rect, CaptureRequest request, CancellationToken cancellationToken)
     {
         await DelayIfNeeded(request, cancellationToken).ConfigureAwait(false);
-        using var bitmap = await CaptureRegionBitmapAsync(rect, request.IncludeCursor, cancellationToken).ConfigureAwait(false);
-        return new CaptureResult(
-            EncodePng(bitmap),
-            rect.Width,
-            rect.Height,
-            new CaptureMetadata(CaptureMode.Region, null, rect, DateTimeOffset.Now));
+        using var capture = await CaptureRegionBitmapAsync(rect, request, cancellationToken).ConfigureAwait(false);
+        var metadata = Metadata(CaptureMode.Region, null, rect, request, capture);
+        return CreateResult(capture.Bitmap, metadata);
     }
 
     public Task<CaptureResult> CaptureActiveWindowAsync(CaptureRequest request, CancellationToken cancellationToken)
@@ -48,25 +57,22 @@ public sealed class WindowsCaptureService : IWindowsCaptureService
     {
         await DelayIfNeeded(request, cancellationToken).ConfigureAwait(false);
         var rect = WindowSelectionService.WindowBounds(hwnd);
-        using var bitmap = await CaptureWindowBitmapAsync(hwnd, rect, request.IncludeCursor, cancellationToken).ConfigureAwait(false);
-        using var composed = ComposeWindowBitmap(bitmap, request);
-        return new CaptureResult(
-            EncodePng(composed),
-            composed.Width,
-            composed.Height,
-            new CaptureMetadata(CaptureMode.Window, WindowSelectionService.WindowTitle(hwnd), rect, DateTimeOffset.Now));
+        using var capture = await CaptureWindowBitmapAsync(hwnd, rect, request, cancellationToken).ConfigureAwait(false);
+        using var composed = WindowBitmapComposer.Compose(capture.Bitmap, request);
+        var captureBounds = request.IncludeWindowShadow
+            ? new PixelRect(rect.X - WindowBitmapComposer.ShadowPadding, rect.Y - WindowBitmapComposer.ShadowPadding, composed.Width, composed.Height)
+            : rect;
+        var metadata = Metadata(CaptureMode.Window, WindowSelectionService.WindowTitle(hwnd), rect, request, capture, captureBounds);
+        return CreateResult(composed, metadata);
     }
 
     public async Task<CaptureResult> CaptureMonitorUnderCursorAsync(CaptureRequest request, CancellationToken cancellationToken)
     {
         await DelayIfNeeded(request, cancellationToken).ConfigureAwait(false);
         var monitor = MonitorSelection.FromPoint(Cursor.Position);
-        using var bitmap = await CaptureMonitorBitmapAsync(monitor, request.IncludeCursor, cancellationToken).ConfigureAwait(false);
-        return new CaptureResult(
-            EncodePng(bitmap),
-            bitmap.Width,
-            bitmap.Height,
-            new CaptureMetadata(CaptureMode.Fullscreen, monitor.DeviceName, monitor.Bounds, DateTimeOffset.Now));
+        using var capture = await CaptureMonitorBitmapAsync(monitor, request, cancellationToken).ConfigureAwait(false);
+        var metadata = Metadata(CaptureMode.Fullscreen, monitor.DeviceName, monitor.Bounds, request, capture);
+        return CreateResult(capture.Bitmap, metadata);
     }
 
     public async Task<CaptureResult> CaptureScrollingRegionAsync(PixelRect rect, CaptureRequest request, ScrollingCaptureOptions options, CancellationToken cancellationToken)
@@ -77,15 +83,35 @@ public sealed class WindowsCaptureService : IWindowsCaptureService
         IReadOnlyList<ulong>? firstFrameHashes = null;
         IReadOnlyList<ulong>? previousFrameHashes = null;
         var bottomProbeCount = 0;
-        var maxRows = Math.Max(rect.Height, options.MaxHeight);
+        var maxRows = Math.Max(1, options.MaxHeight);
+        var backendUsed = CaptureBackendUsed.WindowsGraphicsCapture;
+        string? fallbackReason = null;
+        var stopReason = ScrollingCaptureStopReason.Completed;
 
         try
         {
-            while (TotalHeight(frames) < maxRows && EstimatedBytes(frames, rect.Width) < options.MemoryCapBytes)
+            while (true)
             {
+                var totalHeight = TotalHeight(frames);
+                if (totalHeight >= maxRows)
+                {
+                    stopReason = ScrollingCaptureStopReason.MaxHeightReached;
+                    ReportProgress(options, frames, rect.Width, maxRows, stopReason);
+                    break;
+                }
+
+                if (!CanRetainExtraRows(frames, rect.Width, rect.Height, options.MemoryCapBytes))
+                {
+                    stopReason = ScrollingCaptureStopReason.MemoryCapReached;
+                    ReportProgress(options, frames, rect.Width, maxRows, stopReason);
+                    break;
+                }
+
                 cancellationToken.ThrowIfCancellationRequested();
-                using var rawFrame = await CaptureRegionBitmapAsync(rect, request.IncludeCursor && frames.Count == 0, cancellationToken).ConfigureAwait(false);
-                var frame = CloneBitmap(rawFrame);
+                var frameRequest = request with { IncludeCursor = request.IncludeCursor && frames.Count == 0 };
+                using var rawCapture = await CaptureScrollingFrameBitmapAsync(rect, frameRequest, options, cancellationToken).ConfigureAwait(false);
+                RecordBackend(rawCapture, ref backendUsed, ref fallbackReason);
+                var frame = CloneBitmap(rawCapture.Bitmap);
                 var hashes = RowHashes(frame);
 
                 if (frames.Count == 0)
@@ -94,29 +120,48 @@ public sealed class WindowsCaptureService : IWindowsCaptureService
                     firstFrameHashes = hashes;
                     previousFrameHashes = hashes;
                     accumulatedHashes.AddRange(hashes);
-                    options.Progress?.Report(new ScrollingCaptureProgress(frames.Count, TotalHeight(frames), maxRows));
+                    ReportProgress(options, frames, rect.Width, maxRows);
                 }
                 else
                 {
                     var stickyRows = ScrollingFramePlanner.DetectStickyHeaderRows(firstFrameHashes ?? [], hashes, options.StickyHeaderMaxPixels);
                     var newContentStart = ScrollingFramePlanner.FindNewContentStart(accumulatedHashes, hashes, stickyRows);
 
-                    if (newContentStart is null || newContentStart.Value >= frame.Height)
+                    if (newContentStart is null)
                     {
                         frame.Dispose();
-                        bottomProbeCount++;
+                        stopReason = ScrollingCaptureStopReason.AlignmentFailed;
+                        ReportProgress(options, frames, rect.Width, maxRows, stopReason);
+                        break;
+                    }
+
+                    var noNewRows = newContentStart.Value >= frame.Height;
+                    if (noNewRows)
+                    {
+                        frame.Dispose();
                     }
                     else
                     {
                         var top = Math.Clamp(newContentStart.Value, 0, frame.Height - 1);
-                        frames.Add(CropBitmap(frame, new Rectangle(0, top, frame.Width, frame.Height - top)));
+                        var cropped = CropBitmap(frame, new Rectangle(0, top, frame.Width, frame.Height - top));
+                        if (!CanRetainExtraRows(frames, rect.Width, cropped.Height, options.MemoryCapBytes))
+                        {
+                            cropped.Dispose();
+                            frame.Dispose();
+                            stopReason = ScrollingCaptureStopReason.MemoryCapReached;
+                            ReportProgress(options, frames, rect.Width, maxRows, stopReason);
+                            break;
+                        }
+
+                        frames.Add(cropped);
                         accumulatedHashes.AddRange(hashes.Skip(top));
                         frame.Dispose();
                         bottomProbeCount = 0;
-                        options.Progress?.Report(new ScrollingCaptureProgress(frames.Count, TotalHeight(frames), maxRows));
+                        ReportProgress(options, frames, rect.Width, maxRows);
                     }
 
-                    if (previousFrameHashes is not null && ScrollingFramePlanner.RowsEqual(previousFrameHashes, hashes))
+                    var repeatedFrame = previousFrameHashes is not null && ScrollingFramePlanner.RowsEqual(previousFrameHashes, hashes);
+                    if (noNewRows || repeatedFrame)
                     {
                         bottomProbeCount++;
                     }
@@ -126,19 +171,49 @@ public sealed class WindowsCaptureService : IWindowsCaptureService
 
                 if (bottomProbeCount >= options.BottomProbeFrames)
                 {
+                    stopReason = ScrollingCaptureStopReason.BottomReached;
+                    ReportProgress(options, frames, rect.Width, maxRows, stopReason);
                     break;
                 }
 
-                ScrollDown(rect, Math.Max(1, (int)Math.Floor(rect.Height * options.ScrollStepRatio)));
-                await WaitForScrollSettleAsync(rect, request, options, cancellationToken).ConfigureAwait(false);
+                (scrollDownOverride ?? ScrollDown)(rect, Math.Max(1, (int)Math.Floor(rect.Height * options.ScrollStepRatio)));
+                if (!await WaitForScrollSettleAsync(rect, request, options, cancellationToken).ConfigureAwait(false))
+                {
+                    stopReason = ScrollingCaptureStopReason.Timeout;
+                    ReportProgress(options, frames, rect.Width, maxRows, stopReason);
+                    break;
+                }
             }
 
-            using var stitched = StitchFrames(frames, rect.Width, Math.Min(options.MaxHeight, TotalHeight(frames)));
-            return new CaptureResult(
-                EncodePng(stitched),
-                stitched.Width,
-                stitched.Height,
-                new CaptureMetadata(CaptureMode.Scrolling, null, rect, DateTimeOffset.Now));
+            if (frames.Count == 0)
+            {
+                throw new InvalidOperationException("Scrolling capture did not produce a valid frame.");
+            }
+
+            ReportProgress(options, frames, rect.Width, maxRows, stopReason);
+            return CreateScrollingResult(frames, rect, request, options, backendUsed, fallbackReason, stopReason);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            ReportProgress(options, frames, rect.Width, maxRows, ScrollingCaptureStopReason.Cancelled);
+            if (frames.Count > 0)
+            {
+                return CreateScrollingResult(
+                    frames,
+                    rect,
+                    request,
+                    options,
+                    backendUsed,
+                    fallbackReason,
+                    ScrollingCaptureStopReason.Cancelled);
+            }
+
+            throw;
+        }
+        catch
+        {
+            ReportProgress(options, frames, rect.Width, maxRows, ScrollingCaptureStopReason.CaptureFailed);
+            throw;
         }
         finally
         {
@@ -149,53 +224,112 @@ public sealed class WindowsCaptureService : IWindowsCaptureService
         }
     }
 
-    private async Task<Bitmap> CaptureRegionBitmapAsync(PixelRect rect, bool includeCursor, CancellationToken cancellationToken)
+    private async Task<BackendCapture> CaptureRegionBitmapAsync(PixelRect rect, CaptureRequest request, CancellationToken cancellationToken)
     {
         ValidateRect(rect);
+        if (captureRegionBitmapOverride is not null)
+        {
+            return await captureRegionBitmapOverride(rect, request, cancellationToken).ConfigureAwait(false);
+        }
+
+        if (request.BackendPreference == CaptureBackendPreference.Gdi)
+        {
+            return new BackendCapture(gdiFallback.CaptureScreenRect(rect, request.IncludeCursor), CaptureBackendUsed.Gdi, null);
+        }
+
         var monitor = MonitorSelection.FromRect(rect);
         if (!monitor.Bounds.Contains(rect))
         {
-            return gdiFallback.CaptureScreenRect(rect, includeCursor);
+            const string reason = "Capture rectangle spans multiple monitors; using GDI fallback.";
+            if (request.BackendPreference == CaptureBackendPreference.WindowsGraphicsCapture)
+            {
+                throw new InvalidOperationException(reason);
+            }
+
+            return new BackendCapture(gdiFallback.CaptureScreenRect(rect, request.IncludeCursor), CaptureBackendUsed.Gdi, reason);
         }
 
         try
         {
-            using var monitorBitmap = await graphicsCapture.CaptureMonitorAsync(monitor.Handle, includeCursor, cancellationToken).ConfigureAwait(false);
+            using var monitorBitmap = await graphicsCapture.CaptureMonitorAsync(monitor.Handle, request.IncludeCursor, cancellationToken).ConfigureAwait(false);
             var crop = rect.RelativeTo(monitor.Bounds);
-            return CropBitmap(monitorBitmap, new Rectangle(crop.X, crop.Y, crop.Width, crop.Height));
+            return new BackendCapture(
+                CropBitmap(monitorBitmap, new Rectangle(crop.X, crop.Y, crop.Width, crop.Height)),
+                CaptureBackendUsed.WindowsGraphicsCapture,
+                null);
         }
-        catch (Exception exception) when (WindowsGraphicsCaptureBackend.CanFallback(exception))
+        catch (Exception exception) when (CanUseGdiFallback(request, exception))
         {
-            return gdiFallback.CaptureScreenRect(rect, includeCursor);
+            return new BackendCapture(gdiFallback.CaptureScreenRect(rect, request.IncludeCursor), CaptureBackendUsed.Gdi, FallbackReason(exception));
         }
     }
 
-    private async Task<Bitmap> CaptureWindowBitmapAsync(IntPtr hwnd, PixelRect rect, bool includeCursor, CancellationToken cancellationToken)
+    private async Task<BackendCapture> CaptureScrollingFrameBitmapAsync(
+        PixelRect rect,
+        CaptureRequest request,
+        ScrollingCaptureOptions options,
+        CancellationToken cancellationToken)
+    {
+        if (options.BeforeScreenCapture is not null)
+        {
+            await options.BeforeScreenCapture(cancellationToken).ConfigureAwait(false);
+        }
+
+        try
+        {
+            return await CaptureRegionBitmapAsync(rect, request, cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            if (options.AfterScreenCapture is not null)
+            {
+                await options.AfterScreenCapture(cancellationToken).ConfigureAwait(false);
+            }
+        }
+    }
+
+    private async Task<BackendCapture> CaptureWindowBitmapAsync(IntPtr hwnd, PixelRect rect, CaptureRequest request, CancellationToken cancellationToken)
     {
         ValidateRect(rect);
+        if (request.BackendPreference == CaptureBackendPreference.Gdi)
+        {
+            return new BackendCapture(gdiFallback.CaptureScreenRect(rect, request.IncludeCursor), CaptureBackendUsed.Gdi, null);
+        }
+
         try
         {
-            return await graphicsCapture.CaptureWindowAsync(hwnd, includeCursor, cancellationToken).ConfigureAwait(false);
+            return new BackendCapture(
+                await graphicsCapture.CaptureWindowAsync(hwnd, request.IncludeCursor, cancellationToken).ConfigureAwait(false),
+                CaptureBackendUsed.WindowsGraphicsCapture,
+                null);
         }
-        catch (Exception exception) when (WindowsGraphicsCaptureBackend.CanFallback(exception))
+        catch (Exception exception) when (CanUseGdiFallback(request, exception))
         {
-            return gdiFallback.CaptureScreenRect(rect, includeCursor);
+            return new BackendCapture(gdiFallback.CaptureScreenRect(rect, request.IncludeCursor), CaptureBackendUsed.Gdi, FallbackReason(exception));
         }
     }
 
-    private async Task<Bitmap> CaptureMonitorBitmapAsync(MonitorInfo monitor, bool includeCursor, CancellationToken cancellationToken)
+    private async Task<BackendCapture> CaptureMonitorBitmapAsync(MonitorInfo monitor, CaptureRequest request, CancellationToken cancellationToken)
     {
+        if (request.BackendPreference == CaptureBackendPreference.Gdi)
+        {
+            return new BackendCapture(gdiFallback.CaptureScreenRect(monitor.Bounds, request.IncludeCursor), CaptureBackendUsed.Gdi, null);
+        }
+
         try
         {
-            return await graphicsCapture.CaptureMonitorAsync(monitor.Handle, includeCursor, cancellationToken).ConfigureAwait(false);
+            return new BackendCapture(
+                await graphicsCapture.CaptureMonitorAsync(monitor.Handle, request.IncludeCursor, cancellationToken).ConfigureAwait(false),
+                CaptureBackendUsed.WindowsGraphicsCapture,
+                null);
         }
-        catch (Exception exception) when (WindowsGraphicsCaptureBackend.CanFallback(exception))
+        catch (Exception exception) when (CanUseGdiFallback(request, exception))
         {
-            return gdiFallback.CaptureScreenRect(monitor.Bounds, includeCursor);
+            return new BackendCapture(gdiFallback.CaptureScreenRect(monitor.Bounds, request.IncludeCursor), CaptureBackendUsed.Gdi, FallbackReason(exception));
         }
     }
 
-    private async Task WaitForScrollSettleAsync(PixelRect rect, CaptureRequest request, ScrollingCaptureOptions options, CancellationToken cancellationToken)
+    private async Task<bool> WaitForScrollSettleAsync(PixelRect rect, CaptureRequest request, ScrollingCaptureOptions options, CancellationToken cancellationToken)
     {
         IReadOnlyList<ulong>? previousProbe = null;
         var stableProbes = 0;
@@ -205,14 +339,14 @@ public sealed class WindowsCaptureService : IWindowsCaptureService
             cancellationToken.ThrowIfCancellationRequested();
             await Task.Delay(options.SettlePollMilliseconds, cancellationToken).ConfigureAwait(false);
 
-            using var probe = await CaptureRegionBitmapAsync(rect, request.IncludeCursor, cancellationToken).ConfigureAwait(false);
-            var hashes = RowHashes(probe);
+            using var probe = await CaptureScrollingFrameBitmapAsync(rect, request, options, cancellationToken).ConfigureAwait(false);
+            var hashes = RowHashes(probe.Bitmap);
             if (previousProbe is not null && ScrollingFramePlanner.RowsEqual(previousProbe, hashes))
             {
                 stableProbes++;
                 if (stableProbes >= options.RequiredStableSettleSamples)
                 {
-                    return;
+                    return true;
                 }
             }
             else
@@ -222,6 +356,8 @@ public sealed class WindowsCaptureService : IWindowsCaptureService
 
             previousProbe = hashes;
         }
+
+        return false;
     }
 
     private static Task DelayIfNeeded(CaptureRequest request, CancellationToken cancellationToken) =>
@@ -229,33 +365,109 @@ public sealed class WindowsCaptureService : IWindowsCaptureService
             ? Task.Delay(TimeSpan.FromSeconds(request.DelaySeconds), cancellationToken)
             : Task.CompletedTask;
 
+    private static CaptureMetadata Metadata(CaptureMode mode, string? windowTitle, PixelRect? sourceRect, CaptureRequest request, BackendCapture capture, PixelRect? captureBounds = null) =>
+        new(
+            mode,
+            windowTitle,
+            sourceRect,
+            DateTimeOffset.Now,
+            request.BackendPreference,
+            capture.BackendUsed,
+            capture.FallbackReason,
+            captureBounds ?? sourceRect);
+
+    private static CaptureResult CreateResult(Bitmap bitmap, CaptureMetadata metadata) =>
+        new(CopyBgraPixels(bitmap, metadata), metadata);
+
+    private static CapturedPixels CopyBgraPixels(Bitmap bitmap, CaptureMetadata metadata)
+    {
+        using var normalized = CloneBitmap(bitmap);
+        var stride = normalized.Width * 4;
+        var pixels = new byte[stride * normalized.Height];
+        var data = normalized.LockBits(new Rectangle(0, 0, normalized.Width, normalized.Height), ImageLockMode.ReadOnly, PixelFormat.Format32bppArgb);
+        try
+        {
+            for (var y = 0; y < normalized.Height; y++)
+            {
+                Marshal.Copy(data.Scan0 + y * data.Stride, pixels, y * stride, stride);
+            }
+        }
+        finally
+        {
+            normalized.UnlockBits(data);
+        }
+
+        return new CapturedPixels(pixels, normalized.Width, normalized.Height, stride, metadata);
+    }
+
+    private static bool CanUseGdiFallback(CaptureRequest request, Exception exception) =>
+        request.BackendPreference != CaptureBackendPreference.WindowsGraphicsCapture
+        && WindowsGraphicsCaptureBackend.CanFallback(exception);
+
+    private static string FallbackReason(Exception exception) =>
+        $"{exception.GetType().Name}: {exception.Message}";
+
+    private static void RecordBackend(BackendCapture capture, ref CaptureBackendUsed backendUsed, ref string? fallbackReason)
+    {
+        if (capture.BackendUsed != CaptureBackendUsed.Gdi)
+        {
+            return;
+        }
+
+        backendUsed = CaptureBackendUsed.Gdi;
+        fallbackReason ??= capture.FallbackReason;
+    }
+
+    private static void ReportProgress(
+        ScrollingCaptureOptions options,
+        IReadOnlyList<Bitmap> frames,
+        int width,
+        int maxRows,
+        ScrollingCaptureStopReason? stopReason = null) =>
+        options.Progress?.Report(
+            new ScrollingCaptureProgress(
+                frames.Count,
+                Math.Min(TotalHeight(frames), maxRows),
+                maxRows,
+                EstimatedBytes(frames, width),
+                false,
+                stopReason));
+
+    private static CaptureResult CreateScrollingResult(
+        IReadOnlyList<Bitmap> frames,
+        PixelRect rect,
+        CaptureRequest request,
+        ScrollingCaptureOptions options,
+        CaptureBackendUsed backendUsed,
+        string? fallbackReason,
+        ScrollingCaptureStopReason stopReason)
+    {
+        using var stitched = StitchFrames(frames, rect.Width, Math.Min(options.MaxHeight, TotalHeight(frames)));
+        var metadata = new CaptureMetadata(
+            CaptureMode.Scrolling,
+            null,
+            rect,
+            DateTimeOffset.Now,
+            request.BackendPreference,
+            backendUsed,
+            fallbackReason,
+            rect,
+            StopReason: stopReason);
+        return CreateResult(stitched, metadata);
+    }
+
+    private static bool CanRetainExtraRows(IReadOnlyList<Bitmap> frames, int width, int extraRows, int memoryCapBytes) =>
+        frames.Count == 0 || EstimatedBytes(frames, width) + FrameBytes(width, extraRows) <= Math.Max(0, memoryCapBytes);
+
+    private static long FrameBytes(int width, int height) =>
+        (long)Math.Max(0, width) * Math.Max(0, height) * 4;
+
     private static void ValidateRect(PixelRect rect)
     {
         if (rect.Width <= 0 || rect.Height <= 0)
         {
             throw new ArgumentOutOfRangeException(nameof(rect), "Capture rectangle must have positive dimensions.");
         }
-    }
-
-    private static Bitmap ComposeWindowBitmap(Bitmap bitmap, CaptureRequest request)
-    {
-        if (request.WindowBackgroundTransparent && !request.IncludeWindowShadow)
-        {
-            return CloneBitmap(bitmap);
-        }
-
-        var pad = request.IncludeWindowShadow ? 20 : 0;
-        var composed = new Bitmap(bitmap.Width + pad * 2, bitmap.Height + pad * 2, PixelFormat.Format32bppArgb);
-        using var graphics = Graphics.FromImage(composed);
-        graphics.Clear(ColorTranslator.FromHtml(request.WindowBackgroundHex));
-        if (request.IncludeWindowShadow)
-        {
-            using var shadow = new SolidBrush(Color.FromArgb(42, 0, 0, 0));
-            graphics.FillRectangle(shadow, pad / 2, pad / 2, bitmap.Width + pad, bitmap.Height + pad);
-        }
-
-        graphics.DrawImageUnscaled(bitmap, pad, pad);
-        return composed;
     }
 
     private static IReadOnlyList<ulong> RowHashes(Bitmap bitmap)
@@ -322,14 +534,6 @@ public sealed class WindowsCaptureService : IWindowsCaptureService
         return clone;
     }
 
-    private static byte[] EncodePng(Bitmap bitmap)
-    {
-        using var stream = new MemoryStream();
-        bitmap.SetResolution(96, 96);
-        bitmap.Save(stream, ImageFormat.Png);
-        return stream.ToArray();
-    }
-
     private static int TotalHeight(IEnumerable<Bitmap> frames) => frames.Sum(frame => frame.Height);
 
     private static long EstimatedBytes(IEnumerable<Bitmap> frames, int width) =>
@@ -379,4 +583,9 @@ public sealed class WindowsCaptureService : IWindowsCaptureService
 
     [DllImport("user32.dll", SetLastError = true)]
     private static extern uint SendInput(uint count, Input[] inputs, int size);
+
+    private sealed record BackendCapture(Bitmap Bitmap, CaptureBackendUsed BackendUsed, string? FallbackReason) : IDisposable
+    {
+        public void Dispose() => Bitmap.Dispose();
+    }
 }
