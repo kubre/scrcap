@@ -1,4 +1,5 @@
 using System.IO;
+using System.Text.Json;
 using System.Windows;
 using System.Windows.Input;
 using System.Windows.Media.Imaging;
@@ -26,6 +27,8 @@ public partial class EditorWindow : Window
     private double panStartVerticalOffset;
     private WpfTextBox? inlineTextBox;
     private CorePoint inlineTextAnchor;
+
+    internal string? TestStateJsonPath { get; set; }
 
     public EditorWindow(CaptureResult? capture = null, Settings? settings = null, DiagnosticSpan? firstInteractiveRenderSpan = null)
     {
@@ -82,6 +85,13 @@ public partial class EditorWindow : Window
     {
         if (inlineTextBox is not null || e.OriginalSource is WpfTextBox)
         {
+            return;
+        }
+
+        if (Keyboard.Modifiers == (ModifierKeys.Control | ModifierKeys.Alt) && e.Key == Key.D && TestStateJsonPath is not null)
+        {
+            WriteStateJsonForTests(TestStateJsonPath);
+            e.Handled = true;
             return;
         }
 
@@ -446,6 +456,44 @@ public partial class EditorWindow : Window
     private void ShowRecoverableError(string title, Exception exception) =>
         System.Windows.MessageBox.Show(this, exception.Message, title, MessageBoxButton.OK, MessageBoxImage.Warning);
 
+    internal string ExportStateJsonForTests()
+    {
+        var shapes = viewModel.VisibleShapes
+            .Select(shape => new
+            {
+                kind = KindName(shape.Kind),
+                shape.Start,
+                shape.End,
+                text = shape.Kind is ShapeKind.Text text ? text.Value : null,
+                counter = shape.Kind is ShapeKind.Counter counter ? counter.Number : (int?)null,
+            })
+            .ToArray();
+        var document = viewModel.Document is null
+            ? null
+            : new
+            {
+                viewModel.Document.Size.Width,
+                viewModel.Document.Size.Height,
+                viewModel.Document.Cursor,
+            };
+
+        return JsonSerializer.Serialize(
+            new
+            {
+                document,
+                shapes,
+                canUndo = viewModel.CanUndo,
+                canRedo = viewModel.CanRedo,
+            },
+            SettingsStore.JsonOptions);
+    }
+
+    internal void WriteStateJsonForTests(string statePath)
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(statePath))!);
+        File.WriteAllText(statePath, ExportStateJsonForTests());
+    }
+
     public static BitmapImage DecodePng(byte[] bytes)
     {
         using var stream = new MemoryStream(bytes);
@@ -505,6 +553,17 @@ public partial class EditorWindow : Window
             Key.D4 or Key.NumPad4 => "4",
             Key.D5 or Key.NumPad5 => "5",
             _ => string.Empty,
+        };
+
+    private static string KindName(ShapeKind kind) =>
+        kind switch
+        {
+            ShapeKind.Arrow => "arrow",
+            ShapeKind.Rectangle => "rectangle",
+            ShapeKind.Pixelate => "pixelate",
+            ShapeKind.Counter => "counter",
+            ShapeKind.Text => "text",
+            _ => "unknown",
         };
 
     private System.Windows.Point CenterOfScroller() =>

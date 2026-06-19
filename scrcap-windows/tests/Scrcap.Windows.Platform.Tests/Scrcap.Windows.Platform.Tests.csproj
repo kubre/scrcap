@@ -13,5 +13,12 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\Scrcap.Core\Scrcap.Core.csproj" />
     <ProjectReference Include="..\..\src\Scrcap.Windows.Platform\Scrcap.Windows.Platform.csproj" />
+    <ProjectReference Include="..\Scrcap.CaptureFixture\Scrcap.CaptureFixture.csproj" ReferenceOutputAssembly="false" />
   </ItemGroup>
+  <Target Name="CopyCaptureFixture" AfterTargets="Build">
+    <ItemGroup>
+      <CaptureFixtureFiles Include="..\Scrcap.CaptureFixture\bin\$(Configuration)\net8.0-windows10.0.19041.0\Scrcap.CaptureFixture.*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(CaptureFixtureFiles)" DestinationFolder="$(OutDir)CaptureFixture" SkipUnchangedFiles="true" />
+  </Target>
 </Project>

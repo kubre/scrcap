@@ -3,9 +3,10 @@
 Status: implementation in progress. Checked implementation items indicate code,
 automated tests, visual baselines, or a local/static guard exists in this branch.
 A Windows local build, test suite, rendering golden suite, UI automation/static
-suite, core capture/scroll unit coverage, UI token guard, release hardening
+suite, process-driven editor automation, fixture-driven overlay behavior coverage,
+deterministic capture/scroll fixture launch coverage, core capture/scroll unit coverage, UI token guard, release hardening
 guard, release publish gate, and idle CPU/memory measurement passed on
-2026-06-18. Deterministic fixture apps, representative Windows 10/11 manual QA,
+2026-06-18. Representative Windows 10/11 manual QA,
 live tray/global hotkey capture verification, cross-app clipboard paste checks,
 warm hotkey latency measurement, and full mixed-monitor manual QA stay unchecked
 until they pass on representative machines.
@@ -159,7 +160,7 @@ until they pass on representative machines.
 - [x] Invalidate pixelate cache when the source bitmap changes after crop or undo/redo restore.
 - [x] Commit crop on mouse-up without Enter.
 - [x] Keep Crop tool armed after crop commit.
-- [ ] Render crop preview using the same hazard ants as capture selection.
+- [x] Render crop preview using the same hazard ants as capture selection.
 - [x] Crop bitmap only for crop rect at least 2 by 2 DIP.
 - [x] Apply crop survival rules to existing shapes.
 - [x] Make crop undo restore the full previous document.
@@ -184,9 +185,9 @@ until they pass on representative machines.
 - [x] Add rendering tests for pixelate cache invalidation.
 - [x] Add visual baselines for editor light mode.
 - [x] Add visual baselines for editor dark mode.
-- [ ] Add UI automation that draws all editor tools by mouse and keyboard.
-- [ ] Add UI automation proving non-text shapes do not require Enter.
-- [ ] Add UI automation proving Ctrl+Z removes the last committed interaction.
+- [x] Add UI automation that draws all editor tools by mouse and keyboard.
+- [x] Add UI automation proving non-text shapes do not require Enter.
+- [x] Add UI automation proving Ctrl+Z removes the last committed interaction.
 - [x] Add UI automation proving exported PNG matches visual baseline tolerance.
 
 ## M3 - Preferences, Theme, and Settings Persistence
@@ -376,8 +377,8 @@ until they pass on representative machines.
 - [x] Implement repeat last region target if still valid.
 - [x] Implement repeat last window target if still valid.
 - [x] Implement repeat last fullscreen target if still valid.
-- [ ] Build deterministic capture fixture app.
-- [ ] Expose fixture HWND through stdout or named pipe.
+- [x] Build deterministic capture fixture app.
+- [x] Expose fixture HWND through stdout or named pipe.
 - [x] Add capture test for DWM bounds converted to pixels.
 - [x] Add capture test for colored corners matching expected pixels.
 - [x] Add capture test proving no overlay pixels are present.
@@ -420,7 +421,7 @@ until they pass on representative machines.
 - [x] Position HUD top-right of selected monitor.
 - [x] Style HUD with fixed carbon block, red dot, count, and STOP button.
 - [x] Disable or freeze HUD animation in tests.
-- [ ] Build scroll fixture app with deterministic scrollable panel.
+- [x] Build scroll fixture app with deterministic scrollable panel.
 - [x] Add fixture support for sticky header.
 - [x] Add fixture support for lazy-loading delay.
 - [x] Add scrolling test for normal page.
@@ -529,7 +530,7 @@ until they pass on representative machines.
 - [x] Non-text annotations commit on mouse-up without Enter.
 - [x] Undo and redo work across shapes, auto-expand, crop, and text.
 - [ ] Copy outputs valid PNG with correct dimensions and DPI metadata.
-- [ ] Save outputs valid PNG with correct dimensions and DPI metadata.
+- [x] Save outputs valid PNG with correct dimensions and DPI metadata.
 - [ ] Drag-out outputs valid PNG and cleans temp files.
 - [x] Settings persist, migrate, normalize, and reset.
 - [x] Editor matches the provided design language in light mode.
@@ -549,9 +550,9 @@ until they pass on representative machines.
 - [x] Rendering golden tests pass.
 - [x] UI automation tests pass.
 - [x] Windows release guardrails pass with publishing.
-- [ ] Capture fixture tests pass.
+- [x] Capture fixture tests pass.
 - [ ] Scrolling fixture tests pass.
-- [x] Performance budgets are measured and documented.
+- [ ] Performance budgets are measured and documented.
 - [ ] Multi-monitor and high-DPI manual QA is complete.
 - [x] Platform APIs are isolated behind interfaces.
 - [x] All visible metrics and colors live in tokens.

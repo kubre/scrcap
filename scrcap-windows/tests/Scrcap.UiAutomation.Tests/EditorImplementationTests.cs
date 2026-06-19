@@ -171,6 +171,33 @@ public sealed class EditorImplementationTests
     }
 
     [Fact]
+    public void CropPreviewRendersHazardSelectionPixels()
+    {
+        RunSta(() =>
+        {
+            var viewModel = new EditorViewModel(Settings.Defaults());
+            viewModel.LoadDocument(120, 80);
+            var canvas = new EditorCanvas
+            {
+                ViewModel = viewModel,
+                SourceBitmap = CreateGradientBitmap(120, 80),
+            };
+
+            var png = canvas.RenderCropPreviewPngForTests(new CoreRect(20, 16, 64, 40));
+            var bitmap = EditorWindow.DecodePng(png);
+            var pixels = CopyBgra(bitmap);
+
+            var red = CountPixelsNear(pixels, bitmap.PixelWidth, 20, 16, 84, 19, Colors.Red);
+            var white = CountPixelsNear(pixels, bitmap.PixelWidth, 17, 13, 24, 20, Colors.White);
+            var black = CountPixelsNear(pixels, bitmap.PixelWidth, 20, 16, 84, 19, Colors.Black);
+            Assert.True(red > 6, $"Expected red hazard-ant pixels, got {red}.");
+            Assert.True(white > 8, $"Expected white handle pixels, got {white}.");
+            Assert.True(black > 4, $"Expected black hazard-outline pixels, got {black}.");
+            Assert.True(IsDimmed(pixels, bitmap.PixelWidth, 6, 6), "Expected outside-crop preview pixel to be dimmed.");
+        });
+    }
+
+    [Fact]
     public void DragOutUsesFlattenedRendererPathAndRecoverableFailure()
     {
         var canvasSource = ReadRepoFile("src/Scrcap.Windows.UI/Editor/EditorCanvas.cs");
@@ -336,6 +363,49 @@ public sealed class EditorImplementationTests
         }
 
         return count;
+    }
+
+    private static byte[] CopyBgra(BitmapSource source)
+    {
+        var bitmap = source.Format == PixelFormats.Bgra32
+            ? source
+            : new FormatConvertedBitmap(source, PixelFormats.Bgra32, null, 0);
+        var stride = bitmap.PixelWidth * 4;
+        var pixels = new byte[stride * bitmap.PixelHeight];
+        bitmap.CopyPixels(pixels, stride, 0);
+        return pixels;
+    }
+
+    private static int CountPixelsNear(byte[] pixels, int width, int left, int top, int right, int bottom, Color color)
+    {
+        var count = 0;
+        for (var y = top; y < bottom; y++)
+        {
+            for (var x = left; x < right; x++)
+            {
+                var index = ((y * width) + x) * 4;
+                if (index + 3 >= pixels.Length)
+                {
+                    continue;
+                }
+
+                var distance = Math.Abs(pixels[index] - color.B)
+                    + Math.Abs(pixels[index + 1] - color.G)
+                    + Math.Abs(pixels[index + 2] - color.R);
+                if (distance < 80)
+                {
+                    count++;
+                }
+            }
+        }
+
+        return count;
+    }
+
+    private static bool IsDimmed(byte[] pixels, int width, int x, int y)
+    {
+        var index = ((y * width) + x) * 4;
+        return pixels[index] < 230 && pixels[index + 1] < 230 && pixels[index + 2] < 230;
     }
 
     private static void RunSta(Action action)

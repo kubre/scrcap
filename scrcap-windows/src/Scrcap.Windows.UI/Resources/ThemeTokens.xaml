@@ -160,6 +160,8 @@
   <Thickness x:Key="MetricOverlayHintPadding">10,6</Thickness>
   <Thickness x:Key="MetricOverlayTagPadding">10,5</Thickness>
   <Thickness x:Key="MetricOverlayLabelPadding">10,6</Thickness>
+  <Thickness x:Key="MetricOverlayCountdownPadding">18,12</Thickness>
+  <Thickness x:Key="MetricOverlayCountdownNumberMargin">8,0,0,0</Thickness>
   <Thickness x:Key="MetricScrollingHudPadding">12,9</Thickness>
   <Thickness x:Key="MetricScrollingHudStopPadding">10,4</Thickness>
   <CornerRadius x:Key="MetricPreferencesRadius">8</CornerRadius>

@@ -267,6 +267,8 @@
                   VerticalAlignment="Center"
                   Margin="{StaticResource MetricCanvasHostMargin}">
               <editor:EditorCanvas x:Name="Canvas"
+                                   AutomationProperties.AutomationId="EditorCanvas"
+                                   AutomationProperties.Name="Editor canvas"
                                    Focusable="True"
                                    Width="{Binding ScaledDocumentWidth}"
                                    Height="{Binding ScaledDocumentHeight}"

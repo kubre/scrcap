@@ -1,33 +1,33 @@
 ﻿{
     "scenario":  "Editor sample",
     "theme":  "light",
-    "evidenceDateUtc":  "2026-06-19T12:17:19.4728179+00:00",
-    "commit":  "3e3eca3bf8a0d7b17f5cd5f04830b4c0db5a478e",
+    "evidenceDateUtc":  "2026-06-19T14:37:34.9453239+00:00",
+    "commit":  "6a26a0d4583c91d2f03897863bb967c8b01ba69a",
     "branch":  {
 
                },
-    "headName":  "win_port",
+    "headName":  "remotes/origin/win_port",
     "refsPointingAtHead":  [
-                               "win_port"
+
                            ],
-    "branchContext":  "win_port",
-    "packageMode":  "Release loose build",
-    "appPath":  "C:\\Users\\Asus\\.codex\\worktrees\\b7f9\\scrcap\\scrcap-windows\\src\\Scrcap.Windows.UI\\bin\\Release\\net8.0-windows10.0.19041.0\\Scrcap.Windows.UI.dll",
+    "branchContext":  "remotes/origin/win_port",
+    "packageMode":  "Release loose build, integrated Slice 1-7 continuation",
+    "appPath":  "C:\\Users\\Asus\\.codex\\worktrees\\2c93\\scrcap\\scrcap-windows\\src\\Scrcap.Windows.UI\\bin\\Release\\net8.0-windows10.0.19041.0\\Scrcap.Windows.UI.dll",
     "appArguments":  [
                          "--test-mode",
                          "--open-sample-editor",
-                         "C:\\Users\\Asus\\.codex\\worktrees\\b7f9\\scrcap\\scrcap-windows\\docs\\windows-parity\\reference-sample.png",
+                         "C:\\Users\\Asus\\.codex\\worktrees\\2c93\\scrcap\\scrcap-windows\\docs\\windows-parity\\reference-sample.png",
                          "--test-settings-dir",
-                         "C:\\Users\\Asus\\.codex\\worktrees\\b7f9\\scrcap\\scrcap-windows\\docs\\windows-parity\\settings-deterministic",
+                         "C:\\Users\\Asus\\.codex\\worktrees\\2c93\\scrcap\\scrcap-windows\\docs\\windows-parity\\settings-deterministic",
                          "--test-app-theme",
                          "light"
                      ],
-    "processId":  15532,
-    "hwnd":  "15597814",
+    "processId":  22552,
+    "hwnd":  "13043896",
     "windowTitle":  "scrcap",
     "captureMethod":  "desktop CopyFromScreen using HWND bounds plus shadow padding; not WPF RenderTargetBitmap",
     "shadowPadding":  24,
-    "output":  "C:\\Users\\Asus\\.codex\\worktrees\\b7f9\\scrcap\\scrcap-windows\\docs\\windows-parity\\editor-light-full-hwnd.png",
+    "output":  "C:\\Users\\Asus\\.codex\\worktrees\\2c93\\scrcap\\scrcap-windows\\docs\\windows-parity\\editor-light-full-hwnd.png",
     "image":  {
                   "height":  568,
                   "width":  768

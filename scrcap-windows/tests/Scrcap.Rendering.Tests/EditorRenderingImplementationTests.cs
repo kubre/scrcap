@@ -46,6 +46,36 @@ public sealed class EditorRenderingImplementationTests
         });
     }
 
+    [Theory]
+    [InlineData(1, 80, 50, 96)]
+    [InlineData(2, 160, 100, 192)]
+    public void FlattenPngWritesScaleDimensionsAndDpiMetadata(int scale, int expectedWidth, int expectedHeight, int expectedDpi)
+    {
+        RunSta(() =>
+        {
+            var settings = Settings.Defaults();
+            var viewModel = new EditorViewModel(settings);
+            viewModel.LoadDocument(80, 50);
+            var canvas = new EditorCanvas
+            {
+                ViewModel = viewModel,
+                SourceBitmap = SolidBitmap(80, 50, Colors.White),
+                Width = 80,
+                Height = 50,
+            };
+
+            var bytes = canvas.FlattenPng(scale);
+
+            using var stream = new MemoryStream(bytes);
+            var decoder = new PngBitmapDecoder(stream, BitmapCreateOptions.PreservePixelFormat, BitmapCacheOption.OnLoad);
+            var frame = decoder.Frames[0];
+            Assert.Equal(expectedWidth, frame.PixelWidth);
+            Assert.Equal(expectedHeight, frame.PixelHeight);
+            Assert.Equal(expectedDpi, frame.DpiX, precision: 0);
+            Assert.Equal(expectedDpi, frame.DpiY, precision: 0);
+        });
+    }
+
     [Fact]
     public void FlattenPngRendersFiveHundredShapesWithoutPerShapeControls()
     {

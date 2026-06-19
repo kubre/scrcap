@@ -119,6 +119,13 @@ open. The script starts the tray-resident app with an isolated settings
 directory, waits for startup, samples CPU for 10 seconds, records private memory,
 and then terminates the process.
 
+Current RogStrix evidence from 2026-06-19 is stored at
+`docs/windows-parity/windows-performance-current.json`. It covers a Release
+loose framework-dependent build on Windows 11 Home Single Language build 26200,
+one 1920 by 1080 display at 100 percent / 96 DPI, idle CPU `0`, and private
+memory `14.23 MB`. Manual timing fields remain null because this thread did not
+collect three real hotkey/capture/pixelate trials.
+
 Evidence fields:
 
 | Field | Value |

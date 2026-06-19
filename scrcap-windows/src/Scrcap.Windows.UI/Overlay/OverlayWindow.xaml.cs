@@ -30,6 +30,7 @@ public partial class OverlayWindow : Window
     private WindowCandidate? highlightedWindow;
     private WpfPoint? dragStart;
     private Rect currentSelection;
+    private bool isMovingSelection;
     private bool pointMode;
     private bool windowPickerMode;
     private bool isCompleting;
@@ -45,6 +46,7 @@ public partial class OverlayWindow : Window
     {
         this.windowSelectionService = windowSelectionService;
         this.monitorBounds = monitorBounds;
+        EnsureStandaloneResources();
         InitializeComponent();
         selectionAntTimer = new DispatcherTimer(TimeSpan.FromMilliseconds(75), DispatcherPriority.Render, (_, _) =>
         {
@@ -65,6 +67,19 @@ public partial class OverlayWindow : Window
             UpdateDimMask();
             Focus();
         };
+    }
+
+    private void EnsureStandaloneResources()
+    {
+        if (System.Windows.Application.Current is not null || Resources.MergedDictionaries.Count > 0)
+        {
+            return;
+        }
+
+        Resources.MergedDictionaries.Add(new ResourceDictionary
+        {
+            Source = new Uri("/Scrcap.Windows.UI;component/Resources/ThemeTokens.xaml", UriKind.Relative),
+        });
     }
 
     public Task<PixelRect?> SelectRegionAsync(int delayedCountdownSeconds = 0)
@@ -116,14 +131,8 @@ public partial class OverlayWindow : Window
             return;
         }
 
-        dragStart = e.GetPosition(Root);
-        currentSelection = new Rect(dragStart.Value, dragStart.Value);
-        HintTag.Visibility = Visibility.Collapsed;
-        CoordinateTag.Visibility = Visibility.Collapsed;
-        SelectionAntLayer.Visibility = Visibility.Visible;
-        StartSelectionAnimation();
+        BeginRegionDrag(e.GetPosition(Root));
         CaptureMouse();
-        UpdateSelection(currentSelection);
     }
 
     private void Window_MouseMove(object sender, WpfMouseEventArgs e)
@@ -143,19 +152,7 @@ public partial class OverlayWindow : Window
             return;
         }
 
-        var end = point;
-        if (Keyboard.IsKeyDown(Key.Space))
-        {
-            var delta = end - start;
-            currentSelection.Offset(delta);
-            dragStart = end;
-        }
-        else
-        {
-            currentSelection = Normalize(start, end);
-        }
-
-        UpdateSelection(currentSelection);
+        UpdateRegionDrag(point, Keyboard.IsKeyDown(Key.Space));
     }
 
     private async void Window_MouseUp(object sender, MouseButtonEventArgs e)
@@ -166,13 +163,9 @@ public partial class OverlayWindow : Window
         }
 
         ReleaseMouseCapture();
-        dragStart = null;
         StopSelectionAnimation();
-
-        if (currentSelection.Width < 2 || currentSelection.Height < 2)
+        if (!TryCompleteRegionDrag(out var rect))
         {
-            ClearSelection();
-            Hide();
             rectCompletion.TrySetResult(null);
             return;
         }
@@ -187,7 +180,7 @@ public partial class OverlayWindow : Window
         }
 
         Hide();
-        rectCompletion.TrySetResult(OverlayGeometry.ToCapturePixelRect(currentSelection, monitorBounds, Left, Top));
+        rectCompletion.TrySetResult(rect);
     }
 
     private void Window_KeyDown(object sender, WpfKeyEventArgs e)
@@ -220,11 +213,7 @@ public partial class OverlayWindow : Window
             return;
         }
 
-        isCancelled = true;
-        ReleaseMouseCapture();
-        StopSelectionAnimation();
-        ClearSelection();
-        Hide();
+        CancelSelection();
         rectCompletion.TrySetResult(null);
         pointCompletion.TrySetResult(null);
         windowCompletion.TrySetResult(null);
@@ -264,6 +253,99 @@ public partial class OverlayWindow : Window
         SetMoveHint(intersectingMonitors);
         OverlapTag.Visibility = Visibility.Visible;
         PositionTag(OverlapTag, new WpfPoint(rect.X, rect.Bottom + 8), new WpfPoint(rect.X, rect.Bottom));
+    }
+
+    internal Rect CurrentSelectionForTests => currentSelection;
+
+    internal bool IsSelectionAnimationEnabledForTests => selectionAntTimer.IsEnabled;
+
+    internal WindowCandidate? HighlightedWindowForTests => highlightedWindow;
+
+    internal string WindowLabelTextForTests => WindowLabelText.Text;
+
+    internal void BeginRegionDragForTests(WpfPoint point) => BeginRegionDrag(point);
+
+    internal void MoveRegionDragForTests(WpfPoint point, bool moveSelection) => UpdateRegionDrag(point, moveSelection);
+
+    internal PixelRect? CompleteRegionDragForTests() =>
+        TryCompleteRegionDrag(out var rect) ? rect : null;
+
+    internal void CancelForTests() => CancelSelection();
+
+    internal void HighlightWindowAtForTests(WpfPoint point) => HighlightWindowAt(point);
+
+    internal void CycleWindowHighlightForTests(int direction) => CycleWindowHighlight(direction);
+
+    internal void CommitPointOrWindowForTests(WpfPoint point) => CommitPointOrWindow(point);
+
+    private void BeginRegionDrag(WpfPoint point)
+    {
+        dragStart = point;
+        isMovingSelection = false;
+        currentSelection = new Rect(point, point);
+        HintTag.Visibility = Visibility.Collapsed;
+        CoordinateTag.Visibility = Visibility.Collapsed;
+        SelectionAntLayer.Visibility = Visibility.Visible;
+        StartSelectionAnimation();
+        UpdateSelection(currentSelection);
+    }
+
+    private void UpdateRegionDrag(WpfPoint point, bool moveSelection)
+    {
+        if (dragStart is not { } start)
+        {
+            return;
+        }
+
+        if (moveSelection)
+        {
+            if (!isMovingSelection)
+            {
+                dragStart = point;
+                isMovingSelection = true;
+                UpdateSelection(currentSelection);
+                return;
+            }
+
+            var delta = point - start;
+            currentSelection.Offset(delta);
+            dragStart = point;
+        }
+        else
+        {
+            isMovingSelection = false;
+            currentSelection = Normalize(start, point);
+        }
+
+        UpdateSelection(currentSelection);
+    }
+
+    private bool TryCompleteRegionDrag(out PixelRect rect)
+    {
+        dragStart = null;
+        isMovingSelection = false;
+        StopSelectionAnimation();
+
+        if (currentSelection.Width < 2 || currentSelection.Height < 2)
+        {
+            ClearSelection();
+            Hide();
+            rect = default;
+            return false;
+        }
+
+        rect = OverlayGeometry.ToCapturePixelRect(currentSelection, monitorBounds, Left, Top);
+        return true;
+    }
+
+    private void CancelSelection()
+    {
+        isCancelled = true;
+        isMovingSelection = false;
+        ReleaseMouseCapture();
+        StopSelectionAnimation();
+        ClearSelection();
+        Hide();
     }
 
     private void HighlightWindowAt(WpfPoint point)

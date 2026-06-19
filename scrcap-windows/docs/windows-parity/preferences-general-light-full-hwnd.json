@@ -1,58 +1,57 @@
 ﻿{
-    "scenario":  "preferences-general-light",
+    "scenario":  "Preferences General",
     "theme":  "light",
-    "evidenceDateUtc":  "2026-06-19T11:16:38.7683706+00:00",
-    "commit":  "3e3eca3bf8a0d7b17f5cd5f04830b4c0db5a478e",
+    "evidenceDateUtc":  "2026-06-19T14:37:45.5874409+00:00",
+    "commit":  "6a26a0d4583c91d2f03897863bb967c8b01ba69a",
     "branch":  {
 
                },
-    "headName":  "win_port",
+    "headName":  "remotes/origin/win_port",
     "refsPointingAtHead":  [
-                               "win_port"
+
                            ],
-    "branchContext":  "win_port",
-    "packageMode":  "Release loose build",
-    "appPath":  "C:\\Users\\Asus\\.codex\\worktrees\\d902\\scrcap\\scrcap-windows\\src\\Scrcap.Windows.UI\\bin\\Release\\net8.0-windows10.0.19041.0\\Scrcap.Windows.UI.dll",
+    "branchContext":  "remotes/origin/win_port",
+    "packageMode":  "Release loose build, integrated Slice 1-7 continuation",
+    "appPath":  "C:\\Users\\Asus\\.codex\\worktrees\\2c93\\scrcap\\scrcap-windows\\src\\Scrcap.Windows.UI\\bin\\Release\\net8.0-windows10.0.19041.0\\Scrcap.Windows.UI.dll",
     "appArguments":  [
-                         "--test-mode",
                          "--open-preferences",
-                         "--test-preferences-tab",
-                         "0",
                          "--test-settings-dir",
-                         "C:\\Users\\Asus\\.codex\\worktrees\\d902\\scrcap\\scrcap-windows\\docs\\windows-parity\\settings-deterministic",
+                         "C:\\Users\\Asus\\.codex\\worktrees\\2c93\\scrcap\\scrcap-windows\\docs\\windows-parity\\settings-deterministic",
                          "--test-app-theme",
-                         "light"
+                         "light",
+                         "--test-preferences-tab",
+                         "0"
                      ],
-    "processId":  20332,
-    "hwnd":  "15534216",
+    "processId":  21420,
+    "hwnd":  "9963224",
     "windowTitle":  "scrcap Preferences",
     "captureMethod":  "desktop CopyFromScreen using HWND bounds plus shadow padding; not WPF RenderTargetBitmap",
     "shadowPadding":  24,
-    "output":  "C:\\Users\\Asus\\.codex\\worktrees\\d902\\scrcap\\scrcap-windows\\docs\\windows-parity\\preferences-general-light-full-hwnd.png",
+    "output":  "C:\\Users\\Asus\\.codex\\worktrees\\2c93\\scrcap\\scrcap-windows\\docs\\windows-parity\\preferences-general-light-full-hwnd.png",
     "image":  {
                   "height":  588,
                   "width":  768
               },
     "windowRect":  {
-                       "left":  156,
-                       "top":  156,
-                       "right":  876,
-                       "bottom":  696,
+                       "left":  26,
+                       "top":  26,
+                       "right":  746,
+                       "bottom":  566,
                        "width":  720,
                        "height":  540
                    },
     "dwmExtendedFrameBounds":  {
-                                   "left":  156,
-                                   "top":  156,
-                                   "right":  876,
-                                   "bottom":  696,
+                                   "left":  26,
+                                   "top":  26,
+                                   "right":  746,
+                                   "bottom":  566,
                                    "width":  720,
                                    "height":  540
                                },
     "captureBounds":  {
-                          "left":  132,
+                          "left":  2,
                           "width":  768,
-                          "top":  132,
+                          "top":  2,
                           "height":  588
                       },
     "os":  {

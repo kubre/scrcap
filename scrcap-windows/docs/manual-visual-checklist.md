@@ -60,6 +60,22 @@ QA issue.
 | Screenshots folder | |
 | Notes and defects | |
 
+## Current RogStrix evidence - 2026-06-19
+
+| Field | Value |
+|---|---|
+| Tester | Codex on RogStrix worktree |
+| Date | 2026-06-19 |
+| Windows edition and build | Microsoft Windows 11 Home Single Language 10.0.26200 build 26200 |
+| Hardware or VM | ASUS ROG Strix G513IC |
+| GPU driver | NVIDIA GeForce RTX 3050 Laptop GPU 32.0.15.7628; AMD Radeon(TM) Graphics 30.0.13002.19003 |
+| Display layout | One primary display, 1920 by 1080, working area 1920 by 1032 |
+| DPI values | 100 percent / 96 DPI only |
+| App build or artifact path | Release loose build from `src/Scrcap.Windows.UI/bin/Release/net8.0-windows10.0.19041.0` |
+| Package mode | framework-dependent publish verified by release guardrails; self-contained publish verified with `tools/Publish-Windows.ps1 -Mode self-contained -Configuration Release` |
+| Screenshots folder | `docs/windows-parity` |
+| Notes and defects | Current evidence covers editor and preferences full-HWND light captures, window chrome smoke, idle CPU/private memory, fixture capture tests, and process-driven editor Save. Windows 10, multi-monitor, mixed DPI, negative origin, high contrast, taskbar light/dark manual checks, Paint/Chromium paste, true drag-out, and physical overlay interaction checks remain open. Computer Use UI automation was not available in this thread because the Node REPL execution tool was not exposed after discovery. |
+
 ## Required release matrix
 
 Do not mark this matrix complete from code inspection alone. Each checked row

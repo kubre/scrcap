@@ -3,6 +3,7 @@ using System.Globalization;
 using System.Diagnostics;
 using System.Windows;
 using System.Windows.Input;
+using System.Windows.Automation.Peers;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using Scrcap.Core;
@@ -64,6 +65,9 @@ public sealed class EditorCanvas : FrameworkElement
 
     public event EventHandler? DocumentChanged;
 
+    protected override AutomationPeer OnCreateAutomationPeer() =>
+        new FrameworkElementAutomationPeer(this);
+
     public CorePoint WindowPointToImagePoint(WpfPoint point) =>
         WindowPointToImagePoint(point, allowOutsideImage: ViewModel?.Settings.AutoExpandCanvas == true);
 
@@ -121,6 +125,32 @@ public sealed class EditorCanvas : FrameworkElement
         }
 
         var bitmap = new RenderTargetBitmap(width, height, 96 * scale, 96 * scale, PixelFormats.Pbgra32);
+        bitmap.Render(visual);
+
+        var encoder = new PngBitmapEncoder();
+        encoder.Frames.Add(BitmapFrame.Create(bitmap));
+        using var stream = new MemoryStream();
+        encoder.Save(stream);
+        return stream.ToArray();
+    }
+
+    internal byte[] RenderCropPreviewPngForTests(CoreRect rect)
+    {
+        if (ViewModel?.Document is not { } document || SourceBitmap is null)
+        {
+            return [];
+        }
+
+        var visual = new DrawingVisual();
+        using (var context = visual.RenderOpen())
+        {
+            DrawDocument(context, document.Size, zoom: 1, includeBackground: true);
+            DrawCropPreview(context, rect, document.Size);
+        }
+
+        var width = Math.Max(1, (int)Math.Round(document.Size.Width));
+        var height = Math.Max(1, (int)Math.Round(document.Size.Height));
+        var bitmap = new RenderTargetBitmap(width, height, 96, 96, PixelFormats.Pbgra32);
         bitmap.Render(visual);
 
         var encoder = new PngBitmapEncoder();
@@ -498,22 +528,30 @@ public sealed class EditorCanvas : FrameworkElement
         DrawHazardSelection(context, crop);
     }
 
-    private static void DrawHazardSelection(DrawingContext context, Rect rect)
+    private void DrawHazardSelection(DrawingContext context, Rect rect)
     {
-        var whiteBase = new WpfPen(WpfBrushes.White, 3);
-        var blackBase = new WpfPen(WpfBrushes.Black, 1);
-        var redAnts = new WpfPen(WpfBrushes.Red, 1.5)
+        var blackAnts = new WpfPen(WpfBrushes.Black, 3)
         {
-            DashStyle = new DashStyle([6, 6], 0),
+            DashStyle = new DashStyle([4, 4], 0),
         };
-        whiteBase.Freeze();
-        blackBase.Freeze();
+        var whiteAnts = new WpfPen(WpfBrushes.White, 1)
+        {
+            DashStyle = new DashStyle([4, 4], 0),
+        };
+        var redAnts = new WpfPen((WpfBrush)FindResource("BrushAccent"), 2)
+        {
+            DashStyle = new DashStyle([8, 6], 0),
+        };
+        blackAnts.Freeze();
+        whiteAnts.Freeze();
         redAnts.Freeze();
-        context.DrawRectangle(null, whiteBase, rect);
-        context.DrawRectangle(null, blackBase, rect);
+        context.DrawRectangle(null, blackAnts, rect);
+        context.DrawRectangle(null, whiteAnts, rect);
         context.DrawRectangle(null, redAnts, rect);
 
         const double size = EditorRenderMetrics.CropHandleSize;
+        var handlePen = new WpfPen(WpfBrushes.Black, 1);
+        handlePen.Freeze();
         foreach (var point in new[]
                  {
                      rect.TopLeft,
@@ -523,7 +561,7 @@ public sealed class EditorCanvas : FrameworkElement
                  })
         {
             var handle = new Rect(point.X - size / 2, point.Y - size / 2, size, size);
-            context.DrawRectangle(WpfBrushes.White, blackBase, handle);
+            context.DrawRectangle(WpfBrushes.White, handlePen, handle);
         }
     }
 

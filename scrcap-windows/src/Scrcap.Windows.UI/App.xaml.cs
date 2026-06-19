@@ -59,13 +59,13 @@ public partial class App : System.Windows.Application
 
         if (TryGetOptionValue(e.Args, "--open-sample-editor") is { } samplePath)
         {
-            OpenSampleEditor(samplePath, options.DumpPath, settingsStore.Settings, options.TestMode);
+            OpenSampleEditor(samplePath, options.DumpPath, options.EditorStateJsonPath, settingsStore.Settings, options.TestMode);
             return;
         }
 
         if (options.TestMode)
         {
-            OpenSampleEditor(null, options.DumpPath, settingsStore.Settings, options.TestMode);
+            OpenSampleEditor(null, options.DumpPath, options.EditorStateJsonPath, settingsStore.Settings, options.TestMode);
         }
     }
 
@@ -390,7 +390,7 @@ public partial class App : System.Windows.Application
         }
     }
 
-    private static void OpenSampleEditor(string? samplePath, string? dumpPath, Settings settings, bool shutdownAfterDump)
+    private static void OpenSampleEditor(string? samplePath, string? dumpPath, string? editorStateJsonPath, Settings settings, bool shutdownAfterDump)
     {
         var window = samplePath is { Length: > 0 }
             ? OpenSampleCapture(samplePath, settings)
@@ -399,8 +399,23 @@ public partial class App : System.Windows.Application
                 Title = "scrcap",
             };
         AttachClientOnlyDumpHook(window, dumpPath, shutdownAfterDump);
+        AttachEditorStateJsonHook(window, editorStateJsonPath);
         window.Show();
         window.Activate();
+    }
+
+    private static void AttachEditorStateJsonHook(EditorWindow window, string? statePath)
+    {
+        if (string.IsNullOrWhiteSpace(statePath))
+        {
+            return;
+        }
+
+        window.TestStateJsonPath = statePath;
+        window.Closed += (_, _) =>
+        {
+            window.WriteStateJsonForTests(statePath);
+        };
     }
 
     private static EditorWindow OpenSampleCapture(string samplePath, Settings settings)
@@ -479,6 +494,7 @@ public partial class App : System.Windows.Application
     private sealed record StartupOptions(
         bool TestMode,
         string? DumpPath,
+        string? EditorStateJsonPath,
         string? SettingsDirectory,
         ThemeMode? AppTheme,
         int PreferencesTabIndex)
@@ -487,6 +503,7 @@ public partial class App : System.Windows.Application
             new(
                 args.Contains("--test-mode", StringComparer.OrdinalIgnoreCase),
                 TryGetOptionValue(args, "--dump-window-png"),
+                TryGetOptionValue(args, "--test-editor-state-json"),
                 TryGetOptionValue(args, "--test-settings-dir"),
                 TryGetThemeMode(TryGetOptionValue(args, "--test-app-theme")),
                 TryGetPreferencesTabIndex(TryGetOptionValue(args, "--test-preferences-tab")));

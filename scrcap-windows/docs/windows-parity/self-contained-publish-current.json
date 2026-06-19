@@ -1,0 +1,19 @@
+{
+  "evidenceDate": "2026-06-19",
+  "command": "tools/Publish-Windows.ps1 -Mode self-contained -Configuration Release",
+  "mode": "self-contained",
+  "configuration": "Release",
+  "artifactPath": "artifacts/scrcap-windows-self-contained",
+  "filesChecked": [
+    {
+      "name": "scrcap.exe",
+      "bytes": 185076297
+    },
+    {
+      "name": "LICENSE.txt",
+      "bytes": 356
+    }
+  ],
+  "result": "passed",
+  "manualInstallRun": "not performed"
+}
