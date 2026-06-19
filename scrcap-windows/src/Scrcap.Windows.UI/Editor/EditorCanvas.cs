@@ -1,10 +1,12 @@
 using System.IO;
 using System.Globalization;
+using System.Diagnostics;
 using System.Windows;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using Scrcap.Core;
+using Scrcap.Core.Diagnostics;
 using WpfBrush = System.Windows.Media.Brush;
 using WpfBrushes = System.Windows.Media.Brushes;
 using WpfColor = System.Windows.Media.Color;
@@ -20,6 +22,7 @@ public sealed class EditorCanvas : FrameworkElement
     private WpfPoint? dragStart;
     private WpfPoint? dragCurrent;
     private Rect imageRect;
+    private bool isDragOut;
 
     public static readonly DependencyProperty ViewModelProperty =
         DependencyProperty.Register(
@@ -47,11 +50,30 @@ public sealed class EditorCanvas : FrameworkElement
         set => SetValue(SourceBitmapProperty, value);
     }
 
+    public double SourcePixelScaleX { get; set; } = 1;
+
+    public double SourcePixelScaleY { get; set; } = 1;
+
     public event EventHandler<CoreRect>? CropCommitted;
+
+    public event EventHandler<CorePoint>? TextRequested;
+
+    public event EventHandler<AutoExpandResult>? AutoExpanded;
+
+    public event EventHandler? DragOutRequested;
 
     public event EventHandler? DocumentChanged;
 
-    public CorePoint WindowPointToImagePoint(WpfPoint point)
+    public CorePoint WindowPointToImagePoint(WpfPoint point) =>
+        WindowPointToImagePoint(point, allowOutsideImage: ViewModel?.Settings.AutoExpandCanvas == true);
+
+    public WpfPoint ImagePointToWindowPoint(CorePoint point)
+    {
+        EnsureImageRect();
+        return new WpfPoint(imageRect.X + point.X * (ViewModel?.Zoom ?? 1), imageRect.Y + point.Y * (ViewModel?.Zoom ?? 1));
+    }
+
+    private CorePoint WindowPointToImagePoint(WpfPoint point, bool allowOutsideImage)
     {
         EnsureImageRect();
         if (ViewModel?.Document is null || imageRect.Width <= 0 || imageRect.Height <= 0)
@@ -59,9 +81,11 @@ public sealed class EditorCanvas : FrameworkElement
             return new CorePoint(0, 0);
         }
 
-        return new CorePoint(
-            Math.Clamp((point.X - imageRect.X) / ViewModel.Zoom, 0, ViewModel.Document.Size.Width),
-            Math.Clamp((point.Y - imageRect.Y) / ViewModel.Zoom, 0, ViewModel.Document.Size.Height));
+        var x = (point.X - imageRect.X) / ViewModel.Zoom;
+        var y = (point.Y - imageRect.Y) / ViewModel.Zoom;
+        return allowOutsideImage
+            ? new CorePoint(x, y)
+            : new CorePoint(Math.Clamp(x, 0, ViewModel.Document.Size.Width), Math.Clamp(y, 0, ViewModel.Document.Size.Height));
     }
 
     public byte[] FlattenPng(int scale)
@@ -73,12 +97,20 @@ public sealed class EditorCanvas : FrameworkElement
         }
 
         scale = scale == 1 ? 1 : 2;
-        var width = Math.Max(1, (int)Math.Round(document.Size.Width * scale));
-        var height = Math.Max(1, (int)Math.Round(document.Size.Height * scale));
+        var targetScaleX = SourcePixelScaleX * scale;
+        var targetScaleY = SourcePixelScaleY * scale;
+        var width = Math.Max(1, (int)Math.Round(document.Size.Width * targetScaleX));
+        var height = Math.Max(1, (int)Math.Round(document.Size.Height * targetScaleY));
+        using var span = ScrcapDiagnostics.Start(
+            "flatten_to_png",
+            ("scale", scale),
+            ("pixelWidth", width),
+            ("pixelHeight", height),
+            ("shapeCount", document.Shapes.Count));
         var visual = new DrawingVisual();
         using (var context = visual.RenderOpen())
         {
-            context.PushTransform(new ScaleTransform(scale, scale));
+            context.PushTransform(new ScaleTransform(targetScaleX, targetScaleY));
             DrawDocument(context, document.Size, zoom: 1, includeBackground: true);
             foreach (var shape in document.Shapes)
             {
@@ -106,6 +138,23 @@ public sealed class EditorCanvas : FrameworkElement
         }
 
         Focus();
+        if (Keyboard.Modifiers.HasFlag(ModifierKeys.Alt))
+        {
+            CaptureMouse();
+            dragStart = e.GetPosition(this);
+            dragCurrent = null;
+            isDragOut = true;
+            e.Handled = true;
+            return;
+        }
+
+        if (ViewModel?.ActiveTool == EditorTool.Text)
+        {
+            TextRequested?.Invoke(this, WindowPointToImagePoint(e.GetPosition(this), allowOutsideImage: false));
+            e.Handled = true;
+            return;
+        }
+
         CaptureMouse();
         dragStart = e.GetPosition(this);
         dragCurrent = dragStart;
@@ -116,6 +165,21 @@ public sealed class EditorCanvas : FrameworkElement
     {
         if (dragStart is not null && IsMouseCaptured)
         {
+            if (isDragOut)
+            {
+                var current = e.GetPosition(this);
+                if (Distance(dragStart.Value, current) >= SystemParameters.MinimumHorizontalDragDistance)
+                {
+                    dragStart = null;
+                    dragCurrent = null;
+                    isDragOut = false;
+                    ReleaseMouseCapture();
+                    DragOutRequested?.Invoke(this, EventArgs.Empty);
+                }
+
+                return;
+            }
+
             dragCurrent = AdjustWindowEndPoint(dragStart.Value, e.GetPosition(this), Keyboard.Modifiers);
             InvalidateVisual();
         }
@@ -132,9 +196,16 @@ public sealed class EditorCanvas : FrameworkElement
         var end = AdjustWindowEndPoint(start, e.GetPosition(this), Keyboard.Modifiers);
         dragStart = null;
         dragCurrent = null;
+        if (isDragOut)
+        {
+            isDragOut = false;
+            InvalidateVisual();
+            return;
+        }
 
-        var startImage = WindowPointToImagePoint(start);
-        var endImage = WindowPointToImagePoint(end);
+        var allowOutside = ViewModel.Settings.AutoExpandCanvas && ViewModel.ActiveTool != EditorTool.Crop;
+        var startImage = WindowPointToImagePoint(start, allowOutside);
+        var endImage = WindowPointToImagePoint(end, allowOutside);
         var rect = CoreRect.FromPoints(startImage, endImage);
 
         if (ViewModel.ActiveTool == EditorTool.Crop)
@@ -146,7 +217,12 @@ public sealed class EditorCanvas : FrameworkElement
         }
         else if (ShouldCommit(ViewModel.ActiveTool, rect, startImage, endImage))
         {
-            ViewModel.CommitShape(startImage, endImage);
+            var growth = ViewModel.CommitShape(startImage, endImage);
+            if (growth.HasGrowth)
+            {
+                AutoExpanded?.Invoke(this, growth);
+            }
+
             DocumentChanged?.Invoke(this, EventArgs.Empty);
         }
 
@@ -175,7 +251,8 @@ public sealed class EditorCanvas : FrameworkElement
 
         if (dragStart is { } start && dragCurrent is { } current)
         {
-            DrawPreview(drawingContext, ViewModel, WindowPointToImagePoint(start), WindowPointToImagePoint(current));
+            var allowOutside = ViewModel.Settings.AutoExpandCanvas && ViewModel.ActiveTool != EditorTool.Crop;
+            DrawPreview(drawingContext, ViewModel, WindowPointToImagePoint(start, allowOutside), WindowPointToImagePoint(current, allowOutside));
         }
 
         drawingContext.Pop();
@@ -203,14 +280,18 @@ public sealed class EditorCanvas : FrameworkElement
             return;
         }
 
+        if (viewModel.ActiveTool == EditorTool.Crop)
+        {
+            DrawCropPreview(context, CoreRect.FromPoints(start, end), viewModel.Document?.Size ?? new CoreSize(0, 0));
+            return;
+        }
+
         var preview = new Shape(
             viewModel.ActiveTool == EditorTool.Counter
                 ? new ShapeKind.Counter(viewModel.Document?.NextCounterNumber ?? 1)
                 : viewModel.ActiveTool == EditorTool.Pixelate
                     ? new ShapeKind.Pixelate()
-                    : viewModel.ActiveTool == EditorTool.Crop
-                        ? new ShapeKind.Rectangle()
-                        : viewModel.ActiveTool == EditorTool.Rectangle
+                    : viewModel.ActiveTool == EditorTool.Rectangle
                             ? new ShapeKind.Rectangle()
                             : new ShapeKind.Arrow(),
             viewModel.ColorIndex,
@@ -240,7 +321,11 @@ public sealed class EditorCanvas : FrameworkElement
                 DrawArrow(context, pen, start, end, shape.Size.Scale());
                 break;
             case ShapeKind.Rectangle:
-                context.DrawRoundedRectangle(null, pen, Normalize(start, end), 5, 5);
+                var rect = Normalize(start, end);
+                var rectanglePen = pen.Clone();
+                rectanglePen.Thickness = EditorRenderMetrics.RectangleStroke(viewModel.Settings.StrokeWidth, shape.Size.Scale(), rect.Width, rect.Height);
+                rectanglePen.Freeze();
+                context.DrawRoundedRectangle(null, rectanglePen, rect, 3, 3);
                 break;
             case ShapeKind.Pixelate:
                 DrawPixelate(context, Normalize(start, end), exportScale);
@@ -249,7 +334,7 @@ public sealed class EditorCanvas : FrameworkElement
                 DrawCounter(context, brush, color, end, counter.Number, shape.Size.Scale());
                 break;
             case ShapeKind.Text text:
-                DrawText(context, brush, start, text.Value, text.Size);
+                DrawText(context, brush, start, text.Value, text.Size, text.MaxWidth);
                 break;
         }
     }
@@ -266,7 +351,7 @@ public sealed class EditorCanvas : FrameworkElement
 
         var unitX = dx / length;
         var unitY = dy / length;
-        var headLength = Math.Clamp(length * 0.18, 9 * scale, 26 * scale);
+        var headLength = EditorRenderMetrics.ArrowHeadLength(length);
         var shaftEnd = new WpfPoint(end.X - unitX * headLength * 0.6, end.Y - unitY * headLength * 0.6);
         context.DrawLine(pen, start, shaftEnd);
 
@@ -289,8 +374,9 @@ public sealed class EditorCanvas : FrameworkElement
             return end;
         }
 
-        var startImage = WindowPointToImagePoint(start);
-        var endImage = WindowPointToImagePoint(end);
+        var allowOutside = ViewModel.Settings.AutoExpandCanvas && ViewModel.ActiveTool != EditorTool.Crop;
+        var startImage = WindowPointToImagePoint(start, allowOutside);
+        var endImage = WindowPointToImagePoint(end, allowOutside);
         endImage = ViewModel.ActiveTool switch
         {
             EditorTool.Rectangle => ConstrainToSquare(startImage, endImage),
@@ -307,44 +393,138 @@ public sealed class EditorCanvas : FrameworkElement
             return;
         }
 
-        var clipped = Rect.Intersect(rect, new Rect(0, 0, SourceBitmap.PixelWidth, SourceBitmap.PixelHeight));
-        if (clipped.IsEmpty || !PixelateRenderer.TryGetPixelBounds(clipped, SourceBitmap, out var bounds))
+        var warmRedrawStopwatch = ScrcapDiagnostics.IsEnabled ? Stopwatch.StartNew() : null;
+        var logicalSourceBounds = new Rect(
+            0,
+            0,
+            SourceBitmap.PixelWidth / Math.Max(0.001, SourcePixelScaleX),
+            SourceBitmap.PixelHeight / Math.Max(0.001, SourcePixelScaleY));
+        var clipped = Rect.Intersect(rect, logicalSourceBounds);
+        if (clipped.IsEmpty)
         {
             return;
         }
 
-        var bitmap = pixelateRenderer.Render(SourceBitmap, bounds, blockSize: 9, exportScale);
-        context.DrawImage(bitmap, new Rect(bounds.X, bounds.Y, bounds.Width, bounds.Height));
+        var sourceRect = new Rect(
+            clipped.X * SourcePixelScaleX,
+            clipped.Y * SourcePixelScaleY,
+            clipped.Width * SourcePixelScaleX,
+            clipped.Height * SourcePixelScaleY);
+        if (!PixelateRenderer.TryGetPixelBounds(sourceRect, SourceBitmap, out var bounds))
+        {
+            return;
+        }
+
+        var grid = EditorRenderMetrics.PixelateGrid(bounds.Width / SourcePixelScaleX, bounds.Height / SourcePixelScaleY);
+        var bitmap = pixelateRenderer.Render(SourceBitmap, bounds, grid.Columns, grid.Rows, exportScale, out var cacheHit);
+        context.DrawImage(
+            bitmap,
+            new Rect(
+                bounds.X / SourcePixelScaleX,
+                bounds.Y / SourcePixelScaleY,
+                bounds.Width / SourcePixelScaleX,
+                bounds.Height / SourcePixelScaleY));
+        if (cacheHit && warmRedrawStopwatch is not null)
+        {
+            warmRedrawStopwatch.Stop();
+            ScrcapDiagnostics.Measure(
+                "warm_pixelate_redraw",
+                warmRedrawStopwatch.Elapsed,
+                ("width", bounds.Width),
+                ("height", bounds.Height),
+                ("exportScale", exportScale));
+        }
     }
 
     private void DrawCounter(DrawingContext context, WpfBrush brush, WpfColor color, WpfPoint center, int number, double scale)
     {
-        var radius = 13 * scale;
+        var radius = EditorRenderMetrics.CounterRadius * scale;
         context.DrawEllipse(brush, null, center, radius, radius);
-        var textColor = Luma(color) > 0.5 ? WpfBrushes.Black : WpfBrushes.White;
-        var fontSize = number >= 100 ? 10 * scale : 13 * scale;
+        var textColor = EditorRenderMetrics.ShouldUseDarkCounterText(color) ? WpfBrushes.Black : WpfBrushes.White;
+        var fontSize = EditorRenderMetrics.CounterFontSize(number, radius);
         var text = new FormattedText(
             number.ToString(CultureInfo.InvariantCulture),
             CultureInfo.InvariantCulture,
             System.Windows.FlowDirection.LeftToRight,
-            new Typeface("Segoe UI Semibold"),
+            new Typeface(new System.Windows.Media.FontFamily("Segoe UI"), FontStyles.Normal, FontWeights.Bold, FontStretches.Normal),
             fontSize,
             textColor,
             VisualTreeHelper.GetDpi(this).PixelsPerDip);
         context.DrawText(text, new WpfPoint(center.X - text.Width / 2, center.Y - text.Height / 2));
     }
 
-    private void DrawText(DrawingContext context, WpfBrush brush, WpfPoint start, string value, double size)
+    private void DrawText(DrawingContext context, WpfBrush brush, WpfPoint start, string value, double size, double? maxWidth)
     {
         var formatted = new FormattedText(
             value,
             CultureInfo.InvariantCulture,
             System.Windows.FlowDirection.LeftToRight,
             new Typeface(new System.Windows.Media.FontFamily("Segoe UI"), FontStyles.Normal, FontWeights.Bold, FontStretches.Normal),
-            size,
+            EditorRenderMetrics.TextFontSize(size),
             brush,
             VisualTreeHelper.GetDpi(this).PixelsPerDip);
+        formatted.LineHeight = EditorRenderMetrics.TextLineHeight(size);
+        if (maxWidth is > 0)
+        {
+            formatted.MaxTextWidth = maxWidth.Value;
+        }
+
         context.DrawText(formatted, start);
+    }
+
+    private void DrawCropPreview(DrawingContext context, CoreRect rect, CoreSize documentSize)
+    {
+        if (rect.Width <= 0 || rect.Height <= 0 || documentSize.Width <= 0 || documentSize.Height <= 0)
+        {
+            return;
+        }
+
+        var documentRect = new Rect(0, 0, documentSize.Width, documentSize.Height);
+        var crop = Rect.Intersect(
+            new Rect(rect.X, rect.Y, rect.Width, rect.Height),
+            documentRect);
+        if (crop.IsEmpty)
+        {
+            return;
+        }
+
+        var dim = new SolidColorBrush(WpfColor.FromArgb(88, 0, 0, 0));
+        dim.Freeze();
+        var overlay = new CombinedGeometry(
+            GeometryCombineMode.Exclude,
+            new RectangleGeometry(documentRect),
+            new RectangleGeometry(crop));
+        context.DrawGeometry(dim, null, overlay);
+        DrawHazardSelection(context, crop);
+    }
+
+    private static void DrawHazardSelection(DrawingContext context, Rect rect)
+    {
+        var whiteBase = new WpfPen(WpfBrushes.White, 3);
+        var blackBase = new WpfPen(WpfBrushes.Black, 1);
+        var redAnts = new WpfPen(WpfBrushes.Red, 1.5)
+        {
+            DashStyle = new DashStyle([6, 6], 0),
+        };
+        whiteBase.Freeze();
+        blackBase.Freeze();
+        redAnts.Freeze();
+        context.DrawRectangle(null, whiteBase, rect);
+        context.DrawRectangle(null, blackBase, rect);
+        context.DrawRectangle(null, redAnts, rect);
+
+        const double size = EditorRenderMetrics.CropHandleSize;
+        foreach (var point in new[]
+                 {
+                     rect.TopLeft,
+                     rect.TopRight,
+                     rect.BottomLeft,
+                     rect.BottomRight,
+                 })
+        {
+            var handle = new Rect(point.X - size / 2, point.Y - size / 2, size, size);
+            context.DrawRectangle(WpfBrushes.White, blackBase, handle);
+        }
     }
 
     private WpfColor ColorForShape(Shape shape, EditorViewModel viewModel)
@@ -365,6 +545,13 @@ public sealed class EditorCanvas : FrameworkElement
         };
 
     private static double Distance(CorePoint start, CorePoint end)
+    {
+        var dx = end.X - start.X;
+        var dy = end.Y - start.Y;
+        return Math.Sqrt(dx * dx + dy * dy);
+    }
+
+    private static double Distance(WpfPoint start, WpfPoint end)
     {
         var dx = end.X - start.X;
         var dy = end.Y - start.Y;
@@ -398,9 +585,6 @@ public sealed class EditorCanvas : FrameworkElement
             imageRect = ImageRect(document.Size, new WpfSize(width, height), ViewModel.Zoom);
         }
     }
-
-    private WpfPoint ImagePointToWindowPoint(CorePoint point) =>
-        new(imageRect.X + point.X * (ViewModel?.Zoom ?? 1), imageRect.Y + point.Y * (ViewModel?.Zoom ?? 1));
 
     private static CorePoint ConstrainToSquare(CorePoint start, CorePoint end)
     {

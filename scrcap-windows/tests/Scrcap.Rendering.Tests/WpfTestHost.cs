@@ -58,6 +58,14 @@ internal static class WpfTestHost
             {
                 Source = new Uri("/Scrcap.Windows.UI;component/Resources/ThemeTokens.xaml", UriKind.Relative),
             });
+            app.Resources.MergedDictionaries.Add(new ResourceDictionary
+            {
+                Source = new Uri("/Scrcap.Windows.UI;component/Resources/IconGeometries.xaml", UriKind.Relative),
+            });
+            app.Resources.MergedDictionaries.Add(new ResourceDictionary
+            {
+                Source = new Uri("/Scrcap.Windows.UI;component/Chrome/ScrcapWindowChrome.xaml", UriKind.Relative),
+            });
         }
     }
 }

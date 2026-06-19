@@ -5,6 +5,8 @@
     <ResourceDictionary>
       <ResourceDictionary.MergedDictionaries>
         <ResourceDictionary Source="Resources/ThemeTokens.xaml" />
+        <ResourceDictionary Source="Resources/IconGeometries.xaml" />
+        <ResourceDictionary Source="Chrome/ScrcapWindowChrome.xaml" />
       </ResourceDictionary.MergedDictionaries>
     </ResourceDictionary>
   </Application.Resources>

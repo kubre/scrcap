@@ -1,8 +1,10 @@
 using System.IO;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Documents;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
+using System.Windows.Automation;
 using Scrcap.Core;
 using Scrcap.Windows.Platform.Capture;
 using Scrcap.Windows.UI.Editor;
@@ -33,6 +35,125 @@ public sealed class VisualBaselineTests
     }
 
     [Theory]
+    [InlineData(600)]
+    [InlineData(720)]
+    [InlineData(980)]
+    [InlineData(1200)]
+    public void EditorRendersWithoutToolbarClippingAtRequiredWidths(int width)
+    {
+        WpfTestHost.Run(() =>
+        {
+            WpfTestHost.ApplyTheme(ThemeMode.Light);
+            var settings = BaselineSettings(ThemeMode.Light);
+            var window = new EditorWindow(CaptureResultForEditor(), settings);
+            var viewModel = (EditorViewModel)window.DataContext;
+            viewModel.ActiveTool = EditorTool.Text;
+            viewModel.ColorIndex = 4;
+            viewModel.ActiveSize = ShapeSize.Large;
+
+            var bitmap = VisualBaseline.RenderWindow(window, width, 560);
+
+            Assert.Equal(width, bitmap.PixelWidth);
+            Assert.Equal(560, bitmap.PixelHeight);
+        });
+    }
+
+    [Fact]
+    public void EditorToolbarItemsStayInsideSixHundredDipWindowWhenTextToolIsActive()
+    {
+        WpfTestHost.Run(() =>
+        {
+            WpfTestHost.ApplyTheme(ThemeMode.Light);
+            var window = new EditorWindow(CaptureResultForEditor(), BaselineSettings(ThemeMode.Light))
+            {
+                Width = 600,
+                Height = 560,
+                WindowStartupLocation = WindowStartupLocation.Manual,
+                Left = -32000,
+                Top = -32000,
+                ShowInTaskbar = false,
+            };
+            var viewModel = (EditorViewModel)window.DataContext;
+            viewModel.ActiveTool = EditorTool.Text;
+            viewModel.ColorIndex = 4;
+            viewModel.ActiveSize = ShapeSize.Large;
+            window.Show();
+            DrainDispatcher();
+
+            foreach (var automationId in ToolbarAutomationIds())
+            {
+                var element = FindByAutomationId<FrameworkElement>(window, automationId);
+                Assert.NotNull(element);
+                Assert.True(element!.ActualWidth > 0, $"{automationId} should be visible.");
+                var bounds = element.TransformToAncestor(window).TransformBounds(new Rect(0, 0, element.ActualWidth, element.ActualHeight));
+                Assert.InRange(bounds.Left, 0, window.ActualWidth);
+                Assert.InRange(bounds.Right, 0, window.ActualWidth);
+            }
+
+            window.Close();
+            DrainDispatcher();
+        });
+    }
+
+    [Fact]
+    public void EditorToolbarSelectedStatesRenderActiveBackgrounds()
+    {
+        WpfTestHost.Run(() =>
+        {
+            WpfTestHost.ApplyTheme(ThemeMode.Light);
+            var window = new EditorWindow(CaptureResultForEditor(), BaselineSettings(ThemeMode.Light))
+            {
+                Width = 860,
+                Height = 560,
+                WindowStartupLocation = WindowStartupLocation.Manual,
+                Left = -32000,
+                Top = -32000,
+                ShowInTaskbar = false,
+            };
+            var viewModel = (EditorViewModel)window.DataContext;
+            window.Show();
+            DrainDispatcher();
+
+            foreach (var (tool, automationId) in new[]
+                     {
+                         (EditorTool.Arrow, "ToolArrow"),
+                         (EditorTool.Rectangle, "ToolRectangle"),
+                         (EditorTool.Counter, "ToolCounter"),
+                         (EditorTool.Text, "ToolText"),
+                         (EditorTool.Pixelate, "ToolPixelate"),
+                         (EditorTool.Crop, "ToolCrop"),
+                     })
+            {
+                viewModel.ActiveTool = tool;
+                DrainDispatcher();
+                AssertToolbarState(window, automationId, ToolAutomationIds());
+            }
+
+            for (var index = 0; index < 5; index++)
+            {
+                viewModel.ColorIndex = index;
+                DrainDispatcher();
+                AssertToolbarState(window, $"Color{index + 1}", ColorAutomationIds());
+            }
+
+            foreach (var (size, automationId) in new[]
+                     {
+                         (ShapeSize.Small, "SizeSmall"),
+                         (ShapeSize.Medium, "SizeMedium"),
+                         (ShapeSize.Large, "SizeLarge"),
+                     })
+            {
+                viewModel.ActiveSize = size;
+                DrainDispatcher();
+                AssertToolbarState(window, automationId, SizeAutomationIds());
+            }
+
+            window.Close();
+            DrainDispatcher();
+        });
+    }
+
+    [Theory]
     [InlineData(ThemeMode.Light, "preferences-light")]
     [InlineData(ThemeMode.Dark, "preferences-dark")]
     public void PreferencesMatchesVisualBaseline(ThemeMode theme, string baselineName)
@@ -46,6 +167,36 @@ public sealed class VisualBaselineTests
             var store = new SettingsStore(temp.Path);
             Assert.True(store.Update(next => CopySettings(settings, next)));
             var window = new PreferencesWindow(store);
+
+            var bitmap = VisualBaseline.RenderWindow(window, 720, 540);
+            VisualBaseline.AssertMatches(baselineName, bitmap);
+        });
+    }
+
+    [Theory]
+    [InlineData(ThemeMode.Light, 0, "preferences-general-light")]
+    [InlineData(ThemeMode.Dark, 0, "preferences-general-dark")]
+    [InlineData(ThemeMode.Light, 1, "preferences-capture-light")]
+    [InlineData(ThemeMode.Dark, 1, "preferences-capture-dark")]
+    [InlineData(ThemeMode.Light, 2, "preferences-shortcuts-light")]
+    [InlineData(ThemeMode.Dark, 2, "preferences-shortcuts-dark")]
+    [InlineData(ThemeMode.Light, 3, "preferences-editor-light")]
+    [InlineData(ThemeMode.Dark, 3, "preferences-editor-dark")]
+    [InlineData(ThemeMode.Light, 4, "preferences-output-light")]
+    [InlineData(ThemeMode.Dark, 4, "preferences-output-dark")]
+    [InlineData(ThemeMode.Light, 5, "preferences-about-light")]
+    [InlineData(ThemeMode.Dark, 5, "preferences-about-dark")]
+    public void PreferencesTabsMatchVisualBaselines(ThemeMode theme, int tabIndex, string baselineName)
+    {
+        WpfTestHost.Run(() =>
+        {
+            WpfTestHost.ApplyTheme(theme);
+            using var temp = new TemporarySettingsDirectory();
+            var settings = BaselineSettings(theme);
+            settings.SaveFolder = @"C:\Users\Example\Pictures\scrcap";
+            var store = new SettingsStore(temp.Path);
+            Assert.True(store.Update(next => CopySettings(settings, next)));
+            var window = new PreferencesWindow(store, tabIndex);
 
             var bitmap = VisualBaseline.RenderWindow(window, 720, 540);
             VisualBaseline.AssertMatches(baselineName, bitmap);
@@ -72,7 +223,7 @@ public sealed class VisualBaselineTests
             var hud = new ScrollingCaptureHud(() => { });
             hud.UpdateProgress(new ScrollingCaptureProgress(3, 1280, 2400));
 
-            var bitmap = VisualBaseline.RenderWindow(hud, 220, 64);
+            var bitmap = VisualBaseline.RenderWindow(hud, 244, 64);
             VisualBaseline.AssertMatches("scrolling-hud", bitmap);
         });
     }
@@ -101,8 +252,7 @@ public sealed class VisualBaselineTests
 
         viewModel.ActiveTool = EditorTool.Text;
         viewModel.ColorIndex = 3;
-        viewModel.PendingText = "Baseline";
-        viewModel.CommitShape(new CorePoint(74, 196), new CorePoint(74, 196));
+        viewModel.CommitShape(new CorePoint(74, 196), new CorePoint(74, 196), "Baseline");
     }
 
     private static Settings BaselineSettings(ThemeMode theme)
@@ -149,34 +299,55 @@ public sealed class VisualBaselineTests
 
     private static FrameworkElement CreateOverlayFixture()
     {
-        var root = new Grid
+        var root = new Canvas
         {
-            Background = (Brush)Application.Current.FindResource("BrushOverlayDim"),
+            Width = 640,
+            Height = 360,
+            Background = Brushes.Transparent,
         };
-        var canvas = new Canvas();
-        root.Children.Add(canvas);
 
-        AddText(canvas, "Drag to capture a region. Press Esc to cancel.", 18, 18, "BrushPanel", "BrushInk", new Thickness(10, 6, 10, 6));
-        AddLine(canvas, 320, 0, 320, 360);
-        AddLine(canvas, 0, 180, 640, 180);
-
-        var selection = new System.Windows.Shapes.Rectangle
+        var selectionRect = new Rect(146, 92, 330, 184);
+        var dimMask = new GeometryGroup { FillRule = FillRule.EvenOdd };
+        dimMask.Children.Add(new RectangleGeometry(new Rect(0, 0, 640, 360)));
+        dimMask.Children.Add(new RectangleGeometry(selectionRect));
+        root.Children.Add(new System.Windows.Shapes.Path
         {
-            Width = 330,
-            Height = 184,
-            Stroke = (Brush)Application.Current.FindResource("BrushAccent"),
-            StrokeThickness = 2,
+            Data = dimMask,
+            Fill = (Brush)Application.Current.FindResource("BrushOverlayDim"),
+        });
+
+        AddHint(root, 18, 18);
+        AddLine(root, 320, 0, 320, 360);
+        AddLine(root, 0, 180, 640, 180);
+        AddSelectionAnts(root, selectionRect);
+        AddText(root, "330 \u00d7 184", 484, 50, "BrushTagBackground", "BrushTagText", new Thickness(10, 5, 10, 5), "Consolas");
+        AddMoveHint(root, 146, 284);
+        AddText(root, "2/4  Example window  330 \u00d7 184", 188, 286, "BrushTagBackground", "BrushTagText", new Thickness(10, 6, 10, 6));
+        return root;
+    }
+
+    private static void AddSelectionAnts(Canvas canvas, Rect rect)
+    {
+        AddAnt(canvas, rect, Brushes.Black, 3, [4, 4]);
+        AddAnt(canvas, rect, Brushes.White, 1, [4, 4]);
+        AddAnt(canvas, rect, (Brush)Application.Current.FindResource("BrushAccent"), 2, [8, 6]);
+    }
+
+    private static void AddAnt(Canvas canvas, Rect rect, Brush stroke, double thickness, DoubleCollection dash)
+    {
+        var ant = new System.Windows.Shapes.Rectangle
+        {
+            Width = rect.Width,
+            Height = rect.Height,
+            Stroke = stroke,
+            StrokeThickness = thickness,
             StrokeDashArray = [6, 4],
             Fill = Brushes.Transparent,
         };
-        Canvas.SetLeft(selection, 146);
-        Canvas.SetTop(selection, 92);
-        canvas.Children.Add(selection);
-
-        AddText(canvas, "330 x 184", 484, 284, "BrushAccent", "BrushOnAccent", new Thickness(6, 3, 6, 3), "Consolas");
-        AddText(canvas, "Spans 2 displays", 146, 56, "BrushPanel", "BrushInk", new Thickness(6, 3, 6, 3));
-        AddText(canvas, "Example window", 188, 286, "BrushAccent", "BrushOnAccent", new Thickness(8, 4, 8, 4));
-        return root;
+        ant.StrokeDashArray = dash;
+        Canvas.SetLeft(ant, rect.X);
+        Canvas.SetTop(ant, rect.Y);
+        canvas.Children.Add(ant);
     }
 
     private static void AddLine(Canvas canvas, double x1, double y1, double x2, double y2)
@@ -187,9 +358,72 @@ public sealed class VisualBaselineTests
             Y1 = y1,
             X2 = x2,
             Y2 = y2,
-            Stroke = (Brush)Application.Current.FindResource("BrushAccent"),
+            Stroke = (Brush)Application.Current.FindResource("BrushTagRule"),
             StrokeThickness = 1,
         });
+    }
+
+    private static void AddHint(Canvas canvas, double left, double top)
+    {
+        var text = new TextBlock
+        {
+            Foreground = (Brush)Application.Current.FindResource("BrushTagText"),
+            FontFamily = (FontFamily)Application.Current.FindResource("FontUi"),
+            FontSize = 11.5,
+        };
+        text.Inlines.Add("Drag a region. ");
+        text.Inlines.Add(Keycap("Space"));
+        text.Inlines.Add(" move  ");
+        text.Inlines.Add(Keycap("Esc"));
+        text.Inlines.Add(" cancel");
+        AddInlineTag(canvas, text, left, top, new Thickness(10, 6, 10, 6));
+    }
+
+    private static void AddMoveHint(Canvas canvas, double left, double top)
+    {
+        var text = new TextBlock
+        {
+            Foreground = (Brush)Application.Current.FindResource("BrushTagText"),
+            FontFamily = (FontFamily)Application.Current.FindResource("FontUi"),
+            FontSize = 11.5,
+        };
+        text.Inlines.Add(Keycap("Space"));
+        text.Inlines.Add(" move  ");
+        text.Inlines.Add(Keycap("Esc"));
+        text.Inlines.Add(" cancel  Spans 2 displays");
+        AddInlineTag(canvas, text, left, top, new Thickness(10, 5, 10, 5));
+    }
+
+    private static InlineUIContainer Keycap(string text) =>
+        new(new Border
+        {
+            Background = (Brush)Application.Current.FindResource("BrushAccent"),
+            BorderBrush = (Brush)Application.Current.FindResource("BrushAccentDeep"),
+            BorderThickness = new Thickness(1),
+            Padding = new Thickness(4, 1, 4, 1),
+            Child = new TextBlock
+            {
+                Text = text,
+                Foreground = (Brush)Application.Current.FindResource("BrushOnAccent"),
+                FontFamily = (FontFamily)Application.Current.FindResource("FontMono"),
+                FontSize = 11.5,
+            },
+        });
+
+    private static void AddInlineTag(Canvas canvas, TextBlock text, double left, double top, Thickness padding)
+    {
+        var border = new Border
+        {
+            Background = (Brush)Application.Current.FindResource("BrushTagBackground"),
+            BorderBrush = (Brush)Application.Current.FindResource("BrushTagRule"),
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(0),
+            Padding = padding,
+            Child = text,
+        };
+        Canvas.SetLeft(border, left);
+        Canvas.SetTop(border, top);
+        canvas.Children.Add(border);
     }
 
     private static void AddText(Canvas canvas, string text, double left, double top, string backgroundKey, string foregroundKey, Thickness padding, string fontFamily = "Segoe UI")
@@ -197,7 +431,9 @@ public sealed class VisualBaselineTests
         var border = new Border
         {
             Background = (Brush)Application.Current.FindResource(backgroundKey),
-            CornerRadius = new CornerRadius(4),
+            BorderBrush = (Brush)Application.Current.FindResource("BrushTagRule"),
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(0),
             Padding = padding,
             Child = new TextBlock
             {
@@ -210,6 +446,89 @@ public sealed class VisualBaselineTests
         Canvas.SetLeft(border, left);
         Canvas.SetTop(border, top);
         canvas.Children.Add(border);
+    }
+
+    private static IReadOnlyList<string> ToolbarAutomationIds() =>
+        ToolAutomationIds()
+            .Concat(ColorAutomationIds())
+            .Concat(SizeAutomationIds())
+            .ToArray();
+
+    private static IReadOnlyList<string> ToolAutomationIds() =>
+        ["ToolArrow", "ToolRectangle", "ToolCounter", "ToolText", "ToolPixelate", "ToolCrop"];
+
+    private static IReadOnlyList<string> ColorAutomationIds() =>
+        ["Color1", "Color2", "Color3", "Color4", "Color5"];
+
+    private static IReadOnlyList<string> SizeAutomationIds() =>
+        ["SizeSmall", "SizeMedium", "SizeLarge"];
+
+    private static void AssertToolbarState(Window window, string activeId, IReadOnlyList<string> groupIds)
+    {
+        var activeBrush = (SolidColorBrush)Application.Current.FindResource("BrushActiveWash");
+        foreach (var automationId in groupIds)
+        {
+            var button = FindByAutomationId<Button>(window, automationId);
+            Assert.NotNull(button);
+            var chrome = FindDescendant<Border>(button!);
+            Assert.NotNull(chrome);
+            var brush = Assert.IsType<SolidColorBrush>(chrome!.Background);
+            if (automationId == activeId)
+            {
+                Assert.Equal(activeBrush.Color, brush.Color);
+            }
+            else
+            {
+                Assert.Equal(Colors.Transparent, brush.Color);
+            }
+        }
+    }
+
+    private static T? FindByAutomationId<T>(DependencyObject root, string automationId)
+        where T : DependencyObject
+    {
+        if (root is T element && AutomationProperties.GetAutomationId(element) == automationId)
+        {
+            return element;
+        }
+
+        var children = VisualTreeHelper.GetChildrenCount(root);
+        for (var index = 0; index < children; index++)
+        {
+            if (FindByAutomationId<T>(VisualTreeHelper.GetChild(root, index), automationId) is { } match)
+            {
+                return match;
+            }
+        }
+
+        return null;
+    }
+
+    private static T? FindDescendant<T>(DependencyObject root)
+        where T : DependencyObject
+    {
+        if (root is T element)
+        {
+            return element;
+        }
+
+        var children = VisualTreeHelper.GetChildrenCount(root);
+        for (var index = 0; index < children; index++)
+        {
+            if (FindDescendant<T>(VisualTreeHelper.GetChild(root, index)) is { } match)
+            {
+                return match;
+            }
+        }
+
+        return null;
+    }
+
+    private static void DrainDispatcher()
+    {
+        var dispatcher = System.Windows.Threading.Dispatcher.CurrentDispatcher;
+        dispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.ApplicationIdle);
+        dispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.ContextIdle);
     }
 
     private sealed class TemporarySettingsDirectory : IDisposable

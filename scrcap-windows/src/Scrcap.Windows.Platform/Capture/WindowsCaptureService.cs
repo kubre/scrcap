@@ -3,6 +3,7 @@ using System.Drawing.Imaging;
 using System.Runtime.InteropServices;
 using System.Windows.Forms;
 using Scrcap.Core;
+using Scrcap.Core.Diagnostics;
 
 namespace Scrcap.Windows.Platform.Capture;
 
@@ -423,15 +424,26 @@ public sealed class WindowsCaptureService : IWindowsCaptureService
         IReadOnlyList<Bitmap> frames,
         int width,
         int maxRows,
-        ScrollingCaptureStopReason? stopReason = null) =>
+        ScrollingCaptureStopReason? stopReason = null)
+    {
+        var outputHeight = Math.Min(TotalHeight(frames), maxRows);
+        var estimatedBytes = EstimatedBytes(frames, width);
+        ScrcapDiagnostics.Mark(
+            "scrolling_retained_bytes",
+            ("frames", frames.Count),
+            ("retainedBytes", estimatedBytes),
+            ("outputHeight", outputHeight),
+            ("maxPixelHeight", maxRows),
+            ("stopReason", stopReason));
         options.Progress?.Report(
             new ScrollingCaptureProgress(
                 frames.Count,
-                Math.Min(TotalHeight(frames), maxRows),
+                outputHeight,
                 maxRows,
-                EstimatedBytes(frames, width),
+                estimatedBytes,
                 false,
                 stopReason));
+    }
 
     private static CaptureResult CreateScrollingResult(
         IReadOnlyList<Bitmap> frames,

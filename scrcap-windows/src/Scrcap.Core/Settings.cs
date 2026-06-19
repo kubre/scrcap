@@ -254,6 +254,10 @@ public sealed class SettingsStore
 
     public Settings Settings { get; private set; }
 
+    public string FilePath => filePath;
+
+    public event EventHandler<Settings>? SettingsChanged;
+
     public static string DefaultDirectory() =>
         Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
@@ -271,6 +275,7 @@ public sealed class SettingsStore
         }
 
         Settings = next;
+        SettingsChanged?.Invoke(this, Settings);
         return true;
     }
 

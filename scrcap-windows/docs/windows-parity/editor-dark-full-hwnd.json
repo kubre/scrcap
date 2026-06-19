@@ -1,0 +1,98 @@
+﻿{
+    "scenario":  "Editor sample",
+    "theme":  "dark",
+    "evidenceDateUtc":  "2026-06-19T12:17:44.2250953+00:00",
+    "commit":  "3e3eca3bf8a0d7b17f5cd5f04830b4c0db5a478e",
+    "branch":  {
+
+               },
+    "headName":  "win_port",
+    "refsPointingAtHead":  [
+                               "win_port"
+                           ],
+    "branchContext":  "win_port",
+    "packageMode":  "Release loose build",
+    "appPath":  "C:\\Users\\Asus\\.codex\\worktrees\\b7f9\\scrcap\\scrcap-windows\\src\\Scrcap.Windows.UI\\bin\\Release\\net8.0-windows10.0.19041.0\\Scrcap.Windows.UI.dll",
+    "appArguments":  [
+                         "--test-mode",
+                         "--open-sample-editor",
+                         "C:\\Users\\Asus\\.codex\\worktrees\\b7f9\\scrcap\\scrcap-windows\\docs\\windows-parity\\reference-sample.png",
+                         "--test-settings-dir",
+                         "C:\\Users\\Asus\\.codex\\worktrees\\b7f9\\scrcap\\scrcap-windows\\docs\\windows-parity\\settings-deterministic",
+                         "--test-app-theme",
+                         "dark"
+                     ],
+    "processId":  25152,
+    "hwnd":  "16909922",
+    "windowTitle":  "scrcap",
+    "captureMethod":  "desktop CopyFromScreen using HWND bounds plus shadow padding; not WPF RenderTargetBitmap",
+    "shadowPadding":  24,
+    "output":  "C:\\Users\\Asus\\.codex\\worktrees\\b7f9\\scrcap\\scrcap-windows\\docs\\windows-parity\\editor-dark-full-hwnd.png",
+    "image":  {
+                  "height":  568,
+                  "width":  768
+              },
+    "windowRect":  {
+                       "left":  600,
+                       "top":  256,
+                       "right":  1320,
+                       "bottom":  776,
+                       "width":  720,
+                       "height":  520
+                   },
+    "dwmExtendedFrameBounds":  {
+                                   "left":  600,
+                                   "top":  256,
+                                   "right":  1320,
+                                   "bottom":  776,
+                                   "width":  720,
+                                   "height":  520
+                               },
+    "captureBounds":  {
+                          "left":  576,
+                          "width":  768,
+                          "top":  232,
+                          "height":  568
+                      },
+    "os":  {
+               "caption":  "Microsoft Windows 11 Home Single Language",
+               "buildNumber":  "26200",
+               "architecture":  "64-bit",
+               "version":  "10.0.26200"
+           },
+    "gpu":  [
+                {
+                    "Name":  "NVIDIA GeForce RTX 3050 Laptop GPU",
+                    "DriverVersion":  "32.0.15.7628",
+                    "AdapterRAM":  4293918720
+                },
+                {
+                    "Name":  "AMD Radeon(TM) Graphics",
+                    "DriverVersion":  "30.0.13002.19003",
+                    "AdapterRAM":  536870912
+                }
+            ],
+    "displays":  [
+                     {
+                         "deviceName":  "\\\\.\\DISPLAY1",
+                         "primary":  true,
+                         "bounds":  {
+                                        "left":  0,
+                                        "width":  1920,
+                                        "top":  0,
+                                        "height":  1080
+                                    },
+                         "workingArea":  {
+                                             "left":  0,
+                                             "width":  1920,
+                                             "top":  0,
+                                             "height":  1032
+                                         },
+                         "dpi":  {
+                                     "dpiX":  96,
+                                     "dpiY":  96,
+                                     "scalePercent":  100
+                                 }
+                     }
+                 ]
+}

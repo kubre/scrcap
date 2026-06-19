@@ -1,10 +1,12 @@
 using System.IO;
 using System.Text.Json.Nodes;
 using System.Windows;
+using System.Windows.Automation;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
 using Scrcap.Core;
+using Scrcap.Windows.Platform.Startup;
 using Scrcap.Windows.UI.Preferences;
 using Scrcap.Windows.UI.Resources;
 
@@ -19,13 +21,15 @@ public sealed class PreferencesImplementationTests
 
         foreach (var tab in new[] { "General", "Capture", "Shortcuts", "Editor", "Output", "About" })
         {
-            Assert.Contains($"Header=\"{tab}\"", xaml, StringComparison.Ordinal);
+            Assert.Contains($"Text=\"{tab}\"", xaml, StringComparison.Ordinal);
         }
 
         foreach (var automationId in new[]
                  {
                      "PreferencesTabs",
-                     "ThemeMode",
+                     "ThemeModeSystem",
+                     "ThemeModeLight",
+                     "ThemeModeDark",
                      "LaunchAtLogin",
                      "RegionAfterCapture",
                      "WindowCaptureTarget",
@@ -36,15 +40,21 @@ public sealed class PreferencesImplementationTests
                      "TextSize",
                      "AutoExpandCanvas",
                      "FilenamePattern",
-                     "ExportScale",
-                     "SuppressCopyNotification",
+                     "ExportScale1x",
+                     "ExportScale2x",
+                     "NotifyWhenCopied",
                      "ResetAllPreferences",
-                     "SavePreferences",
-                     "ClosePreferences",
                  })
         {
             Assert.Contains($"AutomationProperties.AutomationId=\"{automationId}\"", xaml, StringComparison.Ordinal);
         }
+
+        Assert.DoesNotContain("SavePreferences", xaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("Content=\"Save\"", xaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("Suppress copy notification", xaml, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Retina", xaml, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("IconPreferencesGeneral", xaml, StringComparison.Ordinal);
+        Assert.Contains("%APPDATA%\\scrcap\\settings.json", xaml, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -81,11 +91,32 @@ public sealed class PreferencesImplementationTests
     }
 
     [Fact]
-    public void PreferencesSaveWritesJsonAndReopenedStoreLoadsChangedSettingPerEditableTab()
+    public void PreferencesUsesSharedWindowChrome()
+    {
+        var xaml = ReadRepoFile("src/Scrcap.Windows.UI/Preferences/PreferencesWindow.xaml");
+        var source = ReadRepoFile("src/Scrcap.Windows.UI/Preferences/PreferencesWindow.xaml.cs");
+        var chrome = ReadRepoFile("src/Scrcap.Windows.UI/Chrome/ScrcapWindowChrome.xaml");
+        var behavior = ReadRepoFile("src/Scrcap.Windows.UI/Chrome/WindowChromeBehavior.cs");
+
+        Assert.Contains("chrome:WindowChromeBehavior.Enabled=\"True\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("<chrome:ScrcapWindowChrome", xaml, StringComparison.Ordinal);
+        Assert.Contains("CaptionCloseButton", chrome, StringComparison.Ordinal);
+        Assert.Contains("SystemCommands.CloseWindow", ReadRepoFile("src/Scrcap.Windows.UI/Chrome/ScrcapWindowChrome.cs"), StringComparison.Ordinal);
+        Assert.Contains("WindowChrome.SetWindowChrome", behavior, StringComparison.Ordinal);
+        Assert.Contains("CaptionHeight = 36", behavior, StringComparison.Ordinal);
+        Assert.Contains("HtMaxButton", behavior, StringComparison.Ordinal);
+        Assert.Contains("WmGetMinMaxInfo", behavior, StringComparison.Ordinal);
+        Assert.Contains("ApplyTaskbarAwareMaximizeBounds", behavior, StringComparison.Ordinal);
+        Assert.DoesNotContain("DragMove()", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("ClosePreferences", xaml, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void PreferencesLiveWritesJsonAndReopenedStoreLoadsChangedSettingPerEditableTab()
     {
         using var temp = new TempDirectory();
         var store = new SettingsStore(temp.Path);
-        var viewModel = new PreferencesViewModel(store)
+        var viewModel = new PreferencesViewModel(store, new FakeLaunchAtLoginService())
         {
             SelectedThemeMode = ThemeMode.Dark,
             RegionAfterCapture = AfterCaptureBehavior.Both,
@@ -96,11 +127,11 @@ public sealed class PreferencesImplementationTests
             SaveFolder = temp.Path,
             FilenamePattern = "prefs-persist-{date}",
             ExportScale = 1,
-            SuppressCopyNotification = true,
+            NotifyWhenCopied = false,
         };
 
         Assert.True(viewModel.RecordShortcut(AppAction.CaptureDelayed, Key.D7, ModifierKeys.Control | ModifierKeys.Shift));
-        Assert.True(viewModel.Save());
+        viewModel.FlushPendingWrites();
 
         var settingsPath = System.IO.Path.Combine(temp.Path, "settings.json");
         Assert.True(File.Exists(settingsPath));
@@ -109,6 +140,7 @@ public sealed class PreferencesImplementationTests
         Assert.Equal(7, json["captureDelaySeconds"]!.GetValue<int>());
         Assert.Equal(6, json["strokeWidth"]!.GetValue<double>());
         Assert.Equal("prefs-persist-{date}", json["filenamePattern"]!.GetValue<string>());
+        Assert.True(json["suppressCopyNotification"]!.GetValue<bool>());
         Assert.Equal("ctrl+shift+7", json["hotkeys"]![AppAction.CaptureDelayed.StorageKey()]!.GetValue<string>());
         Assert.Equal("both", json["afterCapture"]![Scrcap.Core.CaptureMode.Region.StorageKey()]!.GetValue<string>());
 
@@ -121,7 +153,7 @@ public sealed class PreferencesImplementationTests
         Assert.False(reopened.AutoExpandCanvas);
         Assert.Equal("prefs-persist-{date}", reopened.FilenamePattern);
         Assert.Equal(1, reopened.ExportScale);
-        Assert.True(reopened.SuppressCopyNotification);
+        Assert.False(reopened.NotifyWhenCopied);
     }
 
     [Fact]
@@ -129,7 +161,7 @@ public sealed class PreferencesImplementationTests
     {
         using var temp = new TempDirectory();
         var store = new SettingsStore(temp.Path);
-        var viewModel = new PreferencesViewModel(store)
+        var viewModel = new PreferencesViewModel(store, new FakeLaunchAtLoginService())
         {
             SelectedThemeMode = ThemeMode.Dark,
             IncludeCursor = true,
@@ -142,7 +174,6 @@ public sealed class PreferencesImplementationTests
         Assert.True(viewModel.RecordShortcut(AppAction.CaptureRegion, Key.D8, ModifierKeys.Control | ModifierKeys.Shift));
 
         viewModel.ResetAll();
-        Assert.True(viewModel.Save());
 
         var defaults = Settings.Defaults();
         var reopened = new PreferencesViewModel(new SettingsStore(temp.Path));
@@ -184,6 +215,53 @@ public sealed class PreferencesImplementationTests
 
         Assert.Equal(original, viewModel.CaptureWindowHotkey);
         Assert.Contains("reserved by Windows", viewModel.ShortcutRecorderStatus, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ShortcutRecorderClearsWithDeleteAndDisplaysWindowsModifiers()
+    {
+        using var temp = new TempDirectory();
+        var viewModel = new PreferencesViewModel(new SettingsStore(temp.Path));
+
+        Assert.Contains("Alt+Shift+1", viewModel.CaptureRegionHotkeyDisplay, StringComparison.Ordinal);
+        Assert.True(viewModel.RecordShortcut(AppAction.CaptureRegion, Key.Delete, ModifierKeys.None));
+
+        Assert.Empty(viewModel.CaptureRegionHotkey);
+        Assert.Equal("Not set", viewModel.CaptureRegionHotkeyDisplay);
+        Assert.Contains("cleared", viewModel.ShortcutRecorderStatus, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ShortcutRecorderIgnoresKeysUntilExplicitlyArmed()
+    {
+        RunSta(() =>
+        {
+            EnsureApplication();
+            using var temp = new TempDirectory();
+            var window = new PreferencesWindow(new SettingsStore(temp.Path), selectedTabIndex: 2, launchAtLoginService: new FakeLaunchAtLoginService())
+            {
+                WindowStartupLocation = WindowStartupLocation.Manual,
+                Left = -32000,
+                Top = -32000,
+                ShowInTaskbar = false,
+            };
+
+            window.Show();
+            window.UpdateLayout();
+            var button = Assert.IsType<Button>(FindByAutomationId(window, "CaptureRegionHotkey"));
+            var viewModel = Assert.IsType<PreferencesViewModel>(window.DataContext);
+            var original = viewModel.CaptureRegionHotkey;
+
+            button.Focus();
+            RaisePreviewKeyDown(button, Key.Delete);
+            Assert.Equal(original, viewModel.CaptureRegionHotkey);
+
+            button.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            RaisePreviewKeyDown(button, Key.Delete);
+            Assert.Empty(viewModel.CaptureRegionHotkey);
+
+            window.Close();
+        });
     }
 
     [Fact]
@@ -230,6 +308,27 @@ public sealed class PreferencesImplementationTests
             {
                 Source = new Uri("/Scrcap.Windows.UI;component/Resources/ThemeTokens.xaml", UriKind.Relative),
             });
+            app.Resources.MergedDictionaries.Add(new ResourceDictionary
+            {
+                Source = new Uri("/Scrcap.Windows.UI;component/Resources/IconGeometries.xaml", UriKind.Relative),
+            });
+            app.Resources.MergedDictionaries.Add(new ResourceDictionary
+            {
+                Source = new Uri("/Scrcap.Windows.UI;component/Chrome/ScrcapWindowChrome.xaml", UriKind.Relative),
+            });
+        }
+    }
+
+    private sealed class FakeLaunchAtLoginService : ILaunchAtLoginService
+    {
+        public bool Enabled { get; private set; }
+
+        public bool IsEnabled() => Enabled;
+
+        public bool SetEnabled(bool enabled, string? executablePath = null)
+        {
+            Enabled = enabled;
+            return true;
         }
     }
 
@@ -251,6 +350,38 @@ public sealed class PreferencesImplementationTests
         }
 
         return null;
+    }
+
+    private static DependencyObject? FindByAutomationId(DependencyObject parent, string automationId)
+    {
+        if (parent is UIElement element && AutomationProperties.GetAutomationId(element) == automationId)
+        {
+            return parent;
+        }
+
+        for (var index = 0; index < VisualTreeHelper.GetChildrenCount(parent); index++)
+        {
+            var child = VisualTreeHelper.GetChild(parent, index);
+            if (FindByAutomationId(child, automationId) is { } match)
+            {
+                return match;
+            }
+        }
+
+        return null;
+    }
+
+    private static void RaisePreviewKeyDown(UIElement element, Key key)
+    {
+        var args = new KeyEventArgs(
+            Keyboard.PrimaryDevice,
+            PresentationSource.FromVisual(element),
+            Environment.TickCount,
+            key)
+        {
+            RoutedEvent = Keyboard.PreviewKeyDownEvent,
+        };
+        element.RaiseEvent(args);
     }
 
     private static void RunSta(Action action)

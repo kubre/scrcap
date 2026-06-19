@@ -12,7 +12,6 @@ public sealed class EditorViewModel : INotifyPropertyChanged
     private int colorIndex;
     private ShapeSize activeSize = ShapeSize.Small;
     private double zoom = 1;
-    private string pendingText = "Text";
     private bool hasSource;
 
     public event PropertyChangedEventHandler? PropertyChanged;
@@ -24,7 +23,7 @@ public sealed class EditorViewModel : INotifyPropertyChanged
         ActiveSize = ShapeSize.Small;
     }
 
-    public Settings Settings { get; }
+    public Settings Settings { get; private set; }
 
     public AnnotationDocument? Document { get; private set; }
 
@@ -94,6 +93,8 @@ public sealed class EditorViewModel : INotifyPropertyChanged
             if (Set(ref zoom, rounded))
             {
                 OnPropertyChanged(nameof(ZoomPercent));
+                OnPropertyChanged(nameof(ScaledDocumentWidth));
+                OnPropertyChanged(nameof(ScaledDocumentHeight));
             }
         }
     }
@@ -101,12 +102,6 @@ public sealed class EditorViewModel : INotifyPropertyChanged
     public string ZoomPercent => $"{Math.Round(Zoom * 100):0}%";
 
     public string DoneText => Settings.EscBehavior == EscBehavior.CopyAndClose ? "Copy & Close" : "Close";
-
-    public string PendingText
-    {
-        get => pendingText;
-        set => Set(ref pendingText, value);
-    }
 
     public bool HasSource
     {
@@ -129,7 +124,11 @@ public sealed class EditorViewModel : INotifyPropertyChanged
 
     public string DocumentSizeText => Document is null
         ? string.Empty
-        : $"{Math.Round(Document.Size.Width):0} x {Math.Round(Document.Size.Height):0}";
+        : $"{Math.Round(Document.Size.Width):0} \u00d7 {Math.Round(Document.Size.Height):0}";
+
+    public double ScaledDocumentWidth => Math.Max(1, (Document?.Size.Width ?? 1) * Zoom);
+
+    public double ScaledDocumentHeight => Math.Max(1, (Document?.Size.Height ?? 1) * Zoom);
 
     public bool IsArrowToolActive => ActiveTool == EditorTool.Arrow;
 
@@ -163,16 +162,21 @@ public sealed class EditorViewModel : INotifyPropertyChanged
     {
         Document = new AnnotationDocument(width, height);
         HasSource = true;
-        PaletteBrushes = Settings.PaletteHex
-            .Take(Settings.PaletteSlotCount)
-            .Select(hex => (WpfBrush)new WpfSolidColorBrush((System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString(hex)))
-            .ToArray();
-        foreach (var brush in PaletteBrushes.OfType<WpfSolidColorBrush>())
-        {
-            brush.Freeze();
-        }
+        RebuildPaletteBrushes();
 
         OnDocumentChanged();
+    }
+
+    public void ApplySettings(Settings settings)
+    {
+        Settings = settings;
+        ColorIndex = Math.Clamp(ColorIndex, 0, Settings.PaletteSlotCount - 1);
+        RebuildPaletteBrushes();
+        OnPropertyChanged(nameof(Palette));
+        OnPropertyChanged(nameof(PaletteBrushes));
+        OnPropertyChanged(nameof(ActiveColor));
+        OnPropertyChanged(nameof(StrokeWidth));
+        OnPropertyChanged(nameof(DoneText));
     }
 
     public void SelectToolByKey(string key)
@@ -208,27 +212,37 @@ public sealed class EditorViewModel : INotifyPropertyChanged
         };
     }
 
-    public void CommitShape(CorePoint start, CorePoint end, string? text = null)
+    public AutoExpandResult CommitShape(CorePoint start, CorePoint end, string? text = null, double? textMaxWidth = null)
     {
         if (Document is null)
         {
-            return;
+            return AutoExpandResult.None;
         }
 
-        var textValue = string.IsNullOrWhiteSpace(text ?? PendingText) ? "Text" : text ?? PendingText;
+        var textValue = string.IsNullOrWhiteSpace(text) ? string.Empty : text;
         ShapeKind kind = ActiveTool switch
         {
             EditorTool.Arrow => new ShapeKind.Arrow(),
             EditorTool.Rectangle => new ShapeKind.Rectangle(),
             EditorTool.Counter => new ShapeKind.Counter(Document.NextCounterNumber),
-            EditorTool.Text => new ShapeKind.Text(textValue, Settings.TextSize),
+            EditorTool.Text => new ShapeKind.Text(textValue, Settings.TextSize, textMaxWidth),
             EditorTool.Pixelate => new ShapeKind.Pixelate(),
             EditorTool.Crop => new ShapeKind.Rectangle(),
             _ => throw new ArgumentOutOfRangeException(),
         };
 
-        Document.AppendShape(new Shape(kind, ColorIndex, ActiveSize, start, end));
+        var shape = new Shape(kind, ColorIndex, ActiveSize, start, end);
+        var growth = Settings.AutoExpandCanvas
+            ? Document.AppendShapeWithAutoExpand(shape, EditorRenderMetrics.ExpansionBounds(shape, Settings.StrokeWidth))
+            : CommitBoundedShape(shape);
         OnDocumentChanged();
+        return growth;
+    }
+
+    private AutoExpandResult CommitBoundedShape(Shape shape)
+    {
+        Document!.AppendShape(shape);
+        return AutoExpandResult.None;
     }
 
     public bool Crop(CoreRect rect)
@@ -307,9 +321,23 @@ public sealed class EditorViewModel : INotifyPropertyChanged
         OnPropertyChanged(nameof(Document));
         OnPropertyChanged(nameof(VisibleShapes));
         OnPropertyChanged(nameof(DocumentSizeText));
+        OnPropertyChanged(nameof(ScaledDocumentWidth));
+        OnPropertyChanged(nameof(ScaledDocumentHeight));
         OnPropertyChanged(nameof(PaletteBrushes));
         OnPropertyChanged(nameof(CanUndo));
         OnPropertyChanged(nameof(CanRedo));
+    }
+
+    private void RebuildPaletteBrushes()
+    {
+        PaletteBrushes = Settings.PaletteHex
+            .Take(Settings.PaletteSlotCount)
+            .Select(hex => (WpfBrush)new WpfSolidColorBrush((System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString(hex)))
+            .ToArray();
+        foreach (var brush in PaletteBrushes.OfType<WpfSolidColorBrush>())
+        {
+            brush.Freeze();
+        }
     }
 
     private bool Set<T>(ref T field, T value, [CallerMemberName] string? propertyName = null)

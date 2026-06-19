@@ -132,11 +132,29 @@ internal static class OverlayGeometry
     public static WpfPoint CandidateCenter(WindowCandidate candidate) =>
         new(candidate.Bounds.X + candidate.Bounds.Width / 2.0, candidate.Bounds.Y + candidate.Bounds.Height / 2.0);
 
-    public static WpfPoint ClampTagPosition(WpfPoint desired, WpfSize tagSize, WpfSize overlaySize)
+    public static Rect MonitorOverlayBoundsFor(WpfPoint overlayPoint, IReadOnlyList<OverlayMonitorBounds> monitors, double overlayLeft, double overlayTop)
+    {
+        if (monitors.Count == 0)
+        {
+            return new Rect(0, 0, 1, 1);
+        }
+
+        var monitor = MonitorForLogicalPoint(new WpfPoint(overlayLeft + overlayPoint.X, overlayTop + overlayPoint.Y), monitors);
+        return ToOverlayRect(monitor, monitors, overlayLeft, overlayTop);
+    }
+
+    public static WpfPoint ClampTagPosition(WpfPoint desired, WpfSize tagSize, WpfSize overlaySize) =>
+        ClampTagPosition(desired, tagSize, new Rect(0, 0, overlaySize.Width, overlaySize.Height));
+
+    public static WpfPoint ClampTagPosition(WpfPoint desired, WpfSize tagSize, Rect bounds)
     {
         const double margin = 8;
-        var x = Math.Min(Math.Max(margin, desired.X), Math.Max(margin, overlaySize.Width - tagSize.Width - margin));
-        var y = Math.Min(Math.Max(margin, desired.Y), Math.Max(margin, overlaySize.Height - tagSize.Height - margin));
+        var left = bounds.Left + margin;
+        var top = bounds.Top + margin;
+        var right = Math.Max(left, bounds.Right - tagSize.Width - margin);
+        var bottom = Math.Max(top, bounds.Bottom - tagSize.Height - margin);
+        var x = Math.Min(Math.Max(left, desired.X), right);
+        var y = Math.Min(Math.Max(top, desired.Y), bottom);
         return new WpfPoint(x, y);
     }
 

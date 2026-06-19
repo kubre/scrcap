@@ -1,37 +1,67 @@
 <Window x:Class="Scrcap.Windows.UI.Preferences.PreferencesWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:chrome="clr-namespace:Scrcap.Windows.UI.Chrome"
+        xmlns:local="clr-namespace:Scrcap.Windows.UI.Preferences"
         Title="scrcap Preferences"
         Width="{StaticResource MetricPreferencesWidth}"
         Height="{StaticResource MetricPreferencesHeight}"
         MinWidth="{StaticResource MetricPreferencesMinWidth}"
         MinHeight="{StaticResource MetricPreferencesMinHeight}"
         WindowStyle="None"
+        AllowsTransparency="False"
         ResizeMode="CanResizeWithGrip"
         WindowStartupLocation="CenterOwner"
-        Background="{StaticResource BrushChrome}">
+        Background="{StaticResource BrushChrome}"
+        chrome:WindowChromeBehavior.Enabled="True">
   <Window.Resources>
+    <local:HexColorBrushConverter x:Key="HexColorBrushConverter" />
+    <local:InverseBooleanConverter x:Key="InverseBooleanConverter" />
+
     <Style TargetType="TextBlock">
       <Setter Property="Foreground" Value="{StaticResource BrushInk}" />
       <Setter Property="FontFamily" Value="{StaticResource FontUi}" />
       <Setter Property="FontSize" Value="{StaticResource FontSizeBody}" />
     </Style>
-    <Style x:Key="RowLabel" TargetType="TextBlock">
-      <Setter Property="FontFamily" Value="{StaticResource FontUi}" />
-      <Setter Property="FontSize" Value="11" />
-      <Setter Property="FontWeight" Value="Bold" />
+    <Style x:Key="PrefCaption" TargetType="TextBlock">
       <Setter Property="Foreground" Value="{StaticResource BrushMuted}" />
-      <Setter Property="Margin" Value="0,12,0,5" />
+      <Setter Property="FontSize" Value="{StaticResource FontSizeSmall}" />
+      <Setter Property="Margin" Value="0,5,0,0" />
+      <Setter Property="TextWrapping" Value="Wrap" />
     </Style>
-    <Style TargetType="Button">
-      <Setter Property="Background" Value="Transparent" />
+    <Style x:Key="PrefErrorCaption" TargetType="TextBlock" BasedOn="{StaticResource PrefCaption}">
+      <Setter Property="Foreground" Value="{StaticResource BrushDanger}" />
+    </Style>
+    <Style x:Key="PrefSectionTitle" TargetType="TextBlock">
+      <Setter Property="Foreground" Value="{StaticResource BrushMuted}" />
+      <Setter Property="FontSize" Value="10" />
+      <Setter Property="FontWeight" Value="Bold" />
+      <Setter Property="Margin" Value="0,14,0,5" />
+    </Style>
+    <Style x:Key="PrefSection" TargetType="Border">
+      <Setter Property="Background" Value="{StaticResource BrushPanel}" />
       <Setter Property="BorderBrush" Value="{StaticResource BrushHairline}" />
-      <Setter Property="BorderThickness" Value="{StaticResource MetricBorderThickness}" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="CornerRadius" Value="6" />
+      <Setter Property="SnapsToDevicePixels" Value="True" />
+    </Style>
+    <Style x:Key="PrefRow" TargetType="Border">
+      <Setter Property="Padding" Value="12,7" />
+      <Setter Property="BorderBrush" Value="{StaticResource BrushHairline}" />
+      <Setter Property="BorderThickness" Value="0,0,0,1" />
+    </Style>
+    <Style x:Key="PrefLastRow" TargetType="Border" BasedOn="{StaticResource PrefRow}">
+      <Setter Property="BorderThickness" Value="0" />
+    </Style>
+    <Style x:Key="CompactButton" TargetType="Button">
+      <Setter Property="Background" Value="{StaticResource BrushWell}" />
+      <Setter Property="BorderBrush" Value="{StaticResource BrushHairline}" />
+      <Setter Property="BorderThickness" Value="1" />
       <Setter Property="Foreground" Value="{StaticResource BrushInk}" />
       <Setter Property="FontFamily" Value="{StaticResource FontUi}" />
       <Setter Property="FontSize" Value="{StaticResource FontSizeBody}" />
-      <Setter Property="Padding" Value="{StaticResource MetricToolbarButtonPadding}" />
-      <Setter Property="Height" Value="26" />
+      <Setter Property="Height" Value="28" />
+      <Setter Property="Padding" Value="10,0" />
       <Setter Property="Template">
         <Setter.Value>
           <ControlTemplate TargetType="Button">
@@ -39,7 +69,7 @@
                     Background="{TemplateBinding Background}"
                     BorderBrush="{TemplateBinding BorderBrush}"
                     BorderThickness="{TemplateBinding BorderThickness}"
-                    CornerRadius="{StaticResource MetricChromeButtonRadius}">
+                    CornerRadius="{StaticResource MetricPreferencesControlRadius}">
               <ContentPresenter HorizontalAlignment="Center"
                                 VerticalAlignment="Center"
                                 Margin="{TemplateBinding Padding}" />
@@ -49,34 +79,67 @@
                 <Setter TargetName="Chrome" Property="Background" Value="{StaticResource BrushHover}" />
                 <Setter TargetName="Chrome" Property="BorderBrush" Value="{StaticResource BrushAccent}" />
               </Trigger>
-              <Trigger Property="IsPressed" Value="True">
-                <Setter TargetName="Chrome" Property="Background" Value="{StaticResource BrushPressed}" />
+              <Trigger Property="IsKeyboardFocused" Value="True">
+                <Setter TargetName="Chrome" Property="BorderBrush" Value="{StaticResource BrushAccent}" />
+              </Trigger>
+              <Trigger Property="IsEnabled" Value="False">
+                <Setter Property="Opacity" Value="0.45" />
               </Trigger>
             </ControlTemplate.Triggers>
           </ControlTemplate>
         </Setter.Value>
       </Setter>
     </Style>
-    <Style TargetType="TextBox">
-      <Setter Property="Background" Value="{StaticResource BrushWell}" />
-      <Setter Property="BorderBrush" Value="{StaticResource BrushHairline}" />
-      <Setter Property="BorderThickness" Value="{StaticResource MetricBorderThickness}" />
+    <Style x:Key="DangerOutlineButton" TargetType="Button" BasedOn="{StaticResource CompactButton}">
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="BorderBrush" Value="{StaticResource BrushDanger}" />
+      <Setter Property="Foreground" Value="{StaticResource BrushDanger}" />
+    </Style>
+    <Style x:Key="SegmentRadio" TargetType="RadioButton">
       <Setter Property="Foreground" Value="{StaticResource BrushInk}" />
       <Setter Property="FontFamily" Value="{StaticResource FontUi}" />
       <Setter Property="FontSize" Value="{StaticResource FontSizeBody}" />
+      <Setter Property="MinWidth" Value="82" />
       <Setter Property="Height" Value="28" />
-      <Setter Property="Padding" Value="8,2" />
-      <Setter Property="VerticalContentAlignment" Value="Center" />
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="RadioButton">
+            <Border x:Name="Chrome"
+                    Background="{StaticResource BrushWell}"
+                    BorderBrush="{StaticResource BrushHairline}"
+                    BorderThickness="{StaticResource MetricBorderThickness}"
+                    CornerRadius="{StaticResource MetricPreferencesControlRadius}"
+                    Padding="{StaticResource MetricPreferencesSegmentPadding}">
+              <ContentPresenter HorizontalAlignment="Center"
+                                VerticalAlignment="Center" />
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsMouseOver" Value="True">
+                <Setter TargetName="Chrome" Property="Background" Value="{StaticResource BrushHover}" />
+              </Trigger>
+              <Trigger Property="IsChecked" Value="True">
+                <Setter TargetName="Chrome" Property="Background" Value="{StaticResource BrushAccent}" />
+                <Setter TargetName="Chrome" Property="BorderBrush" Value="{StaticResource BrushAccentDeep}" />
+                <Setter Property="Foreground" Value="{StaticResource BrushOnAccent}" />
+              </Trigger>
+              <Trigger Property="IsKeyboardFocused" Value="True">
+                <Setter TargetName="Chrome" Property="BorderBrush" Value="{StaticResource BrushAccentDeep}" />
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
     </Style>
     <Style TargetType="ComboBox">
       <Setter Property="Background" Value="{StaticResource BrushWell}" />
       <Setter Property="BorderBrush" Value="{StaticResource BrushHairline}" />
-      <Setter Property="BorderThickness" Value="{StaticResource MetricBorderThickness}" />
+      <Setter Property="BorderThickness" Value="1" />
       <Setter Property="Foreground" Value="{StaticResource BrushInk}" />
       <Setter Property="FontFamily" Value="{StaticResource FontUi}" />
       <Setter Property="FontSize" Value="{StaticResource FontSizeBody}" />
       <Setter Property="Height" Value="28" />
-      <Setter Property="Padding" Value="9,0,30,0" />
+      <Setter Property="MinWidth" Value="160" />
+      <Setter Property="Padding" Value="9,0,28,0" />
       <Setter Property="Template">
         <Setter.Value>
           <ControlTemplate TargetType="ComboBox">
@@ -85,10 +148,10 @@
                       Background="{TemplateBinding Background}"
                       BorderBrush="{TemplateBinding BorderBrush}"
                       BorderThickness="{TemplateBinding BorderThickness}"
+                      CornerRadius="{StaticResource MetricPreferencesComboRadius}"
                       SnapsToDevicePixels="True">
                 <Grid>
-                  <ContentPresenter x:Name="ContentSite"
-                                    Content="{TemplateBinding SelectionBoxItem}"
+                  <ContentPresenter Content="{TemplateBinding SelectionBoxItem}"
                                     ContentTemplate="{TemplateBinding SelectionBoxItemTemplate}"
                                     ContentStringFormat="{TemplateBinding SelectionBoxItemStringFormat}"
                                     IsHitTestVisible="False"
@@ -168,20 +231,36 @@
         </Setter.Value>
       </Setter>
     </Style>
+    <Style TargetType="TextBox">
+      <Setter Property="Background" Value="{StaticResource BrushWell}" />
+      <Setter Property="BorderBrush" Value="{StaticResource BrushHairline}" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="Foreground" Value="{StaticResource BrushInk}" />
+      <Setter Property="FontFamily" Value="{StaticResource FontUi}" />
+      <Setter Property="FontSize" Value="{StaticResource FontSizeBody}" />
+      <Setter Property="Height" Value="28" />
+      <Setter Property="Padding" Value="8,2" />
+      <Setter Property="VerticalContentAlignment" Value="Center" />
+    </Style>
     <Style TargetType="CheckBox">
       <Setter Property="Foreground" Value="{StaticResource BrushInk}" />
       <Setter Property="FontFamily" Value="{StaticResource FontUi}" />
       <Setter Property="FontSize" Value="{StaticResource FontSizeBody}" />
+      <Setter Property="VerticalAlignment" Value="Center" />
     </Style>
-    <Style TargetType="ScrollViewer">
-      <Setter Property="Background" Value="{StaticResource BrushWell}" />
+    <Style x:Key="ShortcutButton" TargetType="Button" BasedOn="{StaticResource CompactButton}">
+      <Setter Property="FontFamily" Value="{StaticResource FontMono}" />
+      <Setter Property="MinWidth" Value="150" />
+      <Setter Property="AutomationProperties.HelpText" Value="Click, then press a Windows shortcut. Escape cancels. Delete or Backspace clears." />
+    </Style>
+    <Style x:Key="SwatchButton" TargetType="Button" BasedOn="{StaticResource CompactButton}">
+      <Setter Property="Width" Value="46" />
+      <Setter Property="Height" Value="28" />
+      <Setter Property="Padding" Value="3" />
     </Style>
     <Style TargetType="TabControl">
       <Setter Property="Background" Value="{StaticResource BrushWell}" />
       <Setter Property="BorderBrush" Value="Transparent" />
-      <Setter Property="Foreground" Value="{StaticResource BrushInk}" />
-      <Setter Property="FontFamily" Value="{StaticResource FontUi}" />
-      <Setter Property="FontSize" Value="{StaticResource FontSizeBody}" />
       <Setter Property="Template">
         <Setter.Value>
           <ControlTemplate TargetType="TabControl">
@@ -191,45 +270,41 @@
                       Background="{StaticResource BrushChrome}"
                       BorderBrush="{StaticResource BrushRule}"
                       BorderThickness="0,0,0,1">
-                <TabPanel IsItemsHost="True"
-                          VerticalAlignment="Stretch"
-                          KeyboardNavigation.TabIndex="1" />
+                <TabPanel IsItemsHost="True" />
               </Border>
-              <Border Background="{StaticResource BrushWell}">
-                <ContentPresenter ContentSource="SelectedContent" />
-              </Border>
+              <ContentPresenter ContentSource="SelectedContent" />
             </DockPanel>
           </ControlTemplate>
         </Setter.Value>
       </Setter>
     </Style>
     <Style TargetType="TabItem">
-      <Setter Property="Background" Value="Transparent" />
-      <Setter Property="BorderBrush" Value="Transparent" />
-      <Setter Property="Foreground" Value="{StaticResource BrushInk}" />
+      <Setter Property="Foreground" Value="{StaticResource BrushMuted}" />
+      <Setter Property="FontFamily" Value="{StaticResource FontUi}" />
+      <Setter Property="FontSize" Value="{StaticResource FontSizeBody}" />
       <Setter Property="FontWeight" Value="SemiBold" />
-      <Setter Property="Padding" Value="14,0" />
       <Setter Property="Height" Value="{StaticResource MetricToolbarHeight}" />
+      <Setter Property="MinWidth" Value="{StaticResource MetricPreferencesTabMinWidth}" />
       <Setter Property="Template">
         <Setter.Value>
           <ControlTemplate TargetType="TabItem">
             <Border x:Name="Chrome"
-                    Background="{TemplateBinding Background}"
-                    BorderBrush="{TemplateBinding BorderBrush}"
+                    Background="Transparent"
+                    BorderBrush="Transparent"
                     BorderThickness="0,0,1,0"
-                    MinWidth="{StaticResource MetricPreferencesTabMinWidth}">
+                    Padding="{StaticResource MetricPreferencesTabPadding}">
               <ContentPresenter ContentSource="Header"
                                 HorizontalAlignment="Center"
-                                VerticalAlignment="Center"
-                                Margin="{TemplateBinding Padding}" />
+                                VerticalAlignment="Center" />
             </Border>
             <ControlTemplate.Triggers>
               <Trigger Property="IsMouseOver" Value="True">
                 <Setter TargetName="Chrome" Property="Background" Value="{StaticResource BrushHover}" />
+                <Setter Property="Foreground" Value="{StaticResource BrushAccent}" />
               </Trigger>
               <Trigger Property="IsSelected" Value="True">
-                <Setter TargetName="Chrome" Property="Background" Value="{StaticResource BrushActiveWash}" />
-                <Setter Property="Foreground" Value="{StaticResource BrushAccent}" />
+                <Setter TargetName="Chrome" Property="Background" Value="{StaticResource BrushAccent}" />
+                <Setter Property="Foreground" Value="{StaticResource BrushOnAccent}" />
               </Trigger>
             </ControlTemplate.Triggers>
           </ControlTemplate>
@@ -237,199 +312,228 @@
       </Setter>
     </Style>
   </Window.Resources>
-  <Border BorderBrush="{StaticResource BrushRule}"
-          BorderThickness="{StaticResource MetricBorderThickness}"
-          CornerRadius="{StaticResource MetricPreferencesRadius}"
-          Background="{StaticResource BrushChrome}">
-    <DockPanel LastChildFill="True">
-      <Grid DockPanel.Dock="Top"
-            Height="{StaticResource MetricHeaderHeight}"
-            Background="{StaticResource BrushChrome}"
-            MouseLeftButtonDown="DragSurface_MouseLeftButtonDown">
-        <Grid.ColumnDefinitions>
-          <ColumnDefinition Width="*" />
-          <ColumnDefinition Width="Auto" />
-        </Grid.ColumnDefinitions>
-        <Rectangle Grid.ColumnSpan="2"
-                   VerticalAlignment="Bottom"
-                   Height="{StaticResource MetricSeparatorWidth}"
-                   Fill="{StaticResource BrushRule}" />
-        <StackPanel Orientation="Horizontal"
-                    VerticalAlignment="Center"
-                    Margin="{StaticResource MetricHeaderBrandMargin}">
-          <Border Width="{StaticResource MetricLogoGlyphSize}"
-                  Height="{StaticResource MetricLogoGlyphSize}"
-                  BorderBrush="{StaticResource BrushInk}"
-                  BorderThickness="{StaticResource MetricBorderThickness}"
-                  CornerRadius="{StaticResource MetricLogoRadius}"
-                  Margin="{StaticResource MetricLogoMargin}">
-            <Grid>
-              <Rectangle Width="{StaticResource MetricLogoDotSize}" Height="{StaticResource MetricLogoDotSize}" Fill="{StaticResource BrushInk}" HorizontalAlignment="Center" VerticalAlignment="Center" />
-              <Rectangle Width="{StaticResource MetricLogoLineSize}" Fill="{StaticResource BrushInk}" HorizontalAlignment="Center" />
-              <Rectangle Height="{StaticResource MetricLogoLineSize}" Fill="{StaticResource BrushInk}" VerticalAlignment="Center" />
-            </Grid>
-          </Border>
-          <TextBlock Text="SCRCAP"
-                     VerticalAlignment="Center"
-                     FontFamily="{StaticResource FontUi}"
-                     FontSize="{StaticResource FontSizeBrand}"
-                     FontWeight="Black"
-                     Foreground="{StaticResource BrushInk}" />
-          <TextBlock Text="Preferences"
-                     VerticalAlignment="Center"
-                     Margin="{StaticResource MetricPreferencesSubtitleMargin}"
-                     FontFamily="{StaticResource FontUi}"
-                     FontSize="{StaticResource FontSizeSmall}"
-                     FontWeight="SemiBold"
-                     Foreground="{StaticResource BrushMuted}" />
-        </StackPanel>
-        <Button Grid.Column="1"
-                AutomationProperties.AutomationId="ClosePreferences"
-                AutomationProperties.Name="Close preferences"
-                Content="&#xE711;"
-                FontFamily="{StaticResource FontIcon}"
-                Width="{StaticResource MetricIconButtonWidth}"
-                Height="{StaticResource MetricIconButtonHeight}"
-                Margin="{StaticResource MetricPreferencesCloseMargin}"
-                Click="Close_Click" />
-      </Grid>
 
-      <StackPanel DockPanel.Dock="Bottom"
-                  Orientation="Horizontal"
-                  HorizontalAlignment="Right"
-                  Background="{StaticResource BrushChrome}"
-                  Margin="{StaticResource MetricToolbarButtonMargin}"
-                  Height="{StaticResource MetricToolbarHeight}">
-        <Button AutomationProperties.AutomationId="ResetAllPreferences"
-                AutomationProperties.Name="Reset all settings"
-                Content="Reset all"
-                MinWidth="{StaticResource MetricCommandButtonMinWidth}"
-                Margin="{StaticResource MetricPreferencesResetMargin}"
-                BorderBrush="{StaticResource BrushDanger}"
-                Foreground="{StaticResource BrushDanger}"
-                Click="ResetAll_Click" />
-        <Button AutomationProperties.AutomationId="SavePreferences"
-                AutomationProperties.Name="Save preferences"
-                Content="Save"
-                MinWidth="{StaticResource MetricCommandButtonMinWidth}"
-                Margin="{StaticResource MetricPreferencesSaveMargin}"
-                Click="Save_Click" />
-      </StackPanel>
-
-      <TabControl AutomationProperties.AutomationId="PreferencesTabs"
-                  Margin="{StaticResource MetricToolbarButtonMargin}">
-        <TabItem Header="General">
-          <ScrollViewer VerticalScrollBarVisibility="Auto">
-            <StackPanel Margin="{StaticResource MetricPanelMargin}">
-              <TextBlock Style="{StaticResource RowLabel}" Text="Theme" />
-              <ComboBox AutomationProperties.AutomationId="ThemeMode" ItemsSource="{Binding ThemeModes}" SelectedItem="{Binding SelectedThemeMode, Mode=TwoWay}" />
-              <CheckBox AutomationProperties.AutomationId="LaunchAtLogin" Content="Launch at login" IsChecked="{Binding LaunchAtLogin, Mode=TwoWay}" Margin="{StaticResource MetricTopGap}" />
-            </StackPanel>
-          </ScrollViewer>
-        </TabItem>
-
-        <TabItem Header="Capture">
-          <ScrollViewer VerticalScrollBarVisibility="Auto">
-            <StackPanel Margin="{StaticResource MetricPanelMargin}">
-              <TextBlock Style="{StaticResource RowLabel}" Text="Region after capture" />
-              <ComboBox AutomationProperties.AutomationId="RegionAfterCapture" ItemsSource="{Binding CaptureBehaviors}" SelectedItem="{Binding RegionAfterCapture, Mode=TwoWay}" />
-              <TextBlock Style="{StaticResource RowLabel}" Text="Window after capture" />
-              <ComboBox AutomationProperties.AutomationId="WindowAfterCapture" ItemsSource="{Binding CaptureBehaviors}" SelectedItem="{Binding WindowAfterCapture, Mode=TwoWay}" />
-              <TextBlock Style="{StaticResource RowLabel}" Text="Fullscreen after capture" />
-              <ComboBox AutomationProperties.AutomationId="FullscreenAfterCapture" ItemsSource="{Binding CaptureBehaviors}" SelectedItem="{Binding FullscreenAfterCapture, Mode=TwoWay}" />
-              <TextBlock Style="{StaticResource RowLabel}" Text="Scrolling after capture" />
-              <ComboBox AutomationProperties.AutomationId="ScrollingAfterCapture" ItemsSource="{Binding CaptureBehaviors}" SelectedItem="{Binding ScrollingAfterCapture, Mode=TwoWay}" />
-              <TextBlock Style="{StaticResource RowLabel}" Text="Window target" />
-              <ComboBox AutomationProperties.AutomationId="WindowCaptureTarget" ItemsSource="{Binding WindowTargets}" SelectedItem="{Binding WindowCaptureTarget, Mode=TwoWay}" />
-              <CheckBox AutomationProperties.AutomationId="IncludeCursor" Content="Include cursor" IsChecked="{Binding IncludeCursor, Mode=TwoWay}" Margin="{StaticResource MetricTopGap}" />
-              <CheckBox AutomationProperties.AutomationId="IncludeWindowShadow" Content="Include window shadow" IsChecked="{Binding IncludeWindowShadow, Mode=TwoWay}" />
-              <CheckBox AutomationProperties.AutomationId="WindowBackgroundTransparent" Content="Transparent window background" IsChecked="{Binding WindowBackgroundTransparent, Mode=TwoWay}" />
-              <TextBlock Style="{StaticResource RowLabel}" Text="Window background hex" />
-              <TextBox AutomationProperties.AutomationId="WindowBackgroundHex" Text="{Binding WindowBackgroundHex, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
-              <TextBlock Style="{StaticResource RowLabel}" Text="Capture delay seconds" />
-              <Slider AutomationProperties.AutomationId="CaptureDelaySeconds" Minimum="1" Maximum="10" TickFrequency="1" IsSnapToTickEnabled="True" Value="{Binding CaptureDelaySeconds, Mode=TwoWay}" />
-              <TextBlock Style="{StaticResource RowLabel}" Text="Scrolling max height" />
-              <TextBox AutomationProperties.AutomationId="ScrollingMaxHeight" Text="{Binding ScrollingMaxHeight, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
-            </StackPanel>
-          </ScrollViewer>
-        </TabItem>
-
-        <TabItem Header="Shortcuts">
-          <ScrollViewer VerticalScrollBarVisibility="Auto">
-            <StackPanel Margin="{StaticResource MetricPanelMargin}">
-              <TextBlock Style="{StaticResource RowLabel}" Text="Capture region" />
-              <TextBox AutomationProperties.AutomationId="CaptureRegionHotkey" Tag="CaptureRegion" Text="{Binding CaptureRegionHotkey, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" PreviewKeyDown="ShortcutTextBox_PreviewKeyDown" />
-              <TextBlock Style="{StaticResource RowLabel}" Text="Capture window" />
-              <TextBox AutomationProperties.AutomationId="CaptureWindowHotkey" Tag="CaptureWindow" Text="{Binding CaptureWindowHotkey, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" PreviewKeyDown="ShortcutTextBox_PreviewKeyDown" />
-              <TextBlock Style="{StaticResource RowLabel}" Text="Capture fullscreen" />
-              <TextBox AutomationProperties.AutomationId="CaptureFullscreenHotkey" Tag="CaptureFullscreen" Text="{Binding CaptureFullscreenHotkey, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" PreviewKeyDown="ShortcutTextBox_PreviewKeyDown" />
-              <TextBlock Style="{StaticResource RowLabel}" Text="Scrolling capture" />
-              <TextBox AutomationProperties.AutomationId="CaptureScrollingHotkey" Tag="CaptureScrolling" Text="{Binding CaptureScrollingHotkey, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" PreviewKeyDown="ShortcutTextBox_PreviewKeyDown" />
-              <TextBlock Style="{StaticResource RowLabel}" Text="Delayed capture" />
-              <TextBox AutomationProperties.AutomationId="CaptureDelayedHotkey" Tag="CaptureDelayed" Text="{Binding CaptureDelayedHotkey, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" PreviewKeyDown="ShortcutTextBox_PreviewKeyDown" />
-              <TextBlock Style="{StaticResource RowLabel}" Text="Repeat last" />
-              <TextBox AutomationProperties.AutomationId="RepeatLastHotkey" Tag="RepeatLast" Text="{Binding RepeatLastHotkey, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" PreviewKeyDown="ShortcutTextBox_PreviewKeyDown" />
-              <TextBlock AutomationProperties.AutomationId="ShortcutRecorderStatus"
-                         Margin="{StaticResource MetricSmallTopGap}"
-                         Foreground="{StaticResource BrushMuted}"
-                         Text="{Binding ShortcutRecorderStatus}" />
-            </StackPanel>
-          </ScrollViewer>
-        </TabItem>
-
-        <TabItem Header="Editor">
-          <ScrollViewer VerticalScrollBarVisibility="Auto">
-            <StackPanel Margin="{StaticResource MetricPanelMargin}">
-              <TextBlock Style="{StaticResource RowLabel}" Text="Palette" />
-              <UniformGrid Columns="5">
-                <TextBox AutomationProperties.AutomationId="Palette1" Text="{Binding Palette1, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Margin="{StaticResource MetricPaletteGapRight}" />
-                <TextBox AutomationProperties.AutomationId="Palette2" Text="{Binding Palette2, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Margin="{StaticResource MetricPaletteGapRight}" />
-                <TextBox AutomationProperties.AutomationId="Palette3" Text="{Binding Palette3, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Margin="{StaticResource MetricPaletteGapRight}" />
-                <TextBox AutomationProperties.AutomationId="Palette4" Text="{Binding Palette4, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Margin="{StaticResource MetricPaletteGapRight}" />
-                <TextBox AutomationProperties.AutomationId="Palette5" Text="{Binding Palette5, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
-              </UniformGrid>
-              <TextBlock Style="{StaticResource RowLabel}" Text="Stroke width" />
-              <Slider AutomationProperties.AutomationId="StrokeWidth" Minimum="1" Maximum="8" Value="{Binding StrokeWidth, Mode=TwoWay}" />
-              <TextBlock Style="{StaticResource RowLabel}" Text="Text size" />
-              <Slider AutomationProperties.AutomationId="TextSize" Minimum="10" Maximum="36" Value="{Binding TextSize, Mode=TwoWay}" />
-              <TextBlock Style="{StaticResource RowLabel}" Text="Return behavior" />
-              <ComboBox AutomationProperties.AutomationId="TextEnterBehavior" ItemsSource="{Binding TextEnterBehaviors}" SelectedItem="{Binding TextEnterBehavior, Mode=TwoWay}" />
-              <TextBlock Style="{StaticResource RowLabel}" Text="Esc behavior" />
-              <ComboBox AutomationProperties.AutomationId="EscBehavior" ItemsSource="{Binding EscBehaviors}" SelectedItem="{Binding EscBehavior, Mode=TwoWay}" />
-              <CheckBox AutomationProperties.AutomationId="AutoExpandCanvas" Content="Auto-expand canvas" IsChecked="{Binding AutoExpandCanvas, Mode=TwoWay}" Margin="{StaticResource MetricTopGap}" />
-              <TextBlock Style="{StaticResource RowLabel}" Text="Canvas extension background hex" />
-              <TextBox AutomationProperties.AutomationId="CanvasExtensionBackgroundHex" Text="{Binding CanvasExtensionBackgroundHex, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
-            </StackPanel>
-          </ScrollViewer>
-        </TabItem>
-
-        <TabItem Header="Output">
-          <ScrollViewer VerticalScrollBarVisibility="Auto">
-            <StackPanel Margin="{StaticResource MetricPanelMargin}">
-              <TextBlock Style="{StaticResource RowLabel}" Text="Save folder" />
-              <DockPanel>
-                <Button DockPanel.Dock="Right" AutomationProperties.AutomationId="PickSaveFolder" AutomationProperties.Name="Pick save folder" Content="Pick" Margin="{StaticResource MetricPickButtonMargin}" Click="PickSaveFolder_Click" />
-                <TextBox AutomationProperties.AutomationId="SaveFolder" Text="{Binding SaveFolder, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
-              </DockPanel>
-              <TextBlock Style="{StaticResource RowLabel}" Text="Filename pattern" />
-              <TextBox AutomationProperties.AutomationId="FilenamePattern" Text="{Binding FilenamePattern, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
-              <TextBlock Style="{StaticResource RowLabel}" Text="Export scale" />
-              <ComboBox AutomationProperties.AutomationId="ExportScale" ItemsSource="{Binding ExportScales}" SelectedItem="{Binding ExportScale, Mode=TwoWay}" />
-              <CheckBox AutomationProperties.AutomationId="SuppressCopyNotification" Content="Suppress copy notification" IsChecked="{Binding SuppressCopyNotification, Mode=TwoWay}" Margin="{StaticResource MetricTopGap}" />
-            </StackPanel>
-          </ScrollViewer>
-        </TabItem>
-
-        <TabItem Header="About">
-          <StackPanel Margin="{StaticResource MetricPanelMargin}">
-            <TextBlock Text="scrcap for Windows" FontWeight="Bold" Foreground="{StaticResource BrushInk}" />
-            <TextBlock Text="{Binding VersionText, StringFormat=Version {0}}" Margin="{StaticResource MetricSmallTopGap}" />
-            <TextBlock Text="{Binding BuildChannel, StringFormat=Build channel: {0}}" />
-            <TextBlock Text="{Binding SourceLink, StringFormat=Source: {0}}" />
-            <TextBlock Text="License and credits: scrcap project contributors." Margin="{StaticResource MetricSmallTopGap}" />
+  <chrome:ScrcapWindowChrome TitleText="SCRCAP"
+                             SubtitleText=""
+                             FrameCornerRadius="{StaticResource MetricPreferencesRadius}">
+    <TabControl x:Name="PreferencesTabs"
+                AutomationProperties.AutomationId="PreferencesTabs">
+      <TabItem>
+        <TabItem.Header>
+          <StackPanel Orientation="Horizontal">
+            <Path Data="{StaticResource IconPreferencesGeneral}" Width="{StaticResource MetricPreferencesIconSize}" Height="{StaticResource MetricPreferencesIconSize}" Stretch="Uniform" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=TabItem}}" Fill="Transparent" StrokeThickness="1.4" Margin="{StaticResource MetricPreferencesIconMargin}" />
+            <TextBlock Text="General" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=TabItem}}" />
           </StackPanel>
-        </TabItem>
-      </TabControl>
-    </DockPanel>
-  </Border>
+        </TabItem.Header>
+        <ScrollViewer VerticalScrollBarVisibility="Auto" Background="{StaticResource BrushWell}">
+          <StackPanel Margin="{StaticResource MetricPanelMargin}">
+            <TextBlock Style="{StaticResource PrefSectionTitle}" Text="APPEARANCE" />
+            <Border Style="{StaticResource PrefSection}">
+              <StackPanel>
+                <Border Style="{StaticResource PrefRow}">
+                  <Grid>
+                    <Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                    <TextBlock Text="Appearance" VerticalAlignment="Center" />
+                    <StackPanel Grid.Column="1" Orientation="Horizontal">
+                      <RadioButton AutomationProperties.AutomationId="ThemeModeSystem" Style="{StaticResource SegmentRadio}" Content="System" GroupName="ThemeMode" IsChecked="{Binding IsThemeSystem, Mode=TwoWay}" />
+                      <RadioButton AutomationProperties.AutomationId="ThemeModeLight" Style="{StaticResource SegmentRadio}" Content="Light" GroupName="ThemeMode" IsChecked="{Binding IsThemeLight, Mode=TwoWay}" Margin="{StaticResource MetricPreferencesGapLeft}" />
+                      <RadioButton AutomationProperties.AutomationId="ThemeModeDark" Style="{StaticResource SegmentRadio}" Content="Dark" GroupName="ThemeMode" IsChecked="{Binding IsThemeDark, Mode=TwoWay}" Margin="{StaticResource MetricPreferencesGapLeft}" />
+                    </StackPanel>
+                  </Grid>
+                </Border>
+                <Border Style="{StaticResource PrefLastRow}">
+                  <Grid>
+                    <Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                    <TextBlock Text="Launch at login" VerticalAlignment="Center" />
+                    <CheckBox AutomationProperties.AutomationId="LaunchAtLogin" AutomationProperties.Name="Launch at login" Grid.Column="1" IsChecked="{Binding LaunchAtLogin, Mode=TwoWay}" />
+                  </Grid>
+                </Border>
+              </StackPanel>
+            </Border>
+
+            <TextBlock Style="{StaticResource PrefSectionTitle}" Text="RESET" />
+            <Border Style="{StaticResource PrefSection}">
+              <Border Style="{StaticResource PrefLastRow}">
+                <Grid>
+                  <Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                  <StackPanel>
+                    <TextBlock Text="Reset all preferences" />
+                    <TextBlock Style="{StaticResource PrefCaption}" Text="Restores defaults and writes them immediately." />
+                  </StackPanel>
+                  <Button AutomationProperties.AutomationId="ResetAllPreferences" AutomationProperties.Name="Reset all settings" Grid.Column="1" Style="{StaticResource DangerOutlineButton}" Content="Reset all" MinWidth="{StaticResource MetricPreferencesResetMinWidth}" Click="ResetAll_Click" />
+                </Grid>
+              </Border>
+            </Border>
+            <TextBlock Style="{StaticResource PrefErrorCaption}" Text="{Binding LastError}" />
+          </StackPanel>
+        </ScrollViewer>
+      </TabItem>
+
+      <TabItem>
+        <TabItem.Header>
+          <StackPanel Orientation="Horizontal">
+            <Path Data="{StaticResource IconPreferencesCapture}" Width="{StaticResource MetricPreferencesIconSize}" Height="{StaticResource MetricPreferencesIconSize}" Stretch="Uniform" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=TabItem}}" Fill="Transparent" StrokeThickness="1.4" Margin="{StaticResource MetricPreferencesIconMargin}" />
+            <TextBlock Text="Capture" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=TabItem}}" />
+          </StackPanel>
+        </TabItem.Header>
+        <ScrollViewer VerticalScrollBarVisibility="Auto" Background="{StaticResource BrushWell}">
+          <StackPanel Margin="{StaticResource MetricPanelMargin}">
+            <TextBlock Style="{StaticResource PrefSectionTitle}" Text="AFTER CAPTURE" />
+            <Border Style="{StaticResource PrefSection}">
+              <StackPanel>
+                <Border Style="{StaticResource PrefRow}"><Grid><Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><TextBlock Text="Region" VerticalAlignment="Center" /><ComboBox AutomationProperties.AutomationId="RegionAfterCapture" Grid.Column="1" ItemsSource="{Binding CaptureBehaviorOptions}" DisplayMemberPath="Text" SelectedValuePath="Value" SelectedValue="{Binding RegionAfterCapture, Mode=TwoWay}" /></Grid></Border>
+                <Border Style="{StaticResource PrefRow}"><Grid><Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><TextBlock Text="Window" VerticalAlignment="Center" /><ComboBox AutomationProperties.AutomationId="WindowAfterCapture" Grid.Column="1" ItemsSource="{Binding CaptureBehaviorOptions}" DisplayMemberPath="Text" SelectedValuePath="Value" SelectedValue="{Binding WindowAfterCapture, Mode=TwoWay}" /></Grid></Border>
+                <Border Style="{StaticResource PrefRow}"><Grid><Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><TextBlock Text="Fullscreen" VerticalAlignment="Center" /><ComboBox AutomationProperties.AutomationId="FullscreenAfterCapture" Grid.Column="1" ItemsSource="{Binding CaptureBehaviorOptions}" DisplayMemberPath="Text" SelectedValuePath="Value" SelectedValue="{Binding FullscreenAfterCapture, Mode=TwoWay}" /></Grid></Border>
+                <Border Style="{StaticResource PrefLastRow}"><Grid><Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><TextBlock Text="Scrolling" VerticalAlignment="Center" /><ComboBox AutomationProperties.AutomationId="ScrollingAfterCapture" Grid.Column="1" ItemsSource="{Binding CaptureBehaviorOptions}" DisplayMemberPath="Text" SelectedValuePath="Value" SelectedValue="{Binding ScrollingAfterCapture, Mode=TwoWay}" /></Grid></Border>
+              </StackPanel>
+            </Border>
+
+            <TextBlock Style="{StaticResource PrefSectionTitle}" Text="OPTIONS" />
+            <Border Style="{StaticResource PrefSection}">
+              <StackPanel>
+                <Border Style="{StaticResource PrefRow}"><Grid><Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><TextBlock Text="Capture pointer" VerticalAlignment="Center" /><CheckBox AutomationProperties.AutomationId="IncludeCursor" Grid.Column="1" IsChecked="{Binding IncludeCursor, Mode=TwoWay}" /></Grid></Border>
+                <Border Style="{StaticResource PrefRow}"><Grid><Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><StackPanel><TextBlock Text="Countdown" /><TextBlock Style="{StaticResource PrefCaption}" Text="s" /></StackPanel><Slider AutomationProperties.AutomationId="CaptureDelaySeconds" Grid.Column="1" Width="{StaticResource MetricPreferencesDelaySliderWidth}" Minimum="1" Maximum="10" TickFrequency="1" IsSnapToTickEnabled="True" Value="{Binding CaptureDelaySeconds, Mode=TwoWay}" /></Grid></Border>
+                <Border Style="{StaticResource PrefRow}"><Grid><Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><TextBlock Text="Window target" VerticalAlignment="Center" /><ComboBox AutomationProperties.AutomationId="WindowCaptureTarget" Grid.Column="1" ItemsSource="{Binding WindowTargetOptions}" DisplayMemberPath="Text" SelectedValuePath="Value" SelectedValue="{Binding WindowCaptureTarget, Mode=TwoWay}" /></Grid></Border>
+                <Border Style="{StaticResource PrefRow}"><Grid><Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><TextBlock Text="Window shadow" VerticalAlignment="Center" /><CheckBox AutomationProperties.AutomationId="IncludeWindowShadow" Grid.Column="1" IsChecked="{Binding IncludeWindowShadow, Mode=TwoWay}" /></Grid></Border>
+                <Border Style="{StaticResource PrefRow}"><Grid><Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><TextBlock Text="Transparent background" VerticalAlignment="Center" /><CheckBox AutomationProperties.AutomationId="WindowBackgroundTransparent" Grid.Column="1" IsChecked="{Binding WindowBackgroundTransparent, Mode=TwoWay}" /></Grid></Border>
+                <Border Style="{StaticResource PrefRow}"><Grid><Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><TextBlock Text="Background color" VerticalAlignment="Center" /><Button AutomationProperties.AutomationId="WindowBackgroundColor" AutomationProperties.Name="Choose window background color" Grid.Column="1" Style="{StaticResource SwatchButton}" Tag="WindowBackgroundHex" Click="ColorSwatch_Click" IsEnabled="{Binding IsWindowBackgroundColorEnabled}"><Border Width="{StaticResource MetricPreferencesSwatchInnerWidth}" Height="{StaticResource MetricPreferencesSwatchInnerHeight}" Background="{Binding WindowBackgroundHex, Converter={StaticResource HexColorBrushConverter}}" BorderBrush="{StaticResource BrushHairline}" BorderThickness="{StaticResource MetricBorderThickness}" /></Button></Grid></Border>
+                <Border Style="{StaticResource PrefLastRow}"><Grid><Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><StackPanel><TextBlock Text="Scrolling maximum height" /><TextBlock Style="{StaticResource PrefCaption}" Text="px" /></StackPanel><TextBox AutomationProperties.AutomationId="ScrollingMaxHeight" Grid.Column="1" Width="{StaticResource MetricPreferencesSmallInputWidth}" Text="{Binding ScrollingMaxHeight, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" /></Grid></Border>
+              </StackPanel>
+            </Border>
+            <TextBlock Style="{StaticResource PrefErrorCaption}" Text="{Binding LastError}" />
+          </StackPanel>
+        </ScrollViewer>
+      </TabItem>
+
+      <TabItem>
+        <TabItem.Header>
+          <StackPanel Orientation="Horizontal">
+            <Path Data="{StaticResource IconPreferencesShortcuts}" Width="{StaticResource MetricPreferencesIconSize}" Height="{StaticResource MetricPreferencesIconSize}" Stretch="Uniform" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=TabItem}}" Fill="Transparent" StrokeThickness="1.4" Margin="{StaticResource MetricPreferencesIconMargin}" />
+            <TextBlock Text="Shortcuts" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=TabItem}}" />
+          </StackPanel>
+        </TabItem.Header>
+        <ScrollViewer VerticalScrollBarVisibility="Auto" Background="{StaticResource BrushWell}">
+          <StackPanel Margin="{StaticResource MetricPanelMargin}">
+            <TextBlock Style="{StaticResource PrefSectionTitle}" Text="GLOBAL SHORTCUTS" />
+            <Border Style="{StaticResource PrefSection}">
+              <StackPanel>
+                <Border Style="{StaticResource PrefRow}"><Grid><Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><TextBlock Text="Capture region" VerticalAlignment="Center" /><Button AutomationProperties.AutomationId="CaptureRegionHotkey" Grid.Column="1" Style="{StaticResource ShortcutButton}" Content="{Binding CaptureRegionHotkeyDisplay}" Tag="CaptureRegion" Click="ShortcutRecorder_Click" PreviewKeyDown="ShortcutRecorder_PreviewKeyDown" /></Grid></Border>
+                <Border Style="{StaticResource PrefRow}"><Grid><Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><TextBlock Text="Capture window" VerticalAlignment="Center" /><Button AutomationProperties.AutomationId="CaptureWindowHotkey" Grid.Column="1" Style="{StaticResource ShortcutButton}" Content="{Binding CaptureWindowHotkeyDisplay}" Tag="CaptureWindow" Click="ShortcutRecorder_Click" PreviewKeyDown="ShortcutRecorder_PreviewKeyDown" /></Grid></Border>
+                <Border Style="{StaticResource PrefRow}"><Grid><Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><TextBlock Text="Capture fullscreen" VerticalAlignment="Center" /><Button AutomationProperties.AutomationId="CaptureFullscreenHotkey" Grid.Column="1" Style="{StaticResource ShortcutButton}" Content="{Binding CaptureFullscreenHotkeyDisplay}" Tag="CaptureFullscreen" Click="ShortcutRecorder_Click" PreviewKeyDown="ShortcutRecorder_PreviewKeyDown" /></Grid></Border>
+                <Border Style="{StaticResource PrefRow}"><Grid><Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><TextBlock Text="Scrolling capture" VerticalAlignment="Center" /><Button AutomationProperties.AutomationId="CaptureScrollingHotkey" Grid.Column="1" Style="{StaticResource ShortcutButton}" Content="{Binding CaptureScrollingHotkeyDisplay}" Tag="CaptureScrolling" Click="ShortcutRecorder_Click" PreviewKeyDown="ShortcutRecorder_PreviewKeyDown" /></Grid></Border>
+                <Border Style="{StaticResource PrefRow}"><Grid><Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><TextBlock Text="Delayed region" VerticalAlignment="Center" /><Button AutomationProperties.AutomationId="CaptureDelayedHotkey" Grid.Column="1" Style="{StaticResource ShortcutButton}" Content="{Binding CaptureDelayedHotkeyDisplay}" Tag="CaptureDelayed" Click="ShortcutRecorder_Click" PreviewKeyDown="ShortcutRecorder_PreviewKeyDown" /></Grid></Border>
+                <Border Style="{StaticResource PrefLastRow}"><Grid><Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><TextBlock Text="Repeat last" VerticalAlignment="Center" /><Button AutomationProperties.AutomationId="RepeatLastHotkey" Grid.Column="1" Style="{StaticResource ShortcutButton}" Content="{Binding RepeatLastHotkeyDisplay}" Tag="RepeatLast" Click="ShortcutRecorder_Click" PreviewKeyDown="ShortcutRecorder_PreviewKeyDown" /></Grid></Border>
+              </StackPanel>
+            </Border>
+            <TextBlock AutomationProperties.AutomationId="ShortcutRecorderStatus" Style="{StaticResource PrefCaption}" Text="{Binding ShortcutRecorderStatus}" />
+            <TextBlock Style="{StaticResource PrefErrorCaption}" Text="{Binding LastError}" />
+          </StackPanel>
+        </ScrollViewer>
+      </TabItem>
+
+      <TabItem>
+        <TabItem.Header>
+          <StackPanel Orientation="Horizontal">
+            <Path Data="{StaticResource IconPreferencesEditor}" Width="{StaticResource MetricPreferencesIconSize}" Height="{StaticResource MetricPreferencesIconSize}" Stretch="Uniform" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=TabItem}}" Fill="Transparent" StrokeThickness="1.4" Margin="{StaticResource MetricPreferencesIconMargin}" />
+            <TextBlock Text="Editor" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=TabItem}}" />
+          </StackPanel>
+        </TabItem.Header>
+        <ScrollViewer VerticalScrollBarVisibility="Auto" Background="{StaticResource BrushWell}">
+          <StackPanel Margin="{StaticResource MetricPanelMargin}">
+            <TextBlock Style="{StaticResource PrefSectionTitle}" Text="PALETTE" />
+            <Border Style="{StaticResource PrefSection}">
+              <Border Style="{StaticResource PrefLastRow}">
+                <Grid>
+                  <Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                  <TextBlock Text="Slots 1-5" VerticalAlignment="Center" />
+                  <StackPanel Grid.Column="1" Orientation="Horizontal">
+                    <Button AutomationProperties.AutomationId="Palette1" AutomationProperties.Name="Choose palette slot 1" Style="{StaticResource SwatchButton}" Tag="Palette1" Click="ColorSwatch_Click"><Border Width="{StaticResource MetricPreferencesSwatchInnerWidth}" Height="{StaticResource MetricPreferencesSwatchInnerHeight}" Background="{Binding Palette1, Converter={StaticResource HexColorBrushConverter}}" BorderBrush="{StaticResource BrushHairline}" BorderThickness="{StaticResource MetricBorderThickness}" /></Button>
+                    <Button AutomationProperties.AutomationId="Palette2" AutomationProperties.Name="Choose palette slot 2" Style="{StaticResource SwatchButton}" Tag="Palette2" Click="ColorSwatch_Click" Margin="{StaticResource MetricPreferencesGapLeft}"><Border Width="{StaticResource MetricPreferencesSwatchInnerWidth}" Height="{StaticResource MetricPreferencesSwatchInnerHeight}" Background="{Binding Palette2, Converter={StaticResource HexColorBrushConverter}}" BorderBrush="{StaticResource BrushHairline}" BorderThickness="{StaticResource MetricBorderThickness}" /></Button>
+                    <Button AutomationProperties.AutomationId="Palette3" AutomationProperties.Name="Choose palette slot 3" Style="{StaticResource SwatchButton}" Tag="Palette3" Click="ColorSwatch_Click" Margin="{StaticResource MetricPreferencesGapLeft}"><Border Width="{StaticResource MetricPreferencesSwatchInnerWidth}" Height="{StaticResource MetricPreferencesSwatchInnerHeight}" Background="{Binding Palette3, Converter={StaticResource HexColorBrushConverter}}" BorderBrush="{StaticResource BrushHairline}" BorderThickness="{StaticResource MetricBorderThickness}" /></Button>
+                    <Button AutomationProperties.AutomationId="Palette4" AutomationProperties.Name="Choose palette slot 4" Style="{StaticResource SwatchButton}" Tag="Palette4" Click="ColorSwatch_Click" Margin="{StaticResource MetricPreferencesGapLeft}"><Border Width="{StaticResource MetricPreferencesSwatchInnerWidth}" Height="{StaticResource MetricPreferencesSwatchInnerHeight}" Background="{Binding Palette4, Converter={StaticResource HexColorBrushConverter}}" BorderBrush="{StaticResource BrushHairline}" BorderThickness="{StaticResource MetricBorderThickness}" /></Button>
+                    <Button AutomationProperties.AutomationId="Palette5" AutomationProperties.Name="Choose palette slot 5" Style="{StaticResource SwatchButton}" Tag="Palette5" Click="ColorSwatch_Click" Margin="{StaticResource MetricPreferencesGapLeft}"><Border Width="{StaticResource MetricPreferencesSwatchInnerWidth}" Height="{StaticResource MetricPreferencesSwatchInnerHeight}" Background="{Binding Palette5, Converter={StaticResource HexColorBrushConverter}}" BorderBrush="{StaticResource BrushHairline}" BorderThickness="{StaticResource MetricBorderThickness}" /></Button>
+                    <Button AutomationProperties.AutomationId="ResetPalette" AutomationProperties.Name="Reset palette" Style="{StaticResource CompactButton}" Content="Reset" Margin="{StaticResource MetricPreferencesButtonGapLeft}" Click="ResetPalette_Click" />
+                  </StackPanel>
+                </Grid>
+              </Border>
+            </Border>
+
+            <TextBlock Style="{StaticResource PrefSectionTitle}" Text="DRAWING" />
+            <Border Style="{StaticResource PrefSection}">
+              <StackPanel>
+                <Border Style="{StaticResource PrefRow}"><Grid><Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width="Auto" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><TextBlock Text="Stroke" VerticalAlignment="Center" /><Slider AutomationProperties.AutomationId="StrokeWidth" Grid.Column="1" Width="{StaticResource MetricPreferencesSliderWidth}" Minimum="1" Maximum="8" TickFrequency="1" IsSnapToTickEnabled="True" Value="{Binding StrokeWidth, Mode=TwoWay}" /><TextBlock Grid.Column="2" Width="{StaticResource MetricPreferencesReadoutWidth}" FontFamily="{StaticResource FontMono}" Text="{Binding StrokeWidth, StringFormat={}{0:0}px}" VerticalAlignment="Center" HorizontalAlignment="Right" /></Grid></Border>
+                <Border Style="{StaticResource PrefRow}"><Grid><Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width="Auto" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><TextBlock Text="Text size" VerticalAlignment="Center" /><Slider AutomationProperties.AutomationId="TextSize" Grid.Column="1" Width="{StaticResource MetricPreferencesSliderWidth}" Minimum="10" Maximum="36" TickFrequency="1" IsSnapToTickEnabled="True" Value="{Binding TextSize, Mode=TwoWay}" /><TextBlock Grid.Column="2" Width="{StaticResource MetricPreferencesReadoutWidth}" FontFamily="{StaticResource FontMono}" Text="{Binding TextSize, StringFormat={}{0:0}px}" VerticalAlignment="Center" HorizontalAlignment="Right" /></Grid></Border>
+                <Border Style="{StaticResource PrefRow}"><Grid><Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><TextBlock Text="Return behavior" VerticalAlignment="Center" /><ComboBox AutomationProperties.AutomationId="TextEnterBehavior" Grid.Column="1" ItemsSource="{Binding TextEnterBehaviorOptions}" DisplayMemberPath="Text" SelectedValuePath="Value" SelectedValue="{Binding TextEnterBehavior, Mode=TwoWay}" /></Grid></Border>
+                <Border Style="{StaticResource PrefRow}"><Grid><Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><TextBlock Text="Esc behavior" VerticalAlignment="Center" /><ComboBox AutomationProperties.AutomationId="EscBehavior" Grid.Column="1" ItemsSource="{Binding EscBehaviorOptions}" DisplayMemberPath="Text" SelectedValuePath="Value" SelectedValue="{Binding EscBehavior, Mode=TwoWay}" /></Grid></Border>
+                <Border Style="{StaticResource PrefRow}"><Grid><Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><TextBlock Text="Auto-expand canvas" VerticalAlignment="Center" /><CheckBox AutomationProperties.AutomationId="AutoExpandCanvas" Grid.Column="1" IsChecked="{Binding AutoExpandCanvas, Mode=TwoWay}" /></Grid></Border>
+                <Border Style="{StaticResource PrefLastRow}"><Grid><Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><TextBlock Text="Fill color" VerticalAlignment="Center" /><Button AutomationProperties.AutomationId="CanvasExtensionBackgroundColor" AutomationProperties.Name="Choose canvas fill color" Grid.Column="1" Style="{StaticResource SwatchButton}" Tag="CanvasExtensionBackgroundHex" Click="ColorSwatch_Click"><Border Width="{StaticResource MetricPreferencesSwatchInnerWidth}" Height="{StaticResource MetricPreferencesSwatchInnerHeight}" Background="{Binding CanvasExtensionBackgroundHex, Converter={StaticResource HexColorBrushConverter}}" BorderBrush="{StaticResource BrushHairline}" BorderThickness="{StaticResource MetricBorderThickness}" /></Button></Grid></Border>
+              </StackPanel>
+            </Border>
+            <TextBlock Style="{StaticResource PrefCaption}" Text="Number keys 1-5 choose palette slots in the editor." />
+            <TextBlock Style="{StaticResource PrefErrorCaption}" Text="{Binding LastError}" />
+          </StackPanel>
+        </ScrollViewer>
+      </TabItem>
+
+      <TabItem>
+        <TabItem.Header>
+          <StackPanel Orientation="Horizontal">
+            <Path Data="{StaticResource IconPreferencesOutput}" Width="{StaticResource MetricPreferencesIconSize}" Height="{StaticResource MetricPreferencesIconSize}" Stretch="Uniform" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=TabItem}}" Fill="Transparent" StrokeThickness="1.4" Margin="{StaticResource MetricPreferencesIconMargin}" />
+            <TextBlock Text="Output" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=TabItem}}" />
+          </StackPanel>
+        </TabItem.Header>
+        <ScrollViewer VerticalScrollBarVisibility="Auto" Background="{StaticResource BrushWell}">
+          <StackPanel Margin="{StaticResource MetricPanelMargin}">
+            <TextBlock Style="{StaticResource PrefSectionTitle}" Text="FILES" />
+            <Border Style="{StaticResource PrefSection}">
+              <StackPanel>
+                <Border Style="{StaticResource PrefRow}">
+                  <Grid>
+                    <Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                    <TextBox AutomationProperties.AutomationId="SaveFolder" Text="{Binding SaveFolder, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                    <Button AutomationProperties.AutomationId="ChooseSaveFolder" AutomationProperties.Name="Choose save folder" Grid.Column="1" Style="{StaticResource CompactButton}" Content="Choose..." Margin="{StaticResource MetricPreferencesButtonGapLeft}" Click="PickSaveFolder_Click" />
+                  </Grid>
+                </Border>
+                <Border Style="{StaticResource PrefRow}"><Grid><Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><TextBlock Text="Filename pattern" VerticalAlignment="Center" /><TextBox AutomationProperties.AutomationId="FilenamePattern" Grid.Column="1" Width="{StaticResource MetricPreferencesSliderWidth}" Text="{Binding FilenamePattern, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" /></Grid></Border>
+                <Border Style="{StaticResource PrefRow}"><Grid><Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><TextBlock Text="Export scale" VerticalAlignment="Center" /><StackPanel Grid.Column="1" Orientation="Horizontal"><RadioButton AutomationProperties.AutomationId="ExportScale1x" Style="{StaticResource SegmentRadio}" Content="1x logical" GroupName="ExportScale" IsChecked="{Binding IsExportScale1x, Mode=TwoWay}" /><RadioButton AutomationProperties.AutomationId="ExportScale2x" Style="{StaticResource SegmentRadio}" Content="2x high resolution" GroupName="ExportScale" IsChecked="{Binding IsExportScale2x, Mode=TwoWay}" Margin="{StaticResource MetricPreferencesGapLeft}" /></StackPanel></Grid></Border>
+                <Border Style="{StaticResource PrefLastRow}"><Grid><Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><TextBlock Text="Notify when copied" VerticalAlignment="Center" /><CheckBox AutomationProperties.AutomationId="NotifyWhenCopied" Grid.Column="1" IsChecked="{Binding NotifyWhenCopied, Mode=TwoWay}" /></Grid></Border>
+              </StackPanel>
+            </Border>
+            <TextBlock Style="{StaticResource PrefCaption}" Text="Settings file: %APPDATA%\scrcap\settings.json" />
+            <TextBlock Style="{StaticResource PrefErrorCaption}" Text="{Binding LastError}" />
+          </StackPanel>
+        </ScrollViewer>
+      </TabItem>
+
+      <TabItem>
+        <TabItem.Header>
+          <StackPanel Orientation="Horizontal">
+            <Path Data="{StaticResource IconPreferencesAbout}" Width="{StaticResource MetricPreferencesIconSize}" Height="{StaticResource MetricPreferencesIconSize}" Stretch="Uniform" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=TabItem}}" Fill="Transparent" StrokeThickness="1.4" Margin="{StaticResource MetricPreferencesIconMargin}" />
+            <TextBlock Text="About" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=TabItem}}" />
+          </StackPanel>
+        </TabItem.Header>
+        <StackPanel Margin="{StaticResource MetricPanelMargin}">
+          <TextBlock Style="{StaticResource PrefSectionTitle}" Text="SCRCAP" />
+          <Border Style="{StaticResource PrefSection}" Padding="{StaticResource MetricPreferencesAboutPadding}">
+            <StackPanel>
+              <StackPanel Orientation="Horizontal">
+                <Border Width="{StaticResource MetricAboutLogoSize}" Height="{StaticResource MetricAboutLogoSize}" Background="{StaticResource BrushAccent}" CornerRadius="{StaticResource MetricAboutLogoRadius}" Margin="{StaticResource MetricPreferencesAboutLogoMargin}">
+                  <TextBlock Text="S" Foreground="{StaticResource BrushOnAccent}" FontWeight="Bold" FontSize="{StaticResource FontSizeAboutLogo}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                </Border>
+                <StackPanel>
+                  <TextBlock Text="scrcap for Windows" FontWeight="Bold" FontSize="{StaticResource FontSizeBrand}" />
+                  <TextBlock Text="Tiny, fast screenshots with annotation tools." Foreground="{StaticResource BrushMuted}" />
+                </StackPanel>
+              </StackPanel>
+              <TextBlock Text="{Binding VersionText, StringFormat=Version {0}}" Margin="{StaticResource MetricPreferencesAboutVersionMargin}" />
+              <TextBlock Text="{Binding BuildChannel, StringFormat=Build channel: {0}}" />
+              <TextBlock Text="{Binding SourceLink, StringFormat=Source: {0}}" />
+              <TextBlock Style="{StaticResource PrefCaption}" Text="Created by the scrcap project contributors. Windows port credits follow the upstream source license." />
+              <TextBlock Style="{StaticResource PrefErrorCaption}" Text="{Binding LastError}" />
+            </StackPanel>
+          </Border>
+        </StackPanel>
+      </TabItem>
+    </TabControl>
+  </chrome:ScrcapWindowChrome>
 </Window>

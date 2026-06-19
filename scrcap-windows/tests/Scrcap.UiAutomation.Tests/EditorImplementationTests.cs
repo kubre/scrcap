@@ -1,4 +1,5 @@
 using System.IO;
+using System.Text.RegularExpressions;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using Scrcap.Core;
@@ -18,7 +19,6 @@ public sealed class EditorImplementationTests
                      "UndoButton",
                      "SaveButton",
                      "DoneButton",
-                     "CloseButton",
                      "ToolArrow",
                      "ToolRectangle",
                      "ToolCounter",
@@ -33,7 +33,9 @@ public sealed class EditorImplementationTests
                      "SizeSmall",
                      "SizeMedium",
                      "SizeLarge",
-                     "TextValue",
+                     "ZoomOutButton",
+                     "ZoomResetButton",
+                     "ZoomInButton",
                      "ZoomStatus",
                  })
         {
@@ -118,8 +120,143 @@ public sealed class EditorImplementationTests
         Assert.Contains("DocumentChanged?.Invoke(this, EventArgs.Empty)", canvasSource, StringComparison.Ordinal);
         Assert.Contains("EditorTool.Counter => true", canvasSource, StringComparison.Ordinal);
         Assert.Contains("EditorTool.Pixelate => rect.Width > 1 && rect.Height > 1", canvasSource, StringComparison.Ordinal);
+        Assert.Contains("var growth = ViewModel.CommitShape(startImage, endImage)", canvasSource, StringComparison.Ordinal);
         Assert.Contains("Keyboard.Modifiers == ModifierKeys.Control && e.Key == Key.Z", windowSource, StringComparison.Ordinal);
         Assert.Contains("viewModel.Undo()", windowSource, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void InlineTextEditorReplacesToolbarTextFieldAndSuspendsWindowHotkeys()
+    {
+        var xaml = ReadRepoFile("src/Scrcap.Windows.UI/Editor/EditorWindow.xaml");
+        var source = ReadRepoFile("src/Scrcap.Windows.UI/Editor/EditorWindow.xaml.cs");
+
+        Assert.DoesNotContain("TextValue", xaml, StringComparison.Ordinal);
+        Assert.Contains("x:Name=\"TextOverlay\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("AutomationProperties.SetAutomationId(textBox, \"InlineTextEditor\")", source, StringComparison.Ordinal);
+        Assert.Contains("Canvas.TextRequested += Canvas_TextRequested", source, StringComparison.Ordinal);
+        Assert.Contains("inlineTextBox is not null || e.OriginalSource is WpfTextBox", source, StringComparison.Ordinal);
+        Assert.Contains("CommitInlineText()", source, StringComparison.Ordinal);
+        Assert.Contains("viewModel.ActiveTool = previousTool", source, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void InlineTextReturnShiftReturnAndEscapeFollowPreferences()
+    {
+        var source = ReadRepoFile("src/Scrcap.Windows.UI/Editor/EditorWindow.xaml.cs");
+
+        Assert.Contains("settings.TextEnterBehavior == TextEnterBehavior.Newline", source, StringComparison.Ordinal);
+        Assert.Contains("if (shift)", source, StringComparison.Ordinal);
+        Assert.Contains("InsertInlineNewline()", source, StringComparison.Ordinal);
+        Assert.Contains("if (e.Key == Key.Escape)", source, StringComparison.Ordinal);
+        Assert.Contains("string.IsNullOrEmpty(text)", source, StringComparison.Ordinal);
+        Assert.Contains("var maxWidth = inlineTextBox.MaxWidth / Math.Max(0.001, viewModel.Zoom)", source, StringComparison.Ordinal);
+        Assert.Contains("text, maxWidth", source, StringComparison.Ordinal);
+        Assert.Contains("formatted.MaxTextWidth = maxWidth.Value", ReadRepoFile("src/Scrcap.Windows.UI/Editor/EditorCanvas.cs"), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AutoExpandAndCropPreviewUseSharedInteractionHooks()
+    {
+        var canvasSource = ReadRepoFile("src/Scrcap.Windows.UI/Editor/EditorCanvas.cs");
+        var windowSource = ReadRepoFile("src/Scrcap.Windows.UI/Editor/EditorWindow.xaml.cs");
+
+        Assert.Contains("WindowPointToImagePoint(point, allowOutsideImage: ViewModel?.Settings.AutoExpandCanvas == true)", canvasSource, StringComparison.Ordinal);
+        Assert.Contains("ViewModel.Settings.AutoExpandCanvas && ViewModel.ActiveTool != EditorTool.Crop", canvasSource, StringComparison.Ordinal);
+        Assert.Contains("AutoExpanded?.Invoke(this, growth)", canvasSource, StringComparison.Ordinal);
+        Assert.Contains("DrawHazardSelection(context, crop)", canvasSource, StringComparison.Ordinal);
+        Assert.Contains("EditorRenderMetrics.CropHandleSize", canvasSource, StringComparison.Ordinal);
+        Assert.Contains("Canvas.AutoExpanded += (_, growth) => ExpandSourceBitmap(growth)", windowSource, StringComparison.Ordinal);
+        Assert.Contains("CanvasExtensionBackgroundHex", windowSource, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void DragOutUsesFlattenedRendererPathAndRecoverableFailure()
+    {
+        var canvasSource = ReadRepoFile("src/Scrcap.Windows.UI/Editor/EditorCanvas.cs");
+        var windowSource = ReadRepoFile("src/Scrcap.Windows.UI/Editor/EditorWindow.xaml.cs");
+
+        Assert.Contains("Keyboard.Modifiers.HasFlag(ModifierKeys.Alt)", canvasSource, StringComparison.Ordinal);
+        Assert.Contains("DragOutRequested?.Invoke(this, EventArgs.Empty)", canvasSource, StringComparison.Ordinal);
+        Assert.Contains("Canvas.DragOutRequested += (_, _) => DragOutFlattened()", windowSource, StringComparison.Ordinal);
+        Assert.Contains("Canvas.FlattenPng(settings.ResolvedExportScale)", windowSource, StringComparison.Ordinal);
+        Assert.Contains("System.Windows.DataFormats.FileDrop", windowSource, StringComparison.Ordinal);
+        Assert.Contains("ShowRecoverableError(\"scrcap drag failed\", ex)", windowSource, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void EditorUsesSharedWindowChrome()
+    {
+        var xaml = ReadRepoFile("src/Scrcap.Windows.UI/Editor/EditorWindow.xaml");
+        var source = ReadRepoFile("src/Scrcap.Windows.UI/Editor/EditorWindow.xaml.cs");
+
+        Assert.Contains("chrome:WindowChromeBehavior.Enabled=\"True\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("<chrome:ScrcapWindowChrome", xaml, StringComparison.Ordinal);
+        Assert.Contains("shell:WindowChrome.IsHitTestVisibleInChrome=\"True\"", xaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("DragMove()", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("CloseButton", xaml, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ToolbarUsesParityGridPathIconsAndStateBindings()
+    {
+        var xaml = ReadRepoFile("src/Scrcap.Windows.UI/Editor/EditorWindow.xaml");
+        var app = ReadRepoFile("src/Scrcap.Windows.UI/App.xaml");
+        var icons = ReadRepoFile("src/Scrcap.Windows.UI/Resources/IconGeometries.xaml");
+        var tokens = ReadRepoFile("src/Scrcap.Windows.UI/Resources/ThemeTokens.xaml");
+
+        Assert.Contains("Resources/IconGeometries.xaml", app, StringComparison.Ordinal);
+        foreach (var icon in new[]
+                 {
+                     "IconArrow",
+                     "IconRectangle",
+                     "IconCounter",
+                     "IconText",
+                     "IconPixelate",
+                     "IconCrop",
+                     "IconUndo",
+                     "IconSave",
+                     "IconZoomOut",
+                     "IconZoomIn",
+                 })
+        {
+            Assert.Contains($"x:Key=\"{icon}\"", icons, StringComparison.Ordinal);
+            Assert.Contains($"{{StaticResource {icon}}}", xaml, StringComparison.Ordinal);
+        }
+
+        Assert.Contains("<Grid.ColumnDefinitions>", xaml, StringComparison.Ordinal);
+        Assert.Contains("<ColumnDefinition Width=\"*\" />", xaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("MetricSeparatorHeight", xaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("&#x2196;", xaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("&#x25AD;", xaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("&#x25A6;", xaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("&#x2317;", xaml, StringComparison.Ordinal);
+
+        Assert.Contains("<sys:Double x:Key=\"MetricToolbarIconBox\">15</sys:Double>", tokens, StringComparison.Ordinal);
+        Assert.Contains("<Thickness x:Key=\"MetricToolbarButtonPadding\">7,0</Thickness>", tokens, StringComparison.Ordinal);
+        Assert.Contains("<sys:Double x:Key=\"MetricSwatchSize\">11</sys:Double>", tokens, StringComparison.Ordinal);
+        Assert.Contains("<sys:Double x:Key=\"MetricSmallDotSize\">5</sys:Double>", tokens, StringComparison.Ordinal);
+        Assert.Contains("<sys:Double x:Key=\"MetricMediumDotSize\">9</sys:Double>", tokens, StringComparison.Ordinal);
+        Assert.Contains("<sys:Double x:Key=\"MetricLargeDotSize\">13</sys:Double>", tokens, StringComparison.Ordinal);
+
+        var activeBindings = Regex.Matches(xaml, "Tag=\"\\{Binding Is(?:ArrowTool|RectangleTool|CounterTool|TextTool|PixelateTool|CropTool|Color[1-5]|SmallSize|MediumSize|LargeSize)Active\\}\"");
+        Assert.Equal(14, activeBindings.Count);
+    }
+
+    [Fact]
+    public void UndoEnabledStateTracksDocumentCursor()
+    {
+        var viewModel = new EditorViewModel(Settings.Defaults());
+        viewModel.LoadDocument(320, 200);
+
+        Assert.False(viewModel.CanUndo);
+        viewModel.CommitShape(new CorePoint(10, 10), new CorePoint(80, 40));
+        Assert.True(viewModel.CanUndo);
+        Assert.True(viewModel.Undo());
+        Assert.False(viewModel.CanUndo);
+        Assert.True(viewModel.CanRedo);
+        Assert.True(viewModel.Redo());
+        Assert.True(viewModel.CanUndo);
     }
 
     [Fact]

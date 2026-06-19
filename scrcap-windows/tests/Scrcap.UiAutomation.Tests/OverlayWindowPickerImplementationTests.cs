@@ -13,11 +13,71 @@ public sealed class OverlayWindowPickerImplementationTests
         var source = ReadRepoFile("src/Scrcap.Windows.UI/Overlay/OverlayWindow.xaml.cs");
 
         Assert.Contains("IWindowSelectionService", source, StringComparison.Ordinal);
-        Assert.Contains("WindowFromPoint", source, StringComparison.Ordinal);
+        Assert.Contains("SelectWindowAsync", source, StringComparison.Ordinal);
+        Assert.Contains("WindowStackAt", source, StringComparison.Ordinal);
+        Assert.Contains("ResolveCandidateForCommit", source, StringComparison.Ordinal);
         Assert.Contains("EnumerateWindows", source, StringComparison.Ordinal);
         Assert.Contains("CycleWindowHighlight", source, StringComparison.Ordinal);
         Assert.Contains("Key.Tab", source, StringComparison.Ordinal);
         Assert.Contains("Key.Enter", source, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void WindowStackAtPreservesEnumeratedZOrderForOverlaps()
+    {
+        var top = Candidate(1, 20, 20, 120, 120, "Top");
+        var middle = Candidate(2, 10, 10, 120, 120, "Middle");
+        var outside = Candidate(3, 300, 300, 80, 80, "Outside");
+
+        var stack = OverlayWindow.WindowStackAt([top, middle, outside], new PixelPoint(40, 40));
+
+        Assert.Equal([top, middle], stack);
+    }
+
+    [Fact]
+    public void WindowCommitResolutionRefreshesSelectedCandidateBeforeCapture()
+    {
+        var selectedSnapshot = Candidate(10, 0, 0, 100, 100, "Old");
+        var refreshedSelected = Candidate(10, 24, 32, 140, 120, "Current");
+        var livePoint = Candidate(20, 0, 0, 100, 100, "Other");
+
+        var resolved = OverlayWindow.ResolveCandidateForCommit(
+            selectedSnapshot,
+            new PixelPoint(12, 12),
+            [refreshedSelected, livePoint],
+            livePoint);
+
+        Assert.Equal(refreshedSelected, resolved);
+    }
+
+    [Fact]
+    public void WindowCommitResolutionFallsBackToLivePointWhenSelectedCandidateDisappears()
+    {
+        var staleSelected = Candidate(10, 0, 0, 100, 100, "Gone");
+        var livePoint = Candidate(20, 0, 0, 100, 100, "Current");
+
+        var resolved = OverlayWindow.ResolveCandidateForCommit(
+            staleSelected,
+            new PixelPoint(12, 12),
+            [livePoint],
+            livePoint);
+
+        Assert.Equal(livePoint, resolved);
+    }
+
+    [Fact]
+    public void WindowCommitResolutionUsesCurrentPointStackWithoutSelectedCandidate()
+    {
+        var top = Candidate(1, 20, 20, 120, 120, "Top");
+        var middle = Candidate(2, 10, 10, 120, 120, "Middle");
+
+        var resolved = OverlayWindow.ResolveCandidateForCommit(
+            null,
+            new PixelPoint(40, 40),
+            [top, middle],
+            null);
+
+        Assert.Equal(top, resolved);
     }
 
     [Fact]
@@ -154,6 +214,9 @@ public sealed class OverlayWindowPickerImplementationTests
         var root = FindRepoRoot();
         return File.ReadAllText(Path.Combine(root, relativePath));
     }
+
+    private static WindowCandidate Candidate(int hwnd, int x, int y, int width, int height, string title) =>
+        new(new IntPtr(hwnd), new PixelRect(x, y, width, height), title);
 
     private static string FindRepoRoot()
     {

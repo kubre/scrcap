@@ -39,8 +39,8 @@ public partial class ScrollingCaptureHud : Window
     public void UpdateProgress(ScrollingCaptureProgress progress)
     {
         var frameWord = progress.FrameCount == 1 ? "frame" : "frames";
-        var stop = progress.StopReason is null ? string.Empty : $" - {StopText(progress.StopReason.Value)}";
-        ProgressText.Text = $"{progress.FrameCount} {frameWord} - {progress.OutputHeight}/{progress.MaxPixelHeight}px{stop}";
+        var stop = progress.StopReason is null ? string.Empty : $" · {StopText(progress.StopReason.Value)}";
+        ProgressText.Text = $"{progress.OutputHeight}/{progress.MaxPixelHeight} px · {progress.FrameCount} {frameWord}{stop}";
     }
 
     public async Task HideForCaptureAsync(CancellationToken cancellationToken)

@@ -52,7 +52,7 @@ public abstract record ShapeKind
 
     public sealed record Counter(int Number) : ShapeKind;
 
-    public sealed record Text(string Value, double Size) : ShapeKind;
+    public sealed record Text(string Value, double Size, double? MaxWidth = null) : ShapeKind;
 }
 
 public enum ShapeSize
@@ -185,6 +185,22 @@ public sealed class AnnotationDocument
     public void AppendShape(Shape shape) =>
         Commit(Current with { Shapes = [.. Current.Shapes, shape] });
 
+    public AutoExpandResult AppendShapeWithAutoExpand(Shape shape, CoreRect bounds, double padding = 0)
+    {
+        var growth = AutoExpandResult.FromBounds(bounds, Current.Size, padding);
+        var shiftedShapes = growth.HasGrowth
+            ? Current.Shapes.Select(existing => existing.Shifted(growth.Left, growth.Top)).ToArray()
+            : Current.Shapes;
+        var shiftedShape = growth.HasGrowth
+            ? shape.Shifted(growth.Left, growth.Top)
+            : shape;
+
+        Commit(new DocumentSnapshot(
+            new CoreSize(Current.Size.Width + growth.Left + growth.Right, Current.Size.Height + growth.Top + growth.Bottom),
+            [.. shiftedShapes, shiftedShape]));
+        return growth;
+    }
+
     public bool Crop(CoreRect crop)
     {
         var bounded = NormalizeCrop(crop);
@@ -289,4 +305,25 @@ public sealed class AnnotationDocument
     }
 
     private sealed record DocumentSnapshot(CoreSize Size, IReadOnlyList<Shape> Shapes);
+}
+
+public readonly record struct AutoExpandResult(double Left, double Top, double Right, double Bottom)
+{
+    public bool HasGrowth => Left > 0 || Top > 0 || Right > 0 || Bottom > 0;
+
+    public static AutoExpandResult None => new(0, 0, 0, 0);
+
+    public static AutoExpandResult FromBounds(CoreRect bounds, CoreSize size, double padding = 0)
+    {
+        if (bounds.IsEmpty)
+        {
+            return None;
+        }
+
+        return new AutoExpandResult(
+            Math.Max(0, -bounds.MinX + padding),
+            Math.Max(0, -bounds.MinY + padding),
+            Math.Max(0, bounds.MaxX - size.Width + padding),
+            Math.Max(0, bounds.MaxY - size.Height + padding));
+    }
 }

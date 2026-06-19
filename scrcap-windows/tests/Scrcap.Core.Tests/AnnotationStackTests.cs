@@ -102,6 +102,55 @@ public sealed class AnnotationStackTests
         Assert.Equal(new CoreSize(100, 80), document.Size);
     }
 
+    [Fact]
+    public void AppendShapeWithAutoExpandCommitsGrowthAndShapeInOneUndoStep()
+    {
+        var document = new AnnotationDocument(100, 80);
+        document.AppendShape(TestShape(new ShapeKind.Rectangle(), new CorePoint(10, 10), new CorePoint(20, 20)));
+
+        var growth = document.AppendShapeWithAutoExpand(
+            TestShape(new ShapeKind.Arrow(), new CorePoint(-12, -6), new CorePoint(118, 92)),
+            new CoreRect(-12, -6, 130, 98));
+
+        Assert.Equal(new AutoExpandResult(12, 6, 18, 12), growth);
+        Assert.Equal(new CoreSize(130, 98), document.Size);
+        Assert.Equal(new CorePoint(22, 16), document.Shapes[0].Start);
+        Assert.Equal(new CorePoint(0, 0), document.Shapes[1].Start);
+        Assert.Equal(new CorePoint(130, 98), document.Shapes[1].End);
+
+        Assert.True(document.Undo());
+        Assert.Equal(new CoreSize(100, 80), document.Size);
+        Assert.Single(document.Shapes);
+    }
+
+    [Theory]
+    [InlineData(-8, 10, 18, 20, 8, 0, 0, 0)]
+    [InlineData(10, -8, 20, 18, 0, 8, 0, 0)]
+    [InlineData(90, 10, 20, 20, 0, 0, 10, 0)]
+    [InlineData(10, 70, 20, 20, 0, 0, 0, 10)]
+    [InlineData(-8, -9, 118, 99, 8, 9, 10, 10)]
+    public void AppendShapeWithAutoExpandReportsEveryEdgeAndCorner(
+        double x,
+        double y,
+        double width,
+        double height,
+        double left,
+        double top,
+        double right,
+        double bottom)
+    {
+        var document = new AnnotationDocument(100, 80);
+
+        var growth = document.AppendShapeWithAutoExpand(
+            TestShape(new ShapeKind.Rectangle(), new CorePoint(x, y), new CorePoint(x + width, y + height)),
+            new CoreRect(x, y, width, height));
+
+        Assert.Equal(new AutoExpandResult(left, top, right, bottom), growth);
+        Assert.Equal(new CoreSize(100 + left + right, 80 + top + bottom), document.Size);
+        Assert.True(document.Undo());
+        Assert.Equal(new CoreSize(100, 80), document.Size);
+    }
+
     private static Shape TestShape(ShapeKind kind) =>
         new(kind, 0, ShapeSize.Small, new CorePoint(1, 2), new CorePoint(10, 20));
 
