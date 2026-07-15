@@ -42,6 +42,7 @@ internal static class MonitorSelection
             throw new InvalidOperationException("Could not read monitor bounds.");
         }
 
+        var (dpiScaleX, dpiScaleY) = DpiScale(monitor);
         return new MonitorInfo(
             monitor,
             new PixelRect(
@@ -49,11 +50,36 @@ internal static class MonitorSelection
                 info.Monitor.Top,
                 info.Monitor.Right - info.Monitor.Left,
                 info.Monitor.Bottom - info.Monitor.Top),
-            info.DeviceName.ToString());
+            info.DeviceName.ToString(),
+            dpiScaleX,
+            dpiScaleY);
+    }
+
+    private static (double X, double Y) DpiScale(IntPtr monitor)
+    {
+        try
+        {
+            return GetDpiForMonitor(monitor, MonitorDpiType.Effective, out var dpiX, out var dpiY) == 0
+                ? (Math.Max(1, dpiX / 96d), Math.Max(1, dpiY / 96d))
+                : (1, 1);
+        }
+        catch (DllNotFoundException)
+        {
+            return (1, 1);
+        }
+        catch (EntryPointNotFoundException)
+        {
+            return (1, 1);
+        }
     }
 
     private const uint MonitorDefaultToNearest = 2;
     private const int DeviceNameChars = 32;
+
+    private enum MonitorDpiType
+    {
+        Effective = 0,
+    }
 
     [StructLayout(LayoutKind.Sequential)]
     private readonly record struct NativePoint(int X, int Y);
@@ -87,4 +113,7 @@ internal static class MonitorSelection
 
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
     private static extern bool GetMonitorInfo(IntPtr monitor, ref MonitorInfoEx info);
+
+    [DllImport("Shcore.dll")]
+    private static extern int GetDpiForMonitor(IntPtr monitor, MonitorDpiType dpiType, out uint dpiX, out uint dpiY);
 }

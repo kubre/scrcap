@@ -195,6 +195,23 @@ public sealed class CaptureImplementationTests
     }
 
     [Fact]
+    public void TransparentWindowShadowStaysTransparentAndIsSoftAndSymmetric()
+    {
+        using var source = CreateSolidBitmap(20, 12, Color.White);
+        var request = CaptureRequest(transparent: true, shadow: true, background: "#FF00FF");
+
+        using var composed = WindowBitmapComposer.Compose(source, request);
+
+        var pad = WindowBitmapComposer.ShadowPadding;
+        Assert.Equal(0, composed.GetPixel(0, 0).A);
+        Assert.InRange(composed.GetPixel(pad - 1, pad + 6).A, 30, 80);
+        Assert.True(composed.GetPixel(pad - 4, pad + 6).A > composed.GetPixel(pad - 12, pad + 6).A);
+        Assert.Equal(composed.GetPixel(pad - 4, pad + 6).A, composed.GetPixel(pad + 20 + 3, pad + 6).A);
+        Assert.Equal(Color.White.ToArgb(), composed.GetPixel(pad, pad).ToArgb());
+        Assert.DoesNotContain(ReadPixels(composed), color => color.R == 255 && color.B == 255 && color.G == 0);
+    }
+
+    [Fact]
     public void ScrollingStitcherBuildsExpectedBitmapForNormalStickyAndLazyFrames()
     {
         using var first = CreateRows([100, 0, 1, 2, 3, 4]);

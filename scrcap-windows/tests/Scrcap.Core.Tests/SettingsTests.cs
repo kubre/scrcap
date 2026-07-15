@@ -6,6 +6,20 @@ namespace Scrcap.Core.Tests;
 public sealed class SettingsTests
 {
     [Fact]
+    public void SettingsStoreRaisesChangedOnlyAfterSuccessfulAtomicUpdate()
+    {
+        using var temp = new TempDirectory();
+        var store = new SettingsStore(temp.Path);
+        var changes = 0;
+        store.SettingsChanged += (_, _) => changes++;
+
+        Assert.True(store.Update(settings => settings.ThemeMode = ThemeMode.Dark));
+
+        Assert.Equal(1, changes);
+        Assert.Equal(ThemeMode.Dark, store.Settings.ThemeMode);
+    }
+
+    [Fact]
     public void DefaultsMatchCurrentHotkeyContract()
     {
         var settings = Settings.Defaults();

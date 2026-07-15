@@ -6,8 +6,10 @@ using Scrcap.Windows.Platform.Capture;
 using Scrcap.Windows.Platform.Hotkeys;
 using Scrcap.Windows.Platform.Tray;
 using Scrcap.Windows.UI.Editor;
+using Scrcap.Windows.UI.Onboarding;
 using Scrcap.Windows.UI.Overlay;
 using Scrcap.Windows.UI.Preferences;
+using Scrcap.Windows.UI.Resources;
 
 namespace Scrcap.Windows.UI;
 
@@ -19,6 +21,7 @@ public partial class App : System.Windows.Application
     private IWindowsCaptureService? captureService;
     private IWindowSelectionService? windowSelectionService;
     private CaptureTarget? lastCapture;
+    private int captureFlowActive;
 
     protected override void OnStartup(StartupEventArgs e)
     {
@@ -32,6 +35,9 @@ public partial class App : System.Windows.Application
             settingsStore.Settings.ThemeMode = appTheme;
         }
 
+        AppThemeService.Apply(Resources, settingsStore.Settings.ThemeMode);
+        settingsStore.SettingsChanged += SettingsStore_SettingsChanged;
+
         if (!options.TestMode)
         {
             captureService = new WindowsCaptureService();
@@ -40,20 +46,26 @@ public partial class App : System.Windows.Application
             RegisterHotkeys();
             hotkeys.Pressed += (_, action) => HandleCaptureAction(action);
 
-            tray = new NotifyIconTrayService(new TaskbarThemeService());
+            tray = new NotifyIconTrayService(new TaskbarThemeService(), () => settingsStore.Settings.Keymap);
             tray.CaptureRequested += (_, action) => HandleCaptureAction(action);
             tray.PreferencesRequested += (_, _) => OpenPreferences();
             tray.QuitRequested += (_, _) => Shutdown();
             tray.Show();
         }
 
-        if (e.Args.Contains("--open-preferences", StringComparer.OrdinalIgnoreCase))
+        if (options.OpenPreferences)
         {
             OpenPreferences(options.DumpPath, options.TestMode);
             return;
         }
 
-        if (TryGetOptionValue(e.Args, "--open-sample-editor") is { } samplePath)
+        if (options.OpenOnboarding)
+        {
+            OpenOnboarding(options.DumpPath, options.TestMode);
+            return;
+        }
+
+        if (options.SampleEditorPath is { } samplePath)
         {
             OpenSampleEditor(samplePath, options.DumpPath, settingsStore.Settings, options.TestMode);
             return;
@@ -62,11 +74,23 @@ public partial class App : System.Windows.Application
         if (options.TestMode)
         {
             OpenSampleEditor(null, options.DumpPath, settingsStore.Settings, options.TestMode);
+            return;
+        }
+
+        if (!settingsStore.Settings.HasShownFirstLaunchNotice)
+        {
+            settingsStore.Update(settings => settings.HasShownFirstLaunchNotice = true);
+            OpenOnboarding();
         }
     }
 
     protected override void OnExit(ExitEventArgs e)
     {
+        if (settingsStore is not null)
+        {
+            settingsStore.SettingsChanged -= SettingsStore_SettingsChanged;
+        }
+
         tray?.Dispose();
         hotkeys?.Dispose();
         base.OnExit(e);
@@ -79,6 +103,11 @@ public partial class App : System.Windows.Application
             return;
         }
 
+        if (Interlocked.CompareExchange(ref captureFlowActive, 1, 0) != 0)
+        {
+            return;
+        }
+
         try
         {
             var capture = await CaptureAsync(action, settingsStore.Settings, CancellationToken.None).ConfigureAwait(true);
@@ -87,10 +116,16 @@ public partial class App : System.Windows.Application
                 return;
             }
 
-            var behavior = BehaviorFor(action, settingsStore.Settings);
+            var behaviorAction = action == AppAction.RepeatLast
+                ? lastCapture?.Action ?? action
+                : action;
+            var behavior = BehaviorFor(behaviorAction, settingsStore.Settings);
             if (behavior is AfterCaptureBehavior.CopyOnly or AfterCaptureBehavior.Both)
             {
-                System.Windows.Clipboard.SetImage(EditorWindow.BitmapSourceFromPixels(capture.Pixels));
+                var bitmap = EditorWindow.BitmapSourceFromPixels(capture.Pixels);
+                var png = EditorClipboard.EncodePng(bitmap);
+                System.Windows.Clipboard.SetDataObject(EditorClipboard.CreateDataObject(png), true);
+                tray?.NotifyCopy(settingsStore.Settings);
             }
 
             if (behavior is AfterCaptureBehavior.OpenEditor or AfterCaptureBehavior.Both)
@@ -104,6 +139,10 @@ public partial class App : System.Windows.Application
         catch (Exception ex)
         {
             tray?.Notify("scrcap capture failed", ex.Message);
+        }
+        finally
+        {
+            Volatile.Write(ref captureFlowActive, 0);
         }
     }
 
@@ -120,7 +159,7 @@ public partial class App : System.Windows.Application
         {
             AppAction.CaptureRegion => await RegionTargetAsync(AppAction.CaptureRegion, 0, cancellationToken).ConfigureAwait(true),
             AppAction.CaptureDelayed => await RegionTargetAsync(AppAction.CaptureDelayed, settings.CaptureDelaySeconds, cancellationToken).ConfigureAwait(true),
-            AppAction.CaptureWindow => await WindowTargetAsync(cancellationToken).ConfigureAwait(true),
+            AppAction.CaptureWindow => await WindowTargetAsync(settings.WindowCaptureTarget, cancellationToken).ConfigureAwait(true),
             AppAction.CaptureFullscreen => new CaptureTarget(AppAction.CaptureFullscreen, null),
             AppAction.CaptureScrolling => await RegionTargetAsync(AppAction.CaptureScrolling, 0, cancellationToken).ConfigureAwait(true),
             _ => null,
@@ -131,8 +170,9 @@ public partial class App : System.Windows.Application
             return null;
         }
 
-        lastCapture = target;
-        return await CaptureTargetAsync(target, request, cancellationToken).ConfigureAwait(true);
+        var capture = await CaptureTargetAsync(target, request, cancellationToken).ConfigureAwait(true);
+        lastCapture = RememberCaptureTarget(target, capture);
+        return capture;
     }
 
     private async Task<CaptureTarget?> RegionTargetAsync(AppAction action, int countdownSeconds, CancellationToken cancellationToken)
@@ -150,18 +190,24 @@ public partial class App : System.Windows.Application
         }
     }
 
-    private async Task<CaptureTarget?> WindowTargetAsync(CancellationToken cancellationToken)
+    private async Task<CaptureTarget?> WindowTargetAsync(WindowCaptureTarget captureTarget, CancellationToken cancellationToken)
     {
+        if (captureTarget == WindowCaptureTarget.Active)
+        {
+            var activeWindow = windowSelectionService?.EnumerateWindows().FirstOrDefault();
+            if (activeWindow is not null)
+            {
+                return new CaptureTarget(AppAction.CaptureWindow, activeWindow.Bounds, activeWindow.Hwnd);
+            }
+        }
+
         var overlay = new OverlayWindow();
         try
         {
-            var point = await overlay.SelectPointAsync().WaitAsync(cancellationToken).ConfigureAwait(true);
-            if (point is null || windowSelectionService?.WindowFromPoint(point.Value) is not { } candidate)
-            {
-                return null;
-            }
-
-            return new CaptureTarget(AppAction.CaptureWindow, candidate.Bounds, candidate.Hwnd);
+            var candidate = await overlay.SelectWindowAsync().WaitAsync(cancellationToken).ConfigureAwait(true);
+            return candidate is null
+                ? null
+                : new CaptureTarget(AppAction.CaptureWindow, candidate.Bounds, candidate.Hwnd);
         }
         finally
         {
@@ -210,11 +256,46 @@ public partial class App : System.Windows.Application
                 AppAction.CaptureRegion or AppAction.CaptureDelayed
                     when target.Region is { } region => captureService.CaptureRegionAsync(region, request, cancellationToken),
                 AppAction.CaptureWindow when target.WindowHandle is { } hwnd => captureService.CaptureWindowAsync(hwnd, request, cancellationToken),
-                AppAction.CaptureFullscreen => captureService.CaptureMonitorUnderCursorAsync(request, cancellationToken),
+                AppAction.CaptureFullscreen => CaptureFullscreenTargetAsync(target, request, cancellationToken),
                 _ => throw new InvalidOperationException("No repeatable capture target is available."),
             }).ConfigureAwait(true);
         }
     }
+
+    private async Task<CaptureResult> CaptureFullscreenTargetAsync(
+        CaptureTarget target,
+        CaptureRequest request,
+        CancellationToken cancellationToken)
+    {
+        if (captureService is null)
+        {
+            throw new InvalidOperationException("Capture service is not initialized.");
+        }
+
+        if (target.Region is not { } monitorBounds)
+        {
+            return await captureService.CaptureMonitorUnderCursorAsync(request, cancellationToken).ConfigureAwait(true);
+        }
+
+        var regionCapture = await captureService.CaptureRegionAsync(monitorBounds, request, cancellationToken).ConfigureAwait(true);
+        var metadata = regionCapture.Metadata with
+        {
+            Mode = CaptureMode.Fullscreen,
+            WindowTitle = target.FullscreenMonitorName,
+            SourceRect = monitorBounds,
+            CaptureBounds = monitorBounds,
+        };
+        return new CaptureResult(regionCapture.Pixels with { Metadata = metadata }, metadata);
+    }
+
+    private static CaptureTarget RememberCaptureTarget(CaptureTarget target, CaptureResult capture) =>
+        target.Action == AppAction.CaptureFullscreen && capture.Metadata.EffectiveCaptureBounds is { } monitorBounds
+            ? target with
+            {
+                Region = monitorBounds,
+                FullscreenMonitorName = capture.Metadata.WindowTitle,
+            }
+            : target;
 
     private async Task WaitForOverlayDismissalAsync(CancellationToken cancellationToken)
     {
@@ -266,7 +347,16 @@ public partial class App : System.Windows.Application
 
     private void OpenEditor(CaptureResult capture)
     {
-        var window = new EditorWindow(capture, settingsStore?.Settings)
+        var window = new EditorWindow(
+            capture,
+            settingsStore?.Settings,
+            () =>
+            {
+                if (tray is not null && settingsStore is not null)
+                {
+                    tray.NotifyCopy(settingsStore.Settings);
+                }
+            })
         {
             Title = capture.Metadata.WindowTitle is { Length: > 0 } title ? $"scrcap - {title}" : "scrcap",
         };
@@ -276,8 +366,24 @@ public partial class App : System.Windows.Application
 
     private void OpenPreferences(string? dumpPath = null, bool shutdownAfterDump = false)
     {
+        var hotkeySuspension = hotkeys?.Suspend();
         var window = new PreferencesWindow(settingsStore ?? new SettingsStore(SettingsStore.DefaultDirectory()));
-        window.Closed += (_, _) => RegisterHotkeys();
+        window.Closed += (_, _) =>
+        {
+            hotkeySuspension?.Dispose();
+            RegisterHotkeys();
+        };
+        AttachDumpHook(window, dumpPath, shutdownAfterDump);
+        window.Show();
+        window.Activate();
+    }
+
+    private void OpenOnboarding(string? dumpPath = null, bool shutdownAfterDump = false)
+    {
+        var regionShortcut = settingsStore?.Settings.Keymap.ChordFor(AppAction.CaptureRegion)?.WindowsDisplayValue ?? "Alt+Shift+1";
+        var window = new OnboardingWindow(
+            regionShortcut,
+            () => OpenPreferences());
         AttachDumpHook(window, dumpPath, shutdownAfterDump);
         window.Show();
         window.Activate();
@@ -308,6 +414,25 @@ public partial class App : System.Windows.Application
         AttachDumpHook(window, dumpPath, shutdownAfterDump);
         window.Show();
         window.Activate();
+    }
+
+    private void SettingsStore_SettingsChanged(object? sender, EventArgs e)
+    {
+        if (settingsStore is null)
+        {
+            return;
+        }
+
+        AppThemeService.Apply(Resources, settingsStore.Settings.ThemeMode);
+        foreach (var editor in Windows.OfType<EditorWindow>())
+        {
+            editor.ApplySettings(settingsStore.Settings);
+        }
+
+        if (!Windows.OfType<PreferencesWindow>().Any(window => window.IsVisible))
+        {
+            RegisterHotkeys();
+        }
     }
 
     private static EditorWindow OpenSampleCapture(string samplePath, Settings settings)
@@ -365,7 +490,11 @@ public partial class App : System.Windows.Application
         };
     }
 
-    private sealed record CaptureTarget(AppAction Action, PixelRect? Region, IntPtr? WindowHandle = null);
+    private sealed record CaptureTarget(
+        AppAction Action,
+        PixelRect? Region,
+        IntPtr? WindowHandle = null,
+        string? FullscreenMonitorName = null);
 
     private sealed class Scope(Action dispose) : IDisposable
     {
@@ -387,14 +516,20 @@ public partial class App : System.Windows.Application
         bool TestMode,
         string? DumpPath,
         string? SettingsDirectory,
-        ThemeMode? AppTheme)
+        ThemeMode? AppTheme,
+        bool OpenPreferences,
+        bool OpenOnboarding,
+        string? SampleEditorPath)
     {
         public static StartupOptions Parse(IReadOnlyList<string> args) =>
             new(
                 args.Contains("--test-mode", StringComparer.OrdinalIgnoreCase),
                 TryGetOptionValue(args, "--dump-window-png"),
                 TryGetOptionValue(args, "--test-settings-dir"),
-                TryGetThemeMode(TryGetOptionValue(args, "--test-app-theme")));
+                TryGetThemeMode(TryGetOptionValue(args, "--test-app-theme")),
+                args.Contains("--open-preferences", StringComparer.OrdinalIgnoreCase),
+                args.Contains("--open-onboarding", StringComparer.OrdinalIgnoreCase),
+                TryGetOptionValue(args, "--open-sample-editor"));
 
         private static ThemeMode? TryGetThemeMode(string? value) =>
             value?.ToLowerInvariant() switch

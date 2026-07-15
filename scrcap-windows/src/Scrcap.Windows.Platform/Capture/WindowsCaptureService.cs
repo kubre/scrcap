@@ -365,8 +365,12 @@ public sealed class WindowsCaptureService : IWindowsCaptureService
             ? Task.Delay(TimeSpan.FromSeconds(request.DelaySeconds), cancellationToken)
             : Task.CompletedTask;
 
-    private static CaptureMetadata Metadata(CaptureMode mode, string? windowTitle, PixelRect? sourceRect, CaptureRequest request, BackendCapture capture, PixelRect? captureBounds = null) =>
-        new(
+    private static CaptureMetadata Metadata(CaptureMode mode, string? windowTitle, PixelRect? sourceRect, CaptureRequest request, BackendCapture capture, PixelRect? captureBounds = null)
+    {
+        var monitor = sourceRect is { Width: > 0, Height: > 0 }
+            ? MonitorSelection.FromRect(sourceRect.Value)
+            : null;
+        return new CaptureMetadata(
             mode,
             windowTitle,
             sourceRect,
@@ -374,7 +378,10 @@ public sealed class WindowsCaptureService : IWindowsCaptureService
             request.BackendPreference,
             capture.BackendUsed,
             capture.FallbackReason,
-            captureBounds ?? sourceRect);
+            captureBounds ?? sourceRect,
+            monitor?.DpiScaleX ?? 1,
+            monitor?.DpiScaleY ?? 1);
+    }
 
     private static CaptureResult CreateResult(Bitmap bitmap, CaptureMetadata metadata) =>
         new(CopyBgraPixels(bitmap, metadata), metadata);
@@ -443,6 +450,7 @@ public sealed class WindowsCaptureService : IWindowsCaptureService
         ScrollingCaptureStopReason stopReason)
     {
         using var stitched = StitchFrames(frames, rect.Width, Math.Min(options.MaxHeight, TotalHeight(frames)));
+        var monitor = MonitorSelection.FromRect(rect);
         var metadata = new CaptureMetadata(
             CaptureMode.Scrolling,
             null,
@@ -452,6 +460,8 @@ public sealed class WindowsCaptureService : IWindowsCaptureService
             backendUsed,
             fallbackReason,
             rect,
+            monitor.DpiScaleX,
+            monitor.DpiScaleY,
             StopReason: stopReason);
         return CreateResult(stitched, metadata);
     }

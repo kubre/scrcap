@@ -21,14 +21,32 @@ public interface ITrayService : IDisposable
     void Notify(string title, string message);
 }
 
+public static class TrayServiceExtensions
+{
+    /// <summary>
+    /// Emits the capture-copied notification only when the user's live settings allow it.
+    /// All clipboard-success paths should use this contract instead of calling Notify directly.
+    /// </summary>
+    public static void NotifyCopy(this ITrayService tray, Settings settings, string message = "Capture copied to the clipboard.")
+    {
+        if (!settings.SuppressCopyNotification)
+        {
+            tray.Notify("Copied to clipboard", message);
+        }
+    }
+}
+
 public sealed class NotifyIconTrayService : ITrayService
 {
     private readonly NotifyIcon notifyIcon;
     private readonly ITaskbarThemeService themeService;
+    private readonly Func<Keymap> keymapProvider;
+    private readonly Dictionary<AppAction, ToolStripMenuItem> captureItems = [];
 
-    public NotifyIconTrayService(ITaskbarThemeService themeService)
+    public NotifyIconTrayService(ITaskbarThemeService themeService, Func<Keymap>? keymapProvider = null)
     {
         this.themeService = themeService;
+        this.keymapProvider = keymapProvider ?? (() => Keymap.Defaults);
         CurrentIconKey = IconKeyFor(themeService.Current);
         notifyIcon = new NotifyIcon
         {
@@ -71,6 +89,7 @@ public sealed class NotifyIconTrayService : ITrayService
     private ContextMenuStrip BuildMenu()
     {
         var menu = new ContextMenuStrip();
+        menu.Opening += (_, _) => RefreshShortcutLabels();
         AddCapture(menu, "Capture Region", AppAction.CaptureRegion);
         AddCapture(menu, "Capture Window", AppAction.CaptureWindow);
         AddCapture(menu, "Capture Fullscreen", AppAction.CaptureFullscreen);
@@ -83,8 +102,27 @@ public sealed class NotifyIconTrayService : ITrayService
         return menu;
     }
 
-    private void AddCapture(ContextMenuStrip menu, string title, AppAction action) =>
-        menu.Items.Add(title, null, (_, _) => CaptureRequested?.Invoke(this, action));
+    private void AddCapture(ContextMenuStrip menu, string title, AppAction action)
+    {
+        var item = new ToolStripMenuItem(title, null, (_, _) => CaptureRequested?.Invoke(this, action))
+        {
+            ShortcutKeyDisplayString = ShortcutDisplayFor(keymapProvider(), action),
+        };
+        captureItems[action] = item;
+        menu.Items.Add(item);
+    }
+
+    private void RefreshShortcutLabels()
+    {
+        var keymap = keymapProvider();
+        foreach (var (action, item) in captureItems)
+        {
+            item.ShortcutKeyDisplayString = ShortcutDisplayFor(keymap, action);
+        }
+    }
+
+    public static string ShortcutDisplayFor(Keymap keymap, AppAction action) =>
+        keymap.ChordFor(action)?.WindowsDisplayValue ?? string.Empty;
 
     private void HandleThemeChanged(object? sender, TaskbarTheme theme) =>
         ApplyIcon(theme);

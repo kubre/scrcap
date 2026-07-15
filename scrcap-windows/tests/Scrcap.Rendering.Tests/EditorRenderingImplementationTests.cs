@@ -11,6 +11,115 @@ namespace Scrcap.Rendering.Tests;
 public sealed class EditorRenderingImplementationTests
 {
     [Fact]
+    public void FlattenPngUsesLogicalDocumentSizeAndClampsExportToNativePixels()
+    {
+        RunSta(() =>
+        {
+            var settings = Settings.Defaults();
+            var viewModel = new EditorViewModel(settings);
+            viewModel.LoadDocument(100, 50);
+            var canvas = new EditorCanvas
+            {
+                ViewModel = viewModel,
+                SourceBitmap = SolidBitmap(200, 100, Colors.White),
+                Width = 100,
+                Height = 50,
+            };
+            canvas.SetSourcePixelsPerDip(2, 2);
+
+            var native = DecodeFrame(canvas.FlattenPng(scale: 2));
+            var logical = DecodeFrame(canvas.FlattenPng(scale: 1));
+
+            Assert.Equal(200, native.PixelWidth);
+            Assert.Equal(100, native.PixelHeight);
+            Assert.InRange(native.DpiX, 191.9, 192.1);
+            Assert.InRange(native.DpiY, 191.9, 192.1);
+            Assert.Equal(100, logical.PixelWidth);
+            Assert.Equal(50, logical.PixelHeight);
+            Assert.InRange(logical.DpiX, 95.9, 96.1);
+            Assert.InRange(logical.DpiY, 95.9, 96.1);
+        });
+    }
+
+    [Fact]
+    public void FlattenPngDoesNotUpscaleOneXCaptures()
+    {
+        RunSta(() =>
+        {
+            var viewModel = new EditorViewModel(Settings.Defaults());
+            viewModel.LoadDocument(80, 60);
+            var canvas = new EditorCanvas
+            {
+                ViewModel = viewModel,
+                SourceBitmap = SolidBitmap(80, 60, Colors.White),
+            };
+            canvas.SetSourcePixelsPerDip(1, 1);
+
+            var frame = DecodeFrame(canvas.FlattenPng(scale: 2));
+
+            Assert.Equal(80, frame.PixelWidth);
+            Assert.Equal(60, frame.PixelHeight);
+            Assert.InRange(frame.DpiX, 95.9, 96.1);
+        });
+    }
+
+    [Fact]
+    public void RasterGeometryKeepsCropAndExpansionPixelAlignedAtFractionalDpi()
+    {
+        var crop = EditorRasterGeometry.AlignCrop(new CoreRect(10.1, 5.2, 100.2, 40.4), 300, 180, 1.5, 1.5);
+        var expansion = EditorRasterGeometry.AlignExpansion(new CanvasExpansion(2.2, 3.1, 4.2, 5.1), 1.5, 1.5);
+
+        Assert.Equal(new Int32Rect(15, 7, 151, 62), crop.Pixels);
+        Assert.Equal(crop.Pixels.Width, (int)Math.Round(crop.Logical.Width * 1.5));
+        Assert.Equal(crop.Pixels.Height, (int)Math.Round(crop.Logical.Height * 1.5));
+        Assert.Equal(3, expansion.LeftPixels);
+        Assert.Equal(5, expansion.TopPixels);
+        Assert.Equal(6, expansion.RightPixels);
+        Assert.Equal(8, expansion.BottomPixels);
+        Assert.Equal(expansion.LeftPixels, (int)Math.Round(expansion.Logical.Left * 1.5));
+    }
+
+    [Fact]
+    public void ClipboardPayloadContainsBitmapCompatibilityAndExactPngBytes()
+    {
+        RunSta(() =>
+        {
+            var png = EncodePng(SolidBitmap(12, 8, Colors.CornflowerBlue));
+            var data = EditorClipboard.CreateDataObject(png);
+
+            Assert.True(data.GetDataPresent(DataFormats.Bitmap));
+            Assert.True(data.GetDataPresent(EditorClipboard.PngFormat, autoConvert: false));
+            using var stream = Assert.IsType<MemoryStream>(data.GetData(EditorClipboard.PngFormat, autoConvert: false));
+            Assert.Equal(png, stream.ToArray());
+        });
+    }
+
+    [Fact]
+    public void DragOutPayloadCreatesPngFileDropAndCanCleanItUp()
+    {
+        RunSta(() =>
+        {
+            var png = EncodePng(SolidBitmap(10, 6, Colors.Orange));
+            var path = DragOutPayload.CreateTempPng(png, "scrcap-{date}-{time}.png", new DateTimeOffset(2026, 7, 15, 12, 0, 0, TimeSpan.Zero));
+            try
+            {
+                var data = DragOutPayload.CreateDataObject(path);
+                var files = Assert.IsType<string[]>(data.GetData(DataFormats.FileDrop));
+
+                Assert.Single(files);
+                Assert.Equal(Path.GetFullPath(path), files[0]);
+                Assert.Equal(png, File.ReadAllBytes(path));
+            }
+            finally
+            {
+                DragOutPayload.Delete(path);
+            }
+
+            Assert.False(File.Exists(path));
+        });
+    }
+
+    [Fact]
     public void FlattenPngRendersCommittedAnnotations()
     {
         RunSta(() =>
@@ -44,6 +153,46 @@ public sealed class EditorRenderingImplementationTests
             Assert.Equal(96, width);
             Assert.Equal(64, height);
             Assert.True(CountNonWhitePixels(pixels) > 350);
+        });
+    }
+
+    [Fact]
+    public void CroppedCounterAndTextAreClippedToTheVisibleImage()
+    {
+        WpfTestHost.Run(() =>
+        {
+            WpfTestHost.ApplyTheme(ThemeMode.Light);
+            var settings = Settings.Defaults();
+            settings.PaletteHex = ["#111111", "#00AA00", "#0066CC", "#FF0000", "#FF00FF"];
+            var viewModel = new EditorViewModel(settings);
+            viewModel.LoadDocument(100, 80);
+            viewModel.ActiveTool = EditorTool.Counter;
+            viewModel.CommitShape(new CorePoint(95, 40), new CorePoint(95, 40));
+            viewModel.ActiveTool = EditorTool.Text;
+            viewModel.PendingText = "CROPPED TEXT";
+            viewModel.CommitShape(new CorePoint(90, 60), new CorePoint(90, 60));
+            Assert.True(viewModel.Crop(new CoreRect(50, 20, 50, 40)));
+
+            var canvas = new EditorCanvas
+            {
+                ViewModel = viewModel,
+                SourceBitmap = SolidBitmap(50, 40, Colors.White),
+            };
+            var rendered = VisualBaseline.RenderElement(canvas, 200, 160);
+            var pixels = CopyBgra(rendered);
+
+            // The cropped image occupies x=75..125 and y=60..100. Counter/text
+            // glyphs must not paint into the canvas area immediately to its right.
+            for (var y = 50; y < 110; y++)
+            {
+                for (var x = 127; x < 155; x++)
+                {
+                    var offset = ((y * rendered.PixelWidth) + x) * 4;
+                    Assert.InRange(pixels[offset], (byte)217, (byte)219);
+                    Assert.InRange(pixels[offset + 1], (byte)214, (byte)216);
+                    Assert.InRange(pixels[offset + 2], (byte)213, (byte)215);
+                }
+            }
         });
     }
 
@@ -285,6 +434,21 @@ public sealed class EditorRenderingImplementationTests
         var pixels = new byte[width * height * 4];
         converted.CopyPixels(pixels, width * 4, 0);
         return pixels;
+    }
+
+    private static BitmapFrame DecodeFrame(byte[] pngBytes)
+    {
+        using var stream = new MemoryStream(pngBytes);
+        return new PngBitmapDecoder(stream, BitmapCreateOptions.PreservePixelFormat, BitmapCacheOption.OnLoad).Frames[0];
+    }
+
+    private static byte[] EncodePng(BitmapSource source)
+    {
+        var encoder = new PngBitmapEncoder();
+        encoder.Frames.Add(BitmapFrame.Create(source));
+        using var stream = new MemoryStream();
+        encoder.Save(stream);
+        return stream.ToArray();
     }
 
     private static byte[] CopyBgra(BitmapSource source)

@@ -102,6 +102,28 @@ public sealed class AnnotationStackTests
         Assert.Equal(new CoreSize(100, 80), document.Size);
     }
 
+    [Fact]
+    public void CanvasExpansionUsesExactCeiledMissingEdges()
+    {
+        var expansion = CanvasExpansion.Fitting(new CoreRect(-0.2, -4.1, 106.4, 88.3), new CoreSize(100, 80));
+
+        Assert.Equal(new CanvasExpansion(1, 5, 7, 5), expansion);
+    }
+
+    [Fact]
+    public void DocumentAutoExpandShiftsExistingShapesByLeadingGrowthOnly()
+    {
+        var document = new AnnotationDocument(100, 80);
+        document.AppendShape(TestShape(new ShapeKind.Rectangle(), new CorePoint(10, 12), new CorePoint(30, 32)));
+
+        Assert.True(document.AutoExpandToInclude(new CoreRect(-2.4, -1.2, 110, 90), out var offset));
+
+        Assert.Equal(new CorePoint(3, 2), offset);
+        Assert.Equal(new CoreSize(111, 91), document.Size);
+        Assert.Equal(new CorePoint(13, 14), document.Shapes[0].Start);
+        Assert.Equal(new CorePoint(33, 34), document.Shapes[0].End);
+    }
+
     private static Shape TestShape(ShapeKind kind) =>
         new(kind, 0, ShapeSize.Small, new CorePoint(1, 2), new CorePoint(10, 20));
 

@@ -13,6 +13,21 @@ public sealed class EditorImplementationTests
     {
         var xaml = ReadRepoFile("src/Scrcap.Windows.UI/Editor/EditorWindow.xaml");
 
+        Assert.Contains("WindowStyle=\"None\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("<shell:WindowChrome CaptionHeight=\"0\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("GlassFrameThickness=\"0\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("UseAeroCaptionButtons=\"False\"", xaml, StringComparison.Ordinal);
+        var canvasHostIndex = xaml.IndexOf("<Grid Background=\"{DynamicResource BrushCanvas}\"", StringComparison.Ordinal);
+        Assert.True(canvasHostIndex >= 0);
+        var editorCanvasIndex = xaml.IndexOf("<editor:EditorCanvas x:Name=\"Canvas\"", canvasHostIndex, StringComparison.Ordinal);
+        Assert.True(editorCanvasIndex > canvasHostIndex);
+        var editorCanvasEndIndex = xaml.IndexOf("/>", editorCanvasIndex, StringComparison.Ordinal);
+        Assert.True(editorCanvasEndIndex > editorCanvasIndex);
+        Assert.Contains("ClipToBounds=\"True\"", xaml[canvasHostIndex..editorCanvasIndex], StringComparison.Ordinal);
+        Assert.Contains("ClipToBounds=\"True\"", xaml[editorCanvasIndex..editorCanvasEndIndex], StringComparison.Ordinal);
+        Assert.Contains("Margin=\"{StaticResource MetricCanvasMargin}\"", xaml[editorCanvasIndex..editorCanvasEndIndex], StringComparison.Ordinal);
+        Assert.DoesNotContain("<Border Margin=\"{StaticResource MetricEditorPadding}\"", xaml, StringComparison.Ordinal);
+
         foreach (var automationId in new[]
                  {
                      "UndoButton",
@@ -33,7 +48,6 @@ public sealed class EditorImplementationTests
                      "SizeSmall",
                      "SizeMedium",
                      "SizeLarge",
-                     "TextValue",
                      "ZoomStatus",
                  })
         {
@@ -68,6 +82,26 @@ public sealed class EditorImplementationTests
 
         viewModel.SelectSizeByKey("C");
         Assert.Equal(ShapeSize.Large, viewModel.ActiveSize);
+    }
+
+    [Fact]
+    public void LiveEditorSettingsRefreshPaletteStrokeAndDoneBehavior()
+    {
+        var initial = Settings.Defaults();
+        var viewModel = new EditorViewModel(initial);
+        viewModel.LoadDocument(320, 200);
+
+        var updated = Settings.Defaults();
+        updated.PaletteHex[0] = "#FF00FF";
+        updated.StrokeWidth = 9;
+        updated.EscBehavior = EscBehavior.CopyAndClose;
+        viewModel.ApplySettings(updated);
+
+        Assert.Same(updated, viewModel.Settings);
+        Assert.Equal("#FF00FF", viewModel.Palette[0]);
+        Assert.Equal(9 * ShapeSize.Small.Scale(), viewModel.StrokeWidth);
+        Assert.Equal("Copy & Close", viewModel.DoneText);
+        Assert.NotEmpty(viewModel.PaletteBrushes);
     }
 
     [Fact]
@@ -115,11 +149,108 @@ public sealed class EditorImplementationTests
         var windowSource = ReadRepoFile("src/Scrcap.Windows.UI/Editor/EditorWindow.xaml.cs");
 
         Assert.Contains("ViewModel.CommitShape(startImage, endImage)", canvasSource, StringComparison.Ordinal);
+        Assert.Contains("CommitTextEditing()", canvasSource, StringComparison.Ordinal);
+        Assert.Contains("BeginTextEditing(e.GetPosition(this))", canvasSource, StringComparison.Ordinal);
         Assert.Contains("DocumentChanged?.Invoke(this, EventArgs.Empty)", canvasSource, StringComparison.Ordinal);
         Assert.Contains("EditorTool.Counter => true", canvasSource, StringComparison.Ordinal);
+        Assert.Contains("EditorTool.Text => false", canvasSource, StringComparison.Ordinal);
         Assert.Contains("EditorTool.Pixelate => rect.Width > 1 && rect.Height > 1", canvasSource, StringComparison.Ordinal);
         Assert.Contains("Keyboard.Modifiers == ModifierKeys.Control && e.Key == Key.Z", windowSource, StringComparison.Ordinal);
         Assert.Contains("viewModel.Undo()", windowSource, StringComparison.Ordinal);
+        Assert.Contains("Canvas.Focus()", windowSource, StringComparison.Ordinal);
+        Assert.DoesNotContain("TextValue.Focus()", windowSource, StringComparison.Ordinal);
+        Assert.DoesNotContain("TextValue_KeyDown", windowSource, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void InlineTextEditorUsesMacReturnAndEscapeSemantics()
+    {
+        var canvasSource = ReadRepoFile("src/Scrcap.Windows.UI/Editor/EditorCanvas.cs");
+        var viewModelSource = ReadRepoFile("src/Scrcap.Windows.UI/Editor/EditorViewModel.cs");
+
+        Assert.Contains("WpfCursors.IBeam", canvasSource, StringComparison.Ordinal);
+        Assert.Contains("WpfCursors.Cross", canvasSource, StringComparison.Ordinal);
+        Assert.Contains("AcceptsReturn = true", canvasSource, StringComparison.Ordinal);
+        Assert.Contains("public bool IsTextEditing => textEditor is not null;", canvasSource, StringComparison.Ordinal);
+        Assert.Contains("ViewModel?.Settings.TextEnterBehavior == TextEnterBehavior.Newline", canvasSource, StringComparison.Ordinal);
+        Assert.Contains("? shift", canvasSource, StringComparison.Ordinal);
+        Assert.Contains(": !shift", canvasSource, StringComparison.Ordinal);
+        Assert.Contains("if (e.Key == Key.Escape)", canvasSource, StringComparison.Ordinal);
+        Assert.Contains("CommitText(anchor.Value, value)", canvasSource, StringComparison.Ordinal);
+        Assert.Contains("public void CommitText(CorePoint anchor, string text)", viewModelSource, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void InlineTextEditorOwnsTypedShortcutKeys()
+    {
+        var canvasSource = ReadRepoFile("src/Scrcap.Windows.UI/Editor/EditorCanvas.cs");
+        var windowSource = ReadRepoFile("src/Scrcap.Windows.UI/Editor/EditorWindow.xaml.cs");
+
+        Assert.Contains("public bool IsTextEditing => textEditor is not null;", canvasSource, StringComparison.Ordinal);
+        Assert.Contains("if (Canvas.IsTextEditing)", windowSource, StringComparison.Ordinal);
+        Assert.Contains("viewModel.SelectToolByKey(key);", windowSource, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void CropAndPixelateUseMarchingRegionPreviewInsteadOfAnnotationRectangle()
+    {
+        var canvasSource = ReadRepoFile("src/Scrcap.Windows.UI/Editor/EditorCanvas.cs");
+
+        Assert.Contains("DrawRegionPreview(context, rect, viewModel.Zoom)", canvasSource, StringComparison.Ordinal);
+        Assert.Contains("DrawPixelate(context, rect, exportScale: 1)", canvasSource, StringComparison.Ordinal);
+        Assert.Contains("WpfBrushes.Black", canvasSource, StringComparison.Ordinal);
+        Assert.Contains("WpfBrushes.White", canvasSource, StringComparison.Ordinal);
+        Assert.Contains("DispatcherTimer(TimeSpan.FromMilliseconds(75), DispatcherPriority.Render", canvasSource, StringComparison.Ordinal);
+        Assert.Contains("IsRegionPreviewTool(EditorTool? tool)", canvasSource, StringComparison.Ordinal);
+        Assert.DoesNotContain("viewModel.ActiveTool == EditorTool.Crop\r\n                        ? new ShapeKind.Rectangle()", canvasSource, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void EditorCanvasSupportsPhotoshopStylePanAndZoomGestures()
+    {
+        var canvasSource = ReadRepoFile("src/Scrcap.Windows.UI/Editor/EditorCanvas.cs");
+        var viewModelSource = ReadRepoFile("src/Scrcap.Windows.UI/Editor/EditorViewModel.cs");
+
+        Assert.Contains("Keyboard.IsKeyDown(Key.Space)", canvasSource, StringComparison.Ordinal);
+        Assert.Contains("BeginPan(e.GetPosition(this))", canvasSource, StringComparison.Ordinal);
+        Assert.Contains("IsManipulationEnabled = true", canvasSource, StringComparison.Ordinal);
+        Assert.Contains("ManipulationModes.Translate | ManipulationModes.Scale", canvasSource, StringComparison.Ordinal);
+        Assert.Contains("ViewModel.PanBy(translation.X, translation.Y)", canvasSource, StringComparison.Ordinal);
+        Assert.Contains("Keyboard.Modifiers == ModifierKeys.Control", canvasSource, StringComparison.Ordinal);
+        Assert.Contains("ViewModel.PanBy(0, e.Delta)", canvasSource, StringComparison.Ordinal);
+        Assert.Contains("ViewModel.ZoomAt(direction, position.X, position.Y, ActualWidth, ActualHeight)", canvasSource, StringComparison.Ordinal);
+        Assert.Contains("ViewModel.ZoomAt(+1, origin.X, origin.Y, ActualWidth, ActualHeight)", canvasSource, StringComparison.Ordinal);
+        Assert.Contains("ViewModel.ZoomAt(-1, origin.X, origin.Y, ActualWidth, ActualHeight)", canvasSource, StringComparison.Ordinal);
+        Assert.Contains("public void PanBy(double deltaX, double deltaY)", viewModelSource, StringComparison.Ordinal);
+        Assert.Contains("public void ZoomAt(int direction, double viewportX, double viewportY, double viewportWidth, double viewportHeight)", viewModelSource, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AltWheelZoomKeepsThePointUnderTheCursorAnchored()
+    {
+        var viewModel = new EditorViewModel(Settings.Defaults());
+        viewModel.LoadDocument(400, 300);
+        viewModel.ResetZoom();
+
+        const double viewportWidth = 800;
+        const double viewportHeight = 600;
+        const double cursorX = 500;
+        const double cursorY = 320;
+
+        var imageXBefore = ImagePointX(viewModel, cursorX, viewportWidth);
+        var imageYBefore = ImagePointY(viewModel, cursorY, viewportHeight);
+
+        viewModel.ZoomAt(+1, cursorX, cursorY, viewportWidth, viewportHeight);
+
+        Assert.Equal(1.25, viewModel.Zoom);
+        Assert.Equal(imageXBefore, ImagePointX(viewModel, cursorX, viewportWidth), precision: 6);
+        Assert.Equal(imageYBefore, ImagePointY(viewModel, cursorY, viewportHeight), precision: 6);
+
+        var panX = viewModel.PanOffsetX;
+        var panY = viewModel.PanOffsetY;
+        viewModel.PanBy(12, -8);
+        Assert.Equal(panX + 12, viewModel.PanOffsetX);
+        Assert.Equal(panY - 8, viewModel.PanOffsetY);
     }
 
     [Fact]
@@ -199,6 +330,18 @@ public sealed class EditorImplementationTests
         }
 
         return count;
+    }
+
+    private static double ImagePointX(EditorViewModel viewModel, double viewportX, double viewportWidth)
+    {
+        var origin = Math.Max(0, (viewportWidth - viewModel.Document!.Size.Width * viewModel.Zoom) / 2) + viewModel.PanOffsetX;
+        return (viewportX - origin) / viewModel.Zoom;
+    }
+
+    private static double ImagePointY(EditorViewModel viewModel, double viewportY, double viewportHeight)
+    {
+        var origin = Math.Max(0, (viewportHeight - viewModel.Document!.Size.Height * viewModel.Zoom) / 2) + viewModel.PanOffsetY;
+        return (viewportY - origin) / viewModel.Zoom;
     }
 
     private static void RunSta(Action action)

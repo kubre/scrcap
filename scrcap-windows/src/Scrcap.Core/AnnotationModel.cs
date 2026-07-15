@@ -4,6 +4,30 @@ public readonly record struct CorePoint(double X, double Y);
 
 public readonly record struct CoreSize(double Width, double Height);
 
+public readonly record struct CanvasExpansion(double Left, double Top, double Right, double Bottom)
+{
+    public bool HasWork => Left > 0 || Top > 0 || Right > 0 || Bottom > 0;
+
+    public CorePoint Offset => new(Left, Top);
+
+    public static CanvasExpansion Fitting(CoreRect bounds, CoreSize size)
+    {
+        if (bounds.IsEmpty)
+        {
+            return default;
+        }
+
+        return new CanvasExpansion(
+            Growth(0 - bounds.MinX),
+            Growth(0 - bounds.MinY),
+            Growth(bounds.MaxX - size.Width),
+            Growth(bounds.MaxY - size.Height));
+    }
+
+    private static double Growth(double missing) =>
+        missing > 0 ? Math.Ceiling(missing) : 0;
+}
+
 public readonly record struct CoreRect(double X, double Y, double Width, double Height)
 {
     public double MinX => X;
@@ -204,28 +228,47 @@ public sealed class AnnotationDocument
 
     public bool AutoExpandToInclude(CoreRect bounds, double padding = 0)
     {
+        return AutoExpandToInclude(bounds, out _, padding);
+    }
+
+    public bool AutoExpandToInclude(CoreRect bounds, out CorePoint offset, double padding = 0)
+    {
         if (bounds.IsEmpty)
+        {
+            offset = default;
+            return false;
+        }
+
+        var padded = padding > 0
+            ? new CoreRect(bounds.X - padding, bounds.Y - padding, bounds.Width + padding * 2, bounds.Height + padding * 2)
+            : bounds;
+        var expansion = CanvasExpansion.Fitting(padded, Current.Size);
+        offset = expansion.Offset;
+
+        if (!expansion.HasWork)
         {
             return false;
         }
 
-        var leftGrowth = Math.Max(0, -bounds.MinX + padding);
-        var topGrowth = Math.Max(0, -bounds.MinY + padding);
-        var rightGrowth = Math.Max(0, bounds.MaxX - Current.Size.Width + padding);
-        var bottomGrowth = Math.Max(0, bounds.MaxY - Current.Size.Height + padding);
+        ExpandCanvas(expansion);
+        return true;
+    }
 
-        if (leftGrowth <= 0 && topGrowth <= 0 && rightGrowth <= 0 && bottomGrowth <= 0)
+    public void ExpandCanvas(CanvasExpansion expansion)
+    {
+        if (!expansion.HasWork)
         {
-            return false;
+            return;
         }
 
         var shifted = Current.Shapes
-            .Select(shape => shape.Shifted(leftGrowth, topGrowth))
+            .Select(shape => shape.Shifted(expansion.Left, expansion.Top))
             .ToArray();
         Commit(new DocumentSnapshot(
-            new CoreSize(Current.Size.Width + leftGrowth + rightGrowth, Current.Size.Height + topGrowth + bottomGrowth),
+            new CoreSize(
+                Current.Size.Width + expansion.Left + expansion.Right,
+                Current.Size.Height + expansion.Top + expansion.Bottom),
             shifted));
-        return true;
     }
 
     public bool Undo()

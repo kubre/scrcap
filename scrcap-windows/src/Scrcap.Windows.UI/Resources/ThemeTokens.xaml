@@ -8,6 +8,7 @@
   <Color x:Key="ColorMuted">#FF656970</Color>
   <Color x:Key="ColorChrome">#FFF2F2F3</Color>
   <Color x:Key="ColorPanel">#FFFBFBFC</Color>
+  <Color x:Key="ColorWindowFrame">#FF85878D</Color>
   <Color x:Key="ColorRule">#FFA8A9AE</Color>
   <Color x:Key="ColorHairline">#1C000000</Color>
   <Color x:Key="ColorCanvas">#FFD6D7DA</Color>
@@ -29,6 +30,7 @@
   <SolidColorBrush x:Key="BrushMuted" Color="{StaticResource ColorMuted}" po:Freeze="False" />
   <SolidColorBrush x:Key="BrushChrome" Color="{StaticResource ColorChrome}" po:Freeze="False" />
   <SolidColorBrush x:Key="BrushPanel" Color="{StaticResource ColorPanel}" po:Freeze="False" />
+  <SolidColorBrush x:Key="BrushWindowFrame" Color="{StaticResource ColorWindowFrame}" po:Freeze="False" />
   <SolidColorBrush x:Key="BrushRule" Color="{StaticResource ColorRule}" po:Freeze="False" />
   <SolidColorBrush x:Key="BrushHairline" Color="{StaticResource ColorHairline}" po:Freeze="False" />
   <SolidColorBrush x:Key="BrushCanvas" Color="{StaticResource ColorCanvas}" po:Freeze="False" />
@@ -55,6 +57,10 @@
   <sys:Double x:Key="FontSizeZoomText">12</sys:Double>
   <sys:Double x:Key="FontSizeTitle">14</sys:Double>
   <sys:Double x:Key="FontSizeBrand">15</sys:Double>
+  <sys:Double x:Key="FontSizeHeadline">20</sys:Double>
+  <sys:Double x:Key="FontSizeSubtitle">12.5</sys:Double>
+  <sys:Double x:Key="FontSizeCaption">11</sys:Double>
+  <sys:Double x:Key="FontSizePaletteValue">10</sys:Double>
 
   <sys:Double x:Key="MetricHeaderHeight">36</sys:Double>
   <sys:Double x:Key="MetricToolbarHeight">42</sys:Double>
@@ -63,6 +69,7 @@
   <sys:Double x:Key="MetricEditorMinWidth">600</sys:Double>
   <sys:Double x:Key="MetricEditorMinHeight">278</sys:Double>
   <CornerRadius x:Key="MetricEditorRadius">10</CornerRadius>
+  <CornerRadius x:Key="MetricEditorInnerRadius">9</CornerRadius>
   <sys:Double x:Key="MetricPreferencesWidth">720</sys:Double>
   <sys:Double x:Key="MetricPreferencesHeight">540</sys:Double>
   <sys:Double x:Key="MetricPreferencesMinWidth">680</sys:Double>
@@ -79,6 +86,8 @@
   <sys:Double x:Key="MetricSeparatorWidth">1</sys:Double>
   <sys:Double x:Key="MetricSeparatorHeight">22</sys:Double>
   <sys:Double x:Key="MetricSwatchSize">12</sys:Double>
+  <sys:Double x:Key="MetricColorSwatchHeight">32</sys:Double>
+  <sys:Double x:Key="MetricColorSwatchRadius">4</sys:Double>
   <sys:Double x:Key="MetricSmallDotSize">6</sys:Double>
   <sys:Double x:Key="MetricMediumDotSize">10</sys:Double>
   <sys:Double x:Key="MetricLargeDotSize">14</sys:Double>
@@ -90,6 +99,23 @@
   <sys:Double x:Key="MetricPreferencesTabMinWidth">82</sys:Double>
   <sys:Double x:Key="MetricTextInputWidth">150</sys:Double>
   <sys:Double x:Key="MetricTextInputHeight">30</sys:Double>
+  <sys:Double x:Key="MetricToolbarGlyphSize">15</sys:Double>
+  <sys:Double x:Key="MetricToolbarCounterGlyphSize">12.5</sys:Double>
+  <sys:Double x:Key="MetricPixelateGlyphGridSize">11</sys:Double>
+  <sys:Double x:Key="MetricPixelateGlyphCellSize">3</sys:Double>
+  <sys:Double x:Key="MetricOnboardingWidth">460</sys:Double>
+  <sys:Double x:Key="MetricOnboardingHeight">452</sys:Double>
+  <GridLength x:Key="MetricOnboardingHeaderHeight">36</GridLength>
+  <GridLength x:Key="MetricOnboardingFooterHeight">105</GridLength>
+  <sys:Double x:Key="MetricOnboardingFeatureSize">34</sys:Double>
+  <GridLength x:Key="MetricOnboardingFeatureColumnWidth">34</GridLength>
+  <GridLength x:Key="MetricOnboardingFeatureGap">13</GridLength>
+  <GridLength x:Key="MetricCheckboxColumnWidth">18</GridLength>
+  <sys:Double x:Key="MetricCheckboxSize">14</sys:Double>
+  <sys:Double x:Key="MetricCheckmarkWidth">9</sys:Double>
+  <sys:Double x:Key="MetricCheckmarkHeight">7</sys:Double>
+  <sys:Double x:Key="MetricSliderTrackHeight">4</sys:Double>
+  <GridLength x:Key="MetricColorSwatchPreviewWidth">42</GridLength>
   <sys:Double x:Key="MetricOverlayCountdownFontSize">56</sys:Double>
   <sys:Double x:Key="MetricScrollingHudWidth">220</sys:Double>
   <sys:Double x:Key="MetricScrollingHudHeight">64</sys:Double>
@@ -98,12 +124,14 @@
   <Thickness x:Key="MetricEditorPadding">92,72,92,22</Thickness>
   <Thickness x:Key="MetricNoThickness">0</Thickness>
   <Thickness x:Key="MetricBorderThickness">1</Thickness>
-  <Thickness x:Key="MetricHeaderBrandMargin">92,0,0,0</Thickness>
+  <Thickness x:Key="MetricWindowChromeInset">0</Thickness>
+  <Thickness x:Key="MetricWindowFrameThickness">1</Thickness>
+  <Thickness x:Key="MetricHeaderBrandMargin">18,0,0,0</Thickness>
   <Thickness x:Key="MetricLogoMargin">0,0,8,0</Thickness>
   <Thickness x:Key="MetricShortcutTextMargin">6,0,0,0</Thickness>
   <Thickness x:Key="MetricDoneShortcutMargin">10,0,0,0</Thickness>
   <Thickness x:Key="MetricHeaderMargin">18,0</Thickness>
-  <Thickness x:Key="MetricHeaderRightMargin">0,0,22,0</Thickness>
+  <Thickness x:Key="MetricHeaderRightMargin">0,0,8,0</Thickness>
   <Thickness x:Key="MetricWindowMargin">12</Thickness>
   <Thickness x:Key="MetricPanelMargin">18</Thickness>
   <Thickness x:Key="MetricTopGap">0,16,0,0</Thickness>
@@ -112,18 +140,33 @@
   <Thickness x:Key="MetricPaletteGapRight">0,0,6,0</Thickness>
   <Thickness x:Key="MetricPickButtonMargin">8,0,0,0</Thickness>
   <Thickness x:Key="MetricTextInputMargin">8,0,0,0</Thickness>
+  <Thickness x:Key="MetricOnboardingContentMargin">26,28,26,0</Thickness>
+  <Thickness x:Key="MetricOnboardingSubtitleMargin">0,4,0,0</Thickness>
+  <Thickness x:Key="MetricOnboardingFeaturesMargin">0,26,0,0</Thickness>
+  <Thickness x:Key="MetricOnboardingFeatureMargin">0,0,0,12</Thickness>
+  <Thickness x:Key="MetricOnboardingShortcutMargin">8,0,0,0</Thickness>
+  <Thickness x:Key="MetricOnboardingShortcutPadding">5,1</Thickness>
+  <Thickness x:Key="MetricOnboardingFooterMargin">22,16,22,0</Thickness>
+  <Thickness x:Key="MetricOnboardingPrivacyIconMargin">0,0,7,0</Thickness>
+  <Thickness x:Key="MetricOnboardingActionsMargin">0,14,0,0</Thickness>
+  <Thickness x:Key="MetricCheckboxContentMargin">2,0,0,0</Thickness>
+  <Thickness x:Key="MetricSliderThumbBorderThickness">2</Thickness>
+  <Thickness x:Key="MetricValueBadgeMargin">0,10,0,4</Thickness>
+  <Thickness x:Key="MetricColorSwatchTextMargin">10,0,0,0</Thickness>
+  <Thickness x:Key="MetricPaletteValueMargin">0,3,0,0</Thickness>
   <Thickness x:Key="MetricToolbarButtonMargin">0</Thickness>
   <Thickness x:Key="MetricToolbarButtonPadding">8,0</Thickness>
+  <Thickness x:Key="MetricColorSwatchPadding">3</Thickness>
   <Thickness x:Key="MetricToolbarInnerMargin">14,1,0,0</Thickness>
   <Thickness x:Key="MetricSeparatorMargin">16,0</Thickness>
   <Thickness x:Key="MetricCanvasMargin">0</Thickness>
-  <Thickness x:Key="MetricZoomPillMargin">0,0,22,20</Thickness>
+  <Thickness x:Key="MetricZoomPillMargin">0,0,12,52</Thickness>
   <Thickness x:Key="MetricZoomPillPadding">8,5</Thickness>
   <Thickness x:Key="MetricZoomInMargin">0,0,10,0</Thickness>
   <Thickness x:Key="MetricZoomDividerMargin">0,0,14,0</Thickness>
   <Thickness x:Key="MetricComboArrowMargin">0,0,10,0</Thickness>
   <Thickness x:Key="MetricPreferencesSubtitleMargin">10,1,0,0</Thickness>
-  <Thickness x:Key="MetricPreferencesCloseMargin">0,0,22,0</Thickness>
+  <Thickness x:Key="MetricPreferencesCloseMargin">0,0,8,0</Thickness>
   <Thickness x:Key="MetricPreferencesResetMargin">0,8,8,8</Thickness>
   <Thickness x:Key="MetricPreferencesSaveMargin">0,8,22,8</Thickness>
   <Thickness x:Key="MetricOverlayHintPadding">10,6</Thickness>
@@ -132,9 +175,15 @@
   <Thickness x:Key="MetricScrollingHudPadding">12,9</Thickness>
   <Thickness x:Key="MetricScrollingHudStopPadding">10,4</Thickness>
   <CornerRadius x:Key="MetricPreferencesRadius">8</CornerRadius>
+  <CornerRadius x:Key="MetricPreferencesInnerRadius">7</CornerRadius>
   <CornerRadius x:Key="MetricChromeButtonRadius">6</CornerRadius>
   <CornerRadius x:Key="MetricLogoRadius">2</CornerRadius>
   <CornerRadius x:Key="MetricZoomPillRadius">8</CornerRadius>
   <CornerRadius x:Key="MetricOverlayTagRadius">0</CornerRadius>
+  <CornerRadius x:Key="MetricOnboardingFeatureRadius">7</CornerRadius>
+  <CornerRadius x:Key="MetricOnboardingShortcutRadius">4</CornerRadius>
+  <CornerRadius x:Key="MetricCheckboxRadius">2</CornerRadius>
+  <CornerRadius x:Key="MetricSliderTrackRadius">2</CornerRadius>
+  <CornerRadius x:Key="MetricSliderThumbRadius">8</CornerRadius>
 
 </ResourceDictionary>

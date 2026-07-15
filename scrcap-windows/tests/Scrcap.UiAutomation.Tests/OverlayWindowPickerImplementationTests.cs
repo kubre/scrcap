@@ -13,11 +13,60 @@ public sealed class OverlayWindowPickerImplementationTests
         var source = ReadRepoFile("src/Scrcap.Windows.UI/Overlay/OverlayWindow.xaml.cs");
 
         Assert.Contains("IWindowSelectionService", source, StringComparison.Ordinal);
-        Assert.Contains("WindowFromPoint", source, StringComparison.Ordinal);
         Assert.Contains("EnumerateWindows", source, StringComparison.Ordinal);
+        Assert.Contains("SelectWindowAsync", source, StringComparison.Ordinal);
+        Assert.Contains("ResolveCandidateForCommit", source, StringComparison.Ordinal);
         Assert.Contains("CycleWindowHighlight", source, StringComparison.Ordinal);
         Assert.Contains("Key.Tab", source, StringComparison.Ordinal);
         Assert.Contains("Key.Enter", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("SelectPointAsync", source, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void WindowPickerCyclesOnlyCandidatesOverlappingThePointerInZOrder()
+    {
+        WindowCandidate[] candidates =
+        [
+            new(new IntPtr(1), new PixelRect(0, 0, 300, 300), "top"),
+            new(new IntPtr(2), new PixelRect(100, 100, 300, 300), "under"),
+            new(new IntPtr(3), new PixelRect(500, 500, 100, 100), "elsewhere"),
+        ];
+
+        var stack = OverlayWindow.WindowCandidatesUnderPoint(candidates, new PixelPoint(150, 150));
+
+        Assert.Collection(
+            stack,
+            candidate => Assert.Equal(new IntPtr(1), candidate.Hwnd),
+            candidate => Assert.Equal(new IntPtr(2), candidate.Hwnd));
+    }
+
+    [Fact]
+    public void WindowPickerCommitRefreshesTheExactSelectedHwnd()
+    {
+        var selected = new WindowCandidate(new IntPtr(2), new PixelRect(100, 100, 300, 300), "old");
+        WindowCandidate[] refreshed =
+        [
+            new(new IntPtr(1), new PixelRect(0, 0, 300, 300), "top"),
+            new(new IntPtr(2), new PixelRect(120, 130, 320, 310), "updated"),
+        ];
+
+        var committed = OverlayWindow.ResolveCandidateForCommit(selected, refreshed);
+
+        Assert.NotNull(committed);
+        Assert.Equal(new IntPtr(2), committed.Hwnd);
+        Assert.Equal(new PixelRect(120, 130, 320, 310), committed.Bounds);
+    }
+
+    [Fact]
+    public void WindowPickerCommitRejectsAStaleSelectedHwndInsteadOfFallingBackToTopmost()
+    {
+        var selected = new WindowCandidate(new IntPtr(2), new PixelRect(100, 100, 300, 300), "closed");
+        WindowCandidate[] refreshed =
+        [
+            new(new IntPtr(1), new PixelRect(0, 0, 300, 300), "top"),
+        ];
+
+        Assert.Null(OverlayWindow.ResolveCandidateForCommit(selected, refreshed));
     }
 
     [Fact]
@@ -50,6 +99,19 @@ public sealed class OverlayWindowPickerImplementationTests
         Assert.Contains("SelectRegionAsync(countdownSeconds)", source, StringComparison.Ordinal);
         Assert.Contains("RequestFrom(settings, 0)", source, StringComparison.Ordinal);
         Assert.DoesNotContain("RequestFrom(settings, action == AppAction.CaptureDelayed", source, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void SelectionSpaceMoveDoesNotJumpAndKeepsResizeAnchor()
+    {
+        var drag = new OverlaySelectionDragState();
+
+        drag.Begin(new Point(10, 10));
+
+        Assert.Equal(new Rect(10, 10, 100, 50), drag.ResizeTo(new Point(110, 60)));
+        Assert.Equal(new Rect(10, 10, 100, 50), drag.MoveTo(new Point(110, 60)));
+        Assert.Equal(new Rect(20, 20, 100, 50), drag.MoveTo(new Point(120, 70)));
+        Assert.Equal(new Rect(20, 20, 110, 55), drag.ResizeTo(new Point(130, 75)));
     }
 
     [Fact]

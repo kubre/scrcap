@@ -1,23 +1,81 @@
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
 using Scrcap.Core;
+using Scrcap.Windows.Platform.Startup;
+using Scrcap.Windows.Platform.Updates;
 using CoreCaptureMode = Scrcap.Core.CaptureMode;
+using WpfBrush = System.Windows.Media.Brush;
+using WpfColorConverter = System.Windows.Media.ColorConverter;
 using WpfKey = System.Windows.Input.Key;
 using WpfModifierKeys = System.Windows.Input.ModifierKeys;
+using WpfSolidColorBrush = System.Windows.Media.SolidColorBrush;
 
 namespace Scrcap.Windows.UI.Preferences;
 
 public sealed class PreferencesViewModel : INotifyPropertyChanged
 {
     private readonly SettingsStore store;
+    private readonly ILaunchAtLoginService launchAtLoginService;
+    private readonly IUpdateChecker updateChecker;
+    private AppAction? recordingAction;
+    private ThemeMode selectedThemeMode;
+    private bool launchAtLogin;
+    private bool includeCursor;
+    private bool includeWindowShadow;
+    private bool windowBackgroundTransparent;
+    private string windowBackgroundHex = "#FFFFFF";
+    private int captureDelaySeconds;
+    private int scrollingMaxHeight;
+    private WindowCaptureTarget windowCaptureTarget;
+    private AfterCaptureBehavior regionAfterCapture;
+    private AfterCaptureBehavior windowAfterCapture;
+    private AfterCaptureBehavior fullscreenAfterCapture;
+    private AfterCaptureBehavior scrollingAfterCapture;
+    private string captureRegionHotkey = string.Empty;
+    private string captureWindowHotkey = string.Empty;
+    private string captureFullscreenHotkey = string.Empty;
+    private string captureScrollingHotkey = string.Empty;
+    private string captureDelayedHotkey = string.Empty;
+    private string repeatLastHotkey = string.Empty;
+    private string shortcutRecorderStatus = "Press a shortcut while focused in a shortcut field.";
+    private string palette1 = string.Empty;
+    private string palette2 = string.Empty;
+    private string palette3 = string.Empty;
+    private string palette4 = string.Empty;
+    private string palette5 = string.Empty;
+    private double strokeWidth;
+    private double textSize;
+    private TextEnterBehavior textEnterBehavior;
+    private EscBehavior escBehavior;
+    private bool autoExpandCanvas;
+    private string canvasExtensionBackgroundHex = "#FFFFFF";
+    private string saveFolder = string.Empty;
+    private string filenamePattern = string.Empty;
+    private int exportScale;
+    private bool suppressCopyNotification;
+    private string? lastError;
+    private string? updateStatus;
+    private Uri? latestReleaseUrl;
+    private bool isCheckingForUpdates;
 
-    public PreferencesViewModel(SettingsStore store)
+    public PreferencesViewModel(
+        SettingsStore store,
+        ILaunchAtLoginService? launchAtLoginService = null,
+        IUpdateChecker? updateChecker = null)
     {
         this.store = store;
+        this.launchAtLoginService = launchAtLoginService ?? new StartupFolderLaunchAtLoginService();
+        this.updateChecker = updateChecker ?? new GitHubUpdateChecker();
         Load(store.Settings);
     }
 
     public event PropertyChangedEventHandler? PropertyChanged;
+
+    public event EventHandler? SettingsChanged
+    {
+        add => store.SettingsChanged += value;
+        remove => store.SettingsChanged -= value;
+    }
 
     public IReadOnlyList<ThemeMode> ThemeModes { get; } = [ThemeMode.System, ThemeMode.Light, ThemeMode.Dark];
 
@@ -31,212 +89,508 @@ public sealed class PreferencesViewModel : INotifyPropertyChanged
 
     public IReadOnlyList<int> ExportScales { get; } = [1, 2];
 
-    public ThemeMode SelectedThemeMode { get; set; }
+    public ThemeMode SelectedThemeMode
+    {
+        get => selectedThemeMode;
+        set => SetAndPersist(ref selectedThemeMode, value, settings => settings.ThemeMode = value);
+    }
 
-    public bool LaunchAtLogin { get; set; }
+    public bool LaunchAtLogin
+    {
+        get => launchAtLogin;
+        set
+        {
+            if (value == launchAtLogin)
+            {
+                return;
+            }
 
-    public bool IncludeCursor { get; set; }
+            var registration = launchAtLoginService.SetEnabled(value);
+            if (!registration.Succeeded)
+            {
+                SetError("Could not update Launch at Login. " + (registration.ErrorMessage ?? "Windows rejected the Startup registration."));
+                OnPropertyChanged();
+                return;
+            }
 
-    public bool IncludeWindowShadow { get; set; }
+            var previous = launchAtLogin;
+            if (SetAndPersist(ref launchAtLogin, value, settings => settings.LaunchAtLogin = value))
+            {
+                return;
+            }
 
-    public bool WindowBackgroundTransparent { get; set; }
+            _ = launchAtLoginService.SetEnabled(previous);
+        }
+    }
 
-    public string WindowBackgroundHex { get; set; } = "#FFFFFF";
+    public bool IncludeCursor
+    {
+        get => includeCursor;
+        set => SetAndPersist(ref includeCursor, value, settings => settings.IncludeCursor = value);
+    }
 
-    public int CaptureDelaySeconds { get; set; }
+    public bool IncludeWindowShadow
+    {
+        get => includeWindowShadow;
+        set => SetAndPersist(ref includeWindowShadow, value, settings => settings.IncludeWindowShadow = value);
+    }
 
-    public int ScrollingMaxHeight { get; set; }
+    public bool WindowBackgroundTransparent
+    {
+        get => windowBackgroundTransparent;
+        set => SetAndPersist(ref windowBackgroundTransparent, value, settings => settings.WindowBackgroundTransparent = value);
+    }
 
-    public WindowCaptureTarget WindowCaptureTarget { get; set; }
+    public string WindowBackgroundHex
+    {
+        get => windowBackgroundHex;
+        set => SetColorAndPersist(ref windowBackgroundHex, value, (settings, normalized) => settings.WindowBackgroundHex = normalized, nameof(WindowBackgroundBrush));
+    }
 
-    public AfterCaptureBehavior RegionAfterCapture { get; set; }
+    public int CaptureDelaySeconds
+    {
+        get => captureDelaySeconds;
+        set => SetAndPersist(ref captureDelaySeconds, value, settings => settings.CaptureDelaySeconds = value);
+    }
 
-    public AfterCaptureBehavior WindowAfterCapture { get; set; }
+    public int ScrollingMaxHeight
+    {
+        get => scrollingMaxHeight;
+        set => SetAndPersist(ref scrollingMaxHeight, value, settings => settings.ScrollingMaxHeight = value);
+    }
 
-    public AfterCaptureBehavior FullscreenAfterCapture { get; set; }
+    public WindowCaptureTarget WindowCaptureTarget
+    {
+        get => windowCaptureTarget;
+        set => SetAndPersist(ref windowCaptureTarget, value, settings => settings.WindowCaptureTarget = value);
+    }
 
-    public AfterCaptureBehavior ScrollingAfterCapture { get; set; }
+    public AfterCaptureBehavior RegionAfterCapture
+    {
+        get => regionAfterCapture;
+        set => SetAndPersist(ref regionAfterCapture, value, settings => settings.AfterCapture[CoreCaptureMode.Region.StorageKey()] = value);
+    }
 
-    public string CaptureRegionHotkey { get; set; } = string.Empty;
+    public AfterCaptureBehavior WindowAfterCapture
+    {
+        get => windowAfterCapture;
+        set => SetAndPersist(ref windowAfterCapture, value, settings => settings.AfterCapture[CoreCaptureMode.Window.StorageKey()] = value);
+    }
 
-    public string CaptureWindowHotkey { get; set; } = string.Empty;
+    public AfterCaptureBehavior FullscreenAfterCapture
+    {
+        get => fullscreenAfterCapture;
+        set => SetAndPersist(ref fullscreenAfterCapture, value, settings => settings.AfterCapture[CoreCaptureMode.Fullscreen.StorageKey()] = value);
+    }
 
-    public string CaptureFullscreenHotkey { get; set; } = string.Empty;
+    public AfterCaptureBehavior ScrollingAfterCapture
+    {
+        get => scrollingAfterCapture;
+        set => SetAndPersist(ref scrollingAfterCapture, value, settings => settings.AfterCapture[CoreCaptureMode.Scrolling.StorageKey()] = value);
+    }
 
-    public string CaptureScrollingHotkey { get; set; } = string.Empty;
+    public string CaptureRegionHotkey { get => captureRegionHotkey; private set => SetShortcutField(ref captureRegionHotkey, value, nameof(CaptureRegionHotkey), nameof(CaptureRegionHotkeyDisplay)); }
 
-    public string CaptureDelayedHotkey { get; set; } = string.Empty;
+    public string CaptureRegionHotkeyDisplay => HotkeyDisplay(AppAction.CaptureRegion);
 
-    public string RepeatLastHotkey { get; set; } = string.Empty;
+    public string CaptureWindowHotkey { get => captureWindowHotkey; private set => SetShortcutField(ref captureWindowHotkey, value, nameof(CaptureWindowHotkey), nameof(CaptureWindowHotkeyDisplay)); }
 
-    public string ShortcutRecorderStatus { get; private set; } = "Press a shortcut while focused in a shortcut field.";
+    public string CaptureWindowHotkeyDisplay => HotkeyDisplay(AppAction.CaptureWindow);
 
-    public string Palette1 { get; set; } = string.Empty;
+    public string CaptureFullscreenHotkey { get => captureFullscreenHotkey; private set => SetShortcutField(ref captureFullscreenHotkey, value, nameof(CaptureFullscreenHotkey), nameof(CaptureFullscreenHotkeyDisplay)); }
 
-    public string Palette2 { get; set; } = string.Empty;
+    public string CaptureFullscreenHotkeyDisplay => HotkeyDisplay(AppAction.CaptureFullscreen);
 
-    public string Palette3 { get; set; } = string.Empty;
+    public string CaptureScrollingHotkey { get => captureScrollingHotkey; private set => SetShortcutField(ref captureScrollingHotkey, value, nameof(CaptureScrollingHotkey), nameof(CaptureScrollingHotkeyDisplay)); }
 
-    public string Palette4 { get; set; } = string.Empty;
+    public string CaptureScrollingHotkeyDisplay => HotkeyDisplay(AppAction.CaptureScrolling);
 
-    public string Palette5 { get; set; } = string.Empty;
+    public string CaptureDelayedHotkey { get => captureDelayedHotkey; private set => SetShortcutField(ref captureDelayedHotkey, value, nameof(CaptureDelayedHotkey), nameof(CaptureDelayedHotkeyDisplay)); }
 
-    public double StrokeWidth { get; set; }
+    public string CaptureDelayedHotkeyDisplay => HotkeyDisplay(AppAction.CaptureDelayed);
 
-    public double TextSize { get; set; }
+    public string RepeatLastHotkey { get => repeatLastHotkey; private set => SetShortcutField(ref repeatLastHotkey, value, nameof(RepeatLastHotkey), nameof(RepeatLastHotkeyDisplay)); }
 
-    public TextEnterBehavior TextEnterBehavior { get; set; }
+    public string RepeatLastHotkeyDisplay => HotkeyDisplay(AppAction.RepeatLast);
 
-    public EscBehavior EscBehavior { get; set; }
+    public string ShortcutRecorderStatus { get => shortcutRecorderStatus; private set => SetLocal(ref shortcutRecorderStatus, value); }
 
-    public bool AutoExpandCanvas { get; set; }
+    public string Palette1 { get => palette1; set => SetPalette(0, ref palette1, value, nameof(Palette1), nameof(Palette1Brush)); }
 
-    public string CanvasExtensionBackgroundHex { get; set; } = "#FFFFFF";
+    public string Palette2 { get => palette2; set => SetPalette(1, ref palette2, value, nameof(Palette2), nameof(Palette2Brush)); }
 
-    public string SaveFolder { get; set; } = string.Empty;
+    public string Palette3 { get => palette3; set => SetPalette(2, ref palette3, value, nameof(Palette3), nameof(Palette3Brush)); }
 
-    public string FilenamePattern { get; set; } = string.Empty;
+    public string Palette4 { get => palette4; set => SetPalette(3, ref palette4, value, nameof(Palette4), nameof(Palette4Brush)); }
 
-    public int ExportScale { get; set; }
+    public string Palette5 { get => palette5; set => SetPalette(4, ref palette5, value, nameof(Palette5), nameof(Palette5Brush)); }
 
-    public bool SuppressCopyNotification { get; set; }
+    public WpfBrush Palette1Brush => BrushFromHex(Palette1);
 
-    public string VersionText => typeof(Settings).Assembly.GetName().Version?.ToString() ?? "0.0.0";
+    public WpfBrush Palette2Brush => BrushFromHex(Palette2);
+
+    public WpfBrush Palette3Brush => BrushFromHex(Palette3);
+
+    public WpfBrush Palette4Brush => BrushFromHex(Palette4);
+
+    public WpfBrush Palette5Brush => BrushFromHex(Palette5);
+
+    public WpfBrush WindowBackgroundBrush => BrushFromHex(WindowBackgroundHex);
+
+    public double StrokeWidth
+    {
+        get => strokeWidth;
+        set => SetAndPersist(ref strokeWidth, value, settings => settings.StrokeWidth = value);
+    }
+
+    public double TextSize
+    {
+        get => textSize;
+        set => SetAndPersist(ref textSize, value, settings => settings.TextSize = value);
+    }
+
+    public TextEnterBehavior TextEnterBehavior
+    {
+        get => textEnterBehavior;
+        set => SetAndPersist(ref textEnterBehavior, value, settings => settings.TextEnterBehavior = value);
+    }
+
+    public EscBehavior EscBehavior
+    {
+        get => escBehavior;
+        set => SetAndPersist(ref escBehavior, value, settings => settings.EscBehavior = value);
+    }
+
+    public bool AutoExpandCanvas
+    {
+        get => autoExpandCanvas;
+        set => SetAndPersist(ref autoExpandCanvas, value, settings => settings.AutoExpandCanvas = value);
+    }
+
+    public string CanvasExtensionBackgroundHex
+    {
+        get => canvasExtensionBackgroundHex;
+        set => SetColorAndPersist(ref canvasExtensionBackgroundHex, value, (settings, normalized) => settings.CanvasExtensionBackgroundHex = normalized, nameof(CanvasExtensionBackgroundBrush));
+    }
+
+    public WpfBrush CanvasExtensionBackgroundBrush => BrushFromHex(CanvasExtensionBackgroundHex);
+
+    public string SaveFolder
+    {
+        get => saveFolder;
+        set => SetAndPersist(ref saveFolder, value, settings => settings.SaveFolder = string.IsNullOrWhiteSpace(value) ? null : value);
+    }
+
+    public string FilenamePattern
+    {
+        get => filenamePattern;
+        set => SetAndPersist(ref filenamePattern, value, settings => settings.FilenamePattern = value);
+    }
+
+    public int ExportScale
+    {
+        get => exportScale;
+        set
+        {
+            var normalized = value == 1 ? 1 : 2;
+            SetAndPersist(ref exportScale, normalized, settings => settings.ExportScale = normalized);
+        }
+    }
+
+    public bool SuppressCopyNotification
+    {
+        get => suppressCopyNotification;
+        set => SetAndPersist(ref suppressCopyNotification, value, settings => settings.SuppressCopyNotification = value);
+    }
+
+    public string? LastError { get => lastError; private set => SetLocal(ref lastError, value); }
+
+    public string? UpdateStatus { get => updateStatus; private set => SetLocal(ref updateStatus, value); }
+
+    public Uri? LatestReleaseUrl { get => latestReleaseUrl; private set => SetLocal(ref latestReleaseUrl, value); }
+
+    public bool HasLatestRelease => LatestReleaseUrl is not null;
+
+    public bool IsCheckingForUpdates { get => isCheckingForUpdates; private set => SetLocal(ref isCheckingForUpdates, value); }
+
+    public string VersionText => typeof(PreferencesViewModel).Assembly.GetName().Version?.ToString() ?? "0.0.0";
 
     public string BuildChannel => "local";
 
-    public string SourceLink => "https://github.com/";
+    public string SourceLink => GitHubUpdateChecker.SourceUrl;
+
+    public async Task CheckForUpdatesAsync(CancellationToken cancellationToken = default)
+    {
+        if (IsCheckingForUpdates)
+        {
+            return;
+        }
+
+        IsCheckingForUpdates = true;
+        UpdateStatus = "Checking GitHub for updates...";
+        LatestReleaseUrl = null;
+        OnPropertyChanged(nameof(HasLatestRelease));
+        try
+        {
+            var result = await updateChecker.CheckAsync(VersionText, cancellationToken);
+            LatestReleaseUrl = result.Release.HtmlUrl;
+            OnPropertyChanged(nameof(HasLatestRelease));
+            UpdateStatus = result.Availability switch
+            {
+                UpdateAvailability.Available => $"scrcap {result.Release.TagName} is available. You are running {result.CurrentVersion}.",
+                UpdateAvailability.UpToDate => $"You are up to date ({result.CurrentVersion}). Latest release is {result.Release.TagName}.",
+                _ => $"Latest release is {result.Release.TagName}; this {result.CurrentVersion} build cannot be compared automatically.",
+            };
+            LastError = null;
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            SetError("Could not check for updates. The GitHub request timed out.");
+            UpdateStatus = null;
+        }
+        catch (Exception ex)
+        {
+            SetError("Could not check for updates. " + ex.Message);
+            UpdateStatus = null;
+        }
+        finally
+        {
+            IsCheckingForUpdates = false;
+        }
+    }
+
+    public void BeginShortcutRecording(AppAction action)
+    {
+        if (recordingAction == action)
+        {
+            return;
+        }
+
+        var previous = recordingAction;
+        recordingAction = action;
+        if (previous is { } previousAction)
+        {
+            OnHotkeyDisplayChanged(previousAction);
+        }
+
+        ShortcutRecorderStatus = $"Recording {action.Title()} shortcut. Press a key combination now; Backspace clears.";
+        OnHotkeyDisplayChanged(action);
+    }
+
+    public void EndShortcutRecording(AppAction action)
+    {
+        if (recordingAction != action)
+        {
+            return;
+        }
+
+        recordingAction = null;
+        OnHotkeyDisplayChanged(action);
+    }
 
     public bool RecordShortcut(AppAction action, WpfKey key, WpfModifierKeys modifiers)
     {
         if (IsClearKey(key))
         {
-            SetHotkey(action, string.Empty);
-            ShortcutRecorderStatus = $"{action.Title()} shortcut cleared.";
-            OnPropertyChanged(nameof(ShortcutRecorderStatus));
-            return true;
+            return PersistHotkeys(action, string.Empty, null, $"{action.Title()} shortcut cleared.");
         }
 
         if (!TryBuildChord(key, modifiers, out var chord))
         {
             ShortcutRecorderStatus = "Use at least one modifier plus a letter, number, function, or navigation key.";
-            OnPropertyChanged(nameof(ShortcutRecorderStatus));
             return false;
         }
 
         if (!Keymap.IsUsableGlobalShortcut(chord))
         {
             ShortcutRecorderStatus = $"{chord.WindowsDisplayValue} is reserved by Windows.";
-            OnPropertyChanged(nameof(ShortcutRecorderStatus));
             return false;
         }
 
-        AppAction? conflictedAction = null;
-        foreach (var (candidateAction, existingChord) in CurrentHotkeys())
-        {
-            if (candidateAction != action && existingChord == chord)
-            {
-                conflictedAction = candidateAction;
-                break;
-            }
-        }
-
-        if (conflictedAction is { } victim)
-        {
-            SetHotkey(victim, string.Empty);
-        }
-
-        SetHotkey(action, chord.StringValue);
-        ShortcutRecorderStatus = conflictedAction is null
+        var conflictedAction = CurrentHotkeys()
+            .Where(pair => pair.Key != action && pair.Value == chord)
+            .Select(pair => (AppAction?)pair.Key)
+            .FirstOrDefault();
+        var status = conflictedAction is null
             ? $"{action.Title()} set to {chord.WindowsDisplayValue}."
             : $"{action.Title()} set to {chord.WindowsDisplayValue}; {conflictedAction.Value.Title()} was cleared.";
-        OnPropertyChanged(nameof(ShortcutRecorderStatus));
-        return true;
+        return PersistHotkeys(action, chord.StringValue, conflictedAction, status);
     }
 
     public void ResetAll()
     {
-        Load(Settings.Defaults());
+        var previousLaunchAtLogin = launchAtLogin;
+        var launchResult = previousLaunchAtLogin
+            ? launchAtLoginService.SetEnabled(false)
+            : LaunchAtLoginResult.Success;
+        if (!launchResult.Succeeded)
+        {
+            SetError("Could not reset Launch at Login. " + (launchResult.ErrorMessage ?? "Windows rejected the Startup change."));
+            return;
+        }
+
+        var defaults = Settings.Defaults();
+        if (!store.Update(settings => CopySettings(defaults, settings)))
+        {
+            _ = launchAtLoginService.SetEnabled(previousLaunchAtLogin);
+            SetError("Could not reset preferences. The previous valid settings file was kept.");
+            return;
+        }
+
+        Load(store.Settings);
+        LastError = null;
         OnPropertyChanged(string.Empty);
     }
 
-    public bool Save() =>
-        store.Update(settings =>
+    public bool SetColor(string propertyName, string hex)
+    {
+        var normalized = Settings.NormalizeHexColor(hex);
+        if (normalized is null)
         {
-            settings.ThemeMode = SelectedThemeMode;
-            settings.LaunchAtLogin = LaunchAtLogin;
-            settings.IncludeCursor = IncludeCursor;
-            settings.IncludeWindowShadow = IncludeWindowShadow;
-            settings.WindowBackgroundTransparent = WindowBackgroundTransparent;
-            settings.WindowBackgroundHex = WindowBackgroundHex;
-            settings.CaptureDelaySeconds = CaptureDelaySeconds;
-            settings.ScrollingMaxHeight = ScrollingMaxHeight;
-            settings.WindowCaptureTarget = WindowCaptureTarget;
-            settings.AfterCapture = new Dictionary<string, AfterCaptureBehavior>
+            return false;
+        }
+
+        switch (propertyName)
+        {
+            case nameof(WindowBackgroundHex): WindowBackgroundHex = normalized; break;
+            case nameof(Palette1): Palette1 = normalized; break;
+            case nameof(Palette2): Palette2 = normalized; break;
+            case nameof(Palette3): Palette3 = normalized; break;
+            case nameof(Palette4): Palette4 = normalized; break;
+            case nameof(Palette5): Palette5 = normalized; break;
+            case nameof(CanvasExtensionBackgroundHex): CanvasExtensionBackgroundHex = normalized; break;
+            default: return false;
+        }
+
+        return true;
+    }
+
+    // Retained for source compatibility with older automation. Changes are already persisted by each setter.
+    public bool Save() => LastError is null;
+
+    private bool SetAndPersist<T>(ref T field, T value, Action<Settings> mutate, [CallerMemberName] string? propertyName = null)
+    {
+        if (EqualityComparer<T>.Default.Equals(field, value))
+        {
+            return false;
+        }
+
+        if (!store.Update(mutate))
+        {
+            SetError("Could not save preferences. The previous valid settings file was kept.");
+            OnPropertyChanged(propertyName);
+            return false;
+        }
+
+        field = value;
+        LastError = null;
+        OnPropertyChanged(propertyName);
+        return true;
+    }
+
+    private void SetColorAndPersist(ref string field, string value, Action<Settings, string> mutate, string brushProperty, [CallerMemberName] string? propertyName = null)
+    {
+        var normalized = Settings.NormalizeHexColor(value);
+        if (normalized is null || !SetAndPersist(ref field, normalized, settings => mutate(settings, normalized), propertyName))
+        {
+            return;
+        }
+
+        OnPropertyChanged(brushProperty);
+    }
+
+    private void SetPalette(int index, ref string field, string value, string propertyName, string brushProperty)
+    {
+        var normalized = Settings.NormalizeHexColor(value);
+        if (normalized is null)
+        {
+            return;
+        }
+
+        if (SetAndPersist(ref field, normalized, settings => settings.PaletteHex = CurrentPaletteWith(index, normalized), propertyName))
+        {
+            OnPropertyChanged(brushProperty);
+        }
+    }
+
+    private bool PersistHotkeys(AppAction action, string value, AppAction? conflictedAction, string status)
+    {
+        if (!store.Update(settings =>
             {
-                [CoreCaptureMode.Region.StorageKey()] = RegionAfterCapture,
-                [CoreCaptureMode.Window.StorageKey()] = WindowAfterCapture,
-                [CoreCaptureMode.Fullscreen.StorageKey()] = FullscreenAfterCapture,
-                [CoreCaptureMode.Scrolling.StorageKey()] = ScrollingAfterCapture,
-            };
-            settings.Hotkeys = new Dictionary<string, string>
-            {
-                [AppAction.CaptureRegion.StorageKey()] = CaptureRegionHotkey,
-                [AppAction.CaptureWindow.StorageKey()] = CaptureWindowHotkey,
-                [AppAction.CaptureFullscreen.StorageKey()] = CaptureFullscreenHotkey,
-                [AppAction.CaptureScrolling.StorageKey()] = CaptureScrollingHotkey,
-                [AppAction.CaptureDelayed.StorageKey()] = CaptureDelayedHotkey,
-                [AppAction.RepeatLast.StorageKey()] = RepeatLastHotkey,
-            };
-            settings.PaletteHex = [Palette1, Palette2, Palette3, Palette4, Palette5];
-            settings.StrokeWidth = StrokeWidth;
-            settings.TextSize = TextSize;
-            settings.TextEnterBehavior = TextEnterBehavior;
-            settings.EscBehavior = EscBehavior;
-            settings.AutoExpandCanvas = AutoExpandCanvas;
-            settings.CanvasExtensionBackgroundHex = CanvasExtensionBackgroundHex;
-            settings.SaveFolder = string.IsNullOrWhiteSpace(SaveFolder) ? null : SaveFolder;
-            settings.FilenamePattern = FilenamePattern;
-            settings.ExportScale = ExportScale;
-            settings.SuppressCopyNotification = SuppressCopyNotification;
-        });
+                settings.Hotkeys[action.StorageKey()] = value;
+                if (conflictedAction is { } victim)
+                {
+                    settings.Hotkeys[victim.StorageKey()] = string.Empty;
+                }
+            }))
+        {
+            SetError("Could not save the shortcut. The previous valid settings file was kept.");
+            return false;
+        }
+
+        if (conflictedAction is { } victimAction)
+        {
+            SetHotkeyLocal(victimAction, string.Empty);
+        }
+
+        recordingAction = null;
+        SetHotkeyLocal(action, value);
+        ShortcutRecorderStatus = status;
+        LastError = null;
+        return true;
+    }
 
     private void Load(Settings settings)
     {
-        SelectedThemeMode = settings.ThemeMode;
-        LaunchAtLogin = settings.LaunchAtLogin;
-        IncludeCursor = settings.IncludeCursor;
-        IncludeWindowShadow = settings.IncludeWindowShadow;
-        WindowBackgroundTransparent = settings.WindowBackgroundTransparent;
-        WindowBackgroundHex = settings.WindowBackgroundHex;
-        CaptureDelaySeconds = settings.CaptureDelaySeconds;
-        ScrollingMaxHeight = settings.ScrollingMaxHeight;
-        WindowCaptureTarget = settings.WindowCaptureTarget;
-        RegionAfterCapture = settings.BehaviorFor(CoreCaptureMode.Region);
-        WindowAfterCapture = settings.BehaviorFor(CoreCaptureMode.Window);
-        FullscreenAfterCapture = settings.BehaviorFor(CoreCaptureMode.Fullscreen);
-        ScrollingAfterCapture = settings.BehaviorFor(CoreCaptureMode.Scrolling);
-        CaptureRegionHotkey = settings.Hotkeys.GetValueOrDefault(AppAction.CaptureRegion.StorageKey(), string.Empty);
-        CaptureWindowHotkey = settings.Hotkeys.GetValueOrDefault(AppAction.CaptureWindow.StorageKey(), string.Empty);
-        CaptureFullscreenHotkey = settings.Hotkeys.GetValueOrDefault(AppAction.CaptureFullscreen.StorageKey(), string.Empty);
-        CaptureScrollingHotkey = settings.Hotkeys.GetValueOrDefault(AppAction.CaptureScrolling.StorageKey(), string.Empty);
-        CaptureDelayedHotkey = settings.Hotkeys.GetValueOrDefault(AppAction.CaptureDelayed.StorageKey(), string.Empty);
-        RepeatLastHotkey = settings.Hotkeys.GetValueOrDefault(AppAction.RepeatLast.StorageKey(), string.Empty);
-        Palette1 = settings.PaletteHex.ElementAtOrDefault(0) ?? Settings.DefaultPalette[0];
-        Palette2 = settings.PaletteHex.ElementAtOrDefault(1) ?? Settings.DefaultPalette[1];
-        Palette3 = settings.PaletteHex.ElementAtOrDefault(2) ?? Settings.DefaultPalette[2];
-        Palette4 = settings.PaletteHex.ElementAtOrDefault(3) ?? Settings.DefaultPalette[3];
-        Palette5 = settings.PaletteHex.ElementAtOrDefault(4) ?? Settings.DefaultPalette[4];
-        StrokeWidth = settings.StrokeWidth;
-        TextSize = settings.TextSize;
-        TextEnterBehavior = settings.TextEnterBehavior;
-        EscBehavior = settings.EscBehavior;
-        AutoExpandCanvas = settings.AutoExpandCanvas;
-        CanvasExtensionBackgroundHex = settings.CanvasExtensionBackgroundHex;
-        SaveFolder = settings.SaveFolder ?? string.Empty;
-        FilenamePattern = settings.FilenamePattern;
-        ExportScale = settings.ExportScale;
-        SuppressCopyNotification = settings.SuppressCopyNotification;
+        selectedThemeMode = settings.ThemeMode;
+        launchAtLogin = settings.LaunchAtLogin;
+        includeCursor = settings.IncludeCursor;
+        includeWindowShadow = settings.IncludeWindowShadow;
+        windowBackgroundTransparent = settings.WindowBackgroundTransparent;
+        windowBackgroundHex = settings.WindowBackgroundHex;
+        captureDelaySeconds = settings.CaptureDelaySeconds;
+        scrollingMaxHeight = settings.ScrollingMaxHeight;
+        windowCaptureTarget = settings.WindowCaptureTarget;
+        regionAfterCapture = settings.BehaviorFor(CoreCaptureMode.Region);
+        windowAfterCapture = settings.BehaviorFor(CoreCaptureMode.Window);
+        fullscreenAfterCapture = settings.BehaviorFor(CoreCaptureMode.Fullscreen);
+        scrollingAfterCapture = settings.BehaviorFor(CoreCaptureMode.Scrolling);
+        captureRegionHotkey = settings.Hotkeys.GetValueOrDefault(AppAction.CaptureRegion.StorageKey(), string.Empty);
+        captureWindowHotkey = settings.Hotkeys.GetValueOrDefault(AppAction.CaptureWindow.StorageKey(), string.Empty);
+        captureFullscreenHotkey = settings.Hotkeys.GetValueOrDefault(AppAction.CaptureFullscreen.StorageKey(), string.Empty);
+        captureScrollingHotkey = settings.Hotkeys.GetValueOrDefault(AppAction.CaptureScrolling.StorageKey(), string.Empty);
+        captureDelayedHotkey = settings.Hotkeys.GetValueOrDefault(AppAction.CaptureDelayed.StorageKey(), string.Empty);
+        repeatLastHotkey = settings.Hotkeys.GetValueOrDefault(AppAction.RepeatLast.StorageKey(), string.Empty);
+        palette1 = settings.PaletteHex.ElementAtOrDefault(0) ?? Settings.DefaultPalette[0];
+        palette2 = settings.PaletteHex.ElementAtOrDefault(1) ?? Settings.DefaultPalette[1];
+        palette3 = settings.PaletteHex.ElementAtOrDefault(2) ?? Settings.DefaultPalette[2];
+        palette4 = settings.PaletteHex.ElementAtOrDefault(3) ?? Settings.DefaultPalette[3];
+        palette5 = settings.PaletteHex.ElementAtOrDefault(4) ?? Settings.DefaultPalette[4];
+        strokeWidth = settings.StrokeWidth;
+        textSize = settings.TextSize;
+        textEnterBehavior = settings.TextEnterBehavior;
+        escBehavior = settings.EscBehavior;
+        autoExpandCanvas = settings.AutoExpandCanvas;
+        canvasExtensionBackgroundHex = settings.CanvasExtensionBackgroundHex;
+        saveFolder = settings.SaveFolder ?? string.Empty;
+        filenamePattern = settings.FilenamePattern;
+        exportScale = settings.ExportScale;
+        suppressCopyNotification = settings.SuppressCopyNotification;
+    }
+
+    private List<string> CurrentPaletteWith(int index, string value)
+    {
+        var palette = new List<string> { Palette1, Palette2, Palette3, Palette4, Palette5 };
+        palette[index] = value;
+        return palette;
+    }
+
+    private static WpfBrush BrushFromHex(string hex)
+    {
+        var normalized = Settings.NormalizeHexColor(hex) ?? "#FFFFFF";
+        var brush = new WpfSolidColorBrush((System.Windows.Media.Color)WpfColorConverter.ConvertFromString(normalized));
+        brush.Freeze();
+        return brush;
     }
 
     private Dictionary<AppAction, KeyChord> CurrentHotkeys()
@@ -253,50 +607,64 @@ public sealed class PreferencesViewModel : INotifyPropertyChanged
         return result;
     }
 
-    private string GetHotkey(AppAction action) =>
-        action switch
-        {
-            AppAction.CaptureRegion => CaptureRegionHotkey,
-            AppAction.CaptureWindow => CaptureWindowHotkey,
-            AppAction.CaptureFullscreen => CaptureFullscreenHotkey,
-            AppAction.CaptureScrolling => CaptureScrollingHotkey,
-            AppAction.CaptureDelayed => CaptureDelayedHotkey,
-            AppAction.RepeatLast => RepeatLastHotkey,
-            _ => throw new ArgumentOutOfRangeException(nameof(action), action, null),
-        };
+    private string GetHotkey(AppAction action) => action switch
+    {
+        AppAction.CaptureRegion => CaptureRegionHotkey,
+        AppAction.CaptureWindow => CaptureWindowHotkey,
+        AppAction.CaptureFullscreen => CaptureFullscreenHotkey,
+        AppAction.CaptureScrolling => CaptureScrollingHotkey,
+        AppAction.CaptureDelayed => CaptureDelayedHotkey,
+        AppAction.RepeatLast => RepeatLastHotkey,
+        _ => throw new ArgumentOutOfRangeException(nameof(action), action, null),
+    };
 
-    private void SetHotkey(AppAction action, string value)
+    private string HotkeyDisplay(AppAction action)
+    {
+        if (recordingAction == action)
+        {
+            return "Recording...";
+        }
+
+        var value = GetHotkey(action);
+        return KeyChord.TryParse(value, out var chord) ? chord.WindowsDisplayValue : value;
+    }
+
+    private void SetHotkeyLocal(AppAction action, string value)
     {
         switch (action)
         {
-            case AppAction.CaptureRegion:
-                CaptureRegionHotkey = value;
-                OnPropertyChanged(nameof(CaptureRegionHotkey));
-                break;
-            case AppAction.CaptureWindow:
-                CaptureWindowHotkey = value;
-                OnPropertyChanged(nameof(CaptureWindowHotkey));
-                break;
-            case AppAction.CaptureFullscreen:
-                CaptureFullscreenHotkey = value;
-                OnPropertyChanged(nameof(CaptureFullscreenHotkey));
-                break;
-            case AppAction.CaptureScrolling:
-                CaptureScrollingHotkey = value;
-                OnPropertyChanged(nameof(CaptureScrollingHotkey));
-                break;
-            case AppAction.CaptureDelayed:
-                CaptureDelayedHotkey = value;
-                OnPropertyChanged(nameof(CaptureDelayedHotkey));
-                break;
-            case AppAction.RepeatLast:
-                RepeatLastHotkey = value;
-                OnPropertyChanged(nameof(RepeatLastHotkey));
-                break;
-            default:
-                throw new ArgumentOutOfRangeException(nameof(action), action, null);
+            case AppAction.CaptureRegion: CaptureRegionHotkey = value; break;
+            case AppAction.CaptureWindow: CaptureWindowHotkey = value; break;
+            case AppAction.CaptureFullscreen: CaptureFullscreenHotkey = value; break;
+            case AppAction.CaptureScrolling: CaptureScrollingHotkey = value; break;
+            case AppAction.CaptureDelayed: CaptureDelayedHotkey = value; break;
+            case AppAction.RepeatLast: RepeatLastHotkey = value; break;
+            default: throw new ArgumentOutOfRangeException(nameof(action), action, null);
         }
     }
+
+    private void SetShortcutField(ref string field, string value, string propertyName, string displayPropertyName)
+    {
+        if (field == value)
+        {
+            return;
+        }
+
+        field = value;
+        OnPropertyChanged(propertyName);
+        OnPropertyChanged(displayPropertyName);
+    }
+
+    private void OnHotkeyDisplayChanged(AppAction action) => OnPropertyChanged(action switch
+    {
+        AppAction.CaptureRegion => nameof(CaptureRegionHotkeyDisplay),
+        AppAction.CaptureWindow => nameof(CaptureWindowHotkeyDisplay),
+        AppAction.CaptureFullscreen => nameof(CaptureFullscreenHotkeyDisplay),
+        AppAction.CaptureScrolling => nameof(CaptureScrollingHotkeyDisplay),
+        AppAction.CaptureDelayed => nameof(CaptureDelayedHotkeyDisplay),
+        AppAction.RepeatLast => nameof(RepeatLastHotkeyDisplay),
+        _ => throw new ArgumentOutOfRangeException(nameof(action), action, null),
+    });
 
     private static bool TryBuildChord(WpfKey key, WpfModifierKeys modifiers, out KeyChord chord)
     {
@@ -307,26 +675,10 @@ public sealed class PreferencesViewModel : INotifyPropertyChanged
         }
 
         var chordModifiers = ChordModifiers.None;
-        if (modifiers.HasFlag(WpfModifierKeys.Control))
-        {
-            chordModifiers |= ChordModifiers.Control;
-        }
-
-        if (modifiers.HasFlag(WpfModifierKeys.Alt))
-        {
-            chordModifiers |= ChordModifiers.Option;
-        }
-
-        if (modifiers.HasFlag(WpfModifierKeys.Shift))
-        {
-            chordModifiers |= ChordModifiers.Shift;
-        }
-
-        if (modifiers.HasFlag(WpfModifierKeys.Windows))
-        {
-            chordModifiers |= ChordModifiers.Command;
-        }
-
+        if (modifiers.HasFlag(WpfModifierKeys.Control)) chordModifiers |= ChordModifiers.Control;
+        if (modifiers.HasFlag(WpfModifierKeys.Alt)) chordModifiers |= ChordModifiers.Option;
+        if (modifiers.HasFlag(WpfModifierKeys.Shift)) chordModifiers |= ChordModifiers.Shift;
+        if (modifiers.HasFlag(WpfModifierKeys.Windows)) chordModifiers |= ChordModifiers.Command;
         chord = new KeyChord(keyName, chordModifiers);
         return true;
     }
@@ -344,7 +696,6 @@ public sealed class PreferencesViewModel : INotifyPropertyChanged
             WpfKey.Back => "backspace",
             WpfKey.Space => "space",
             WpfKey.Enter or WpfKey.Return => "enter",
-            WpfKey.Escape => "escape",
             WpfKey.Insert => "insert",
             WpfKey.Home => "home",
             WpfKey.End => "end",
@@ -356,7 +707,6 @@ public sealed class PreferencesViewModel : INotifyPropertyChanged
             WpfKey.Right => "right",
             _ => string.Empty,
         };
-
         return name.Length > 0;
     }
 
@@ -364,6 +714,47 @@ public sealed class PreferencesViewModel : INotifyPropertyChanged
 
     private static bool IsModifierKey(WpfKey key) =>
         key is WpfKey.LeftCtrl or WpfKey.RightCtrl or WpfKey.LeftAlt or WpfKey.RightAlt or WpfKey.LeftShift or WpfKey.RightShift or WpfKey.LWin or WpfKey.RWin;
+
+    private static void CopySettings(Settings source, Settings target)
+    {
+        target.SchemaVersion = source.SchemaVersion;
+        target.Hotkeys = new Dictionary<string, string>(source.Hotkeys);
+        target.AfterCapture = new Dictionary<string, AfterCaptureBehavior>(source.AfterCapture);
+        target.PaletteHex = source.PaletteHex.ToList();
+        target.EscBehavior = source.EscBehavior;
+        target.StrokeWidth = source.StrokeWidth;
+        target.TextSize = source.TextSize;
+        target.TextEnterBehavior = source.TextEnterBehavior;
+        target.WindowCaptureTarget = source.WindowCaptureTarget;
+        target.IncludeWindowShadow = source.IncludeWindowShadow;
+        target.WindowBackgroundTransparent = source.WindowBackgroundTransparent;
+        target.WindowBackgroundHex = source.WindowBackgroundHex;
+        target.AutoExpandCanvas = source.AutoExpandCanvas;
+        target.CanvasExtensionBackgroundHex = source.CanvasExtensionBackgroundHex;
+        target.SaveFolder = source.SaveFolder;
+        target.FilenamePattern = source.FilenamePattern;
+        target.ExportScale = source.ExportScale;
+        target.ScrollingMaxHeight = source.ScrollingMaxHeight;
+        target.LaunchAtLogin = source.LaunchAtLogin;
+        target.ThemeMode = source.ThemeMode;
+        target.IncludeCursor = source.IncludeCursor;
+        target.CaptureDelaySeconds = source.CaptureDelaySeconds;
+        target.SuppressCopyNotification = source.SuppressCopyNotification;
+        target.HasShownFirstLaunchNotice = source.HasShownFirstLaunchNotice;
+    }
+
+    private void SetError(string message) => LastError = message;
+
+    private void SetLocal<T>(ref T field, T value, [CallerMemberName] string? propertyName = null)
+    {
+        if (EqualityComparer<T>.Default.Equals(field, value))
+        {
+            return;
+        }
+
+        field = value;
+        OnPropertyChanged(propertyName);
+    }
 
     public void OnPropertyChanged([CallerMemberName] string? propertyName = null) =>
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));

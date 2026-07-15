@@ -22,10 +22,14 @@ public partial class OverlayWindow : Window
     private readonly IReadOnlyList<OverlayMonitorBounds> monitorBounds;
     private readonly DispatcherTimer selectionAntTimer;
     private readonly TaskCompletionSource<PixelRect?> rectCompletion = new();
-    private readonly TaskCompletionSource<PixelPoint?> pointCompletion = new();
+    private readonly TaskCompletionSource<WindowCandidate?> windowCompletion = new();
+    private readonly OverlaySelectionDragState selectionDrag = new();
     private IReadOnlyList<WindowCandidate> windowCandidates = [];
+    private IReadOnlyList<WindowCandidate> overlappingWindowCandidates = [];
     private WindowCandidate? highlightedWindow;
-    private WpfPoint? dragStart;
+    private PixelPoint? windowPointer;
+    private bool isMovingSelection;
+    private bool isDraggingSelection;
     private Rect currentSelection;
     private bool pointMode;
     private bool isCompleting;
@@ -73,7 +77,7 @@ public partial class OverlayWindow : Window
         return rectCompletion.Task;
     }
 
-    public Task<PixelPoint?> SelectPointAsync()
+    public Task<WindowCandidate?> SelectWindowAsync()
     {
         pointMode = true;
         windowCandidates = windowSelectionService.EnumerateWindows();
@@ -81,7 +85,7 @@ public partial class OverlayWindow : Window
         HintTag.Visibility = Visibility.Visible;
         Show();
         Activate();
-        return pointCompletion.Task;
+        return windowCompletion.Task;
     }
 
     private void Window_MouseDown(object sender, MouseButtonEventArgs e)
@@ -93,19 +97,16 @@ public partial class OverlayWindow : Window
 
         if (pointMode)
         {
-            var point = highlightedWindow is { } candidate
-                ? new PixelPoint(
-                    (int)Math.Round(OverlayGeometry.CandidateCenter(candidate).X),
-                    (int)Math.Round(OverlayGeometry.CandidateCenter(candidate).Y))
-                : OverlayGeometry.ToCapturePixelPoint(e.GetPosition(Root), monitorBounds, Left, Top);
-            Hide();
-            pointCompletion.TrySetResult(point);
+            HighlightWindowAt(e.GetPosition(Root));
+            CompleteWindowSelection(highlightedWindow);
             return;
         }
 
-        dragStart = e.GetPosition(Root);
-        currentSelection = new Rect(dragStart.Value, dragStart.Value);
-        HintTag.Visibility = Visibility.Collapsed;
+        selectionDrag.Begin(e.GetPosition(Root));
+        isDraggingSelection = true;
+        currentSelection = selectionDrag.CurrentSelection;
+        HintTag.Text = "Space: move   Esc: cancel";
+        HintTag.Visibility = Visibility.Visible;
         Selection.Visibility = Visibility.Visible;
         StartSelectionAnimation();
         CaptureMouse();
@@ -123,7 +124,7 @@ public partial class OverlayWindow : Window
             return;
         }
 
-        if (dragStart is not { } start)
+        if (!isDraggingSelection)
         {
             return;
         }
@@ -131,13 +132,13 @@ public partial class OverlayWindow : Window
         var end = point;
         if (Keyboard.IsKeyDown(Key.Space))
         {
-            var delta = end - start;
-            currentSelection.Offset(delta);
-            dragStart = end;
+            currentSelection = selectionDrag.MoveTo(end);
+            BeginSelectionMove();
         }
         else
         {
-            currentSelection = Normalize(start, end);
+            currentSelection = selectionDrag.ResizeTo(end);
+            EndSelectionMove();
         }
 
         UpdateSelection(currentSelection);
@@ -145,13 +146,15 @@ public partial class OverlayWindow : Window
 
     private async void Window_MouseUp(object sender, MouseButtonEventArgs e)
     {
-        if (e.ChangedButton != MouseButton.Left || dragStart is null)
+        if (e.ChangedButton != MouseButton.Left || !isDraggingSelection)
         {
             return;
         }
 
         ReleaseMouseCapture();
-        dragStart = null;
+        selectionDrag.End();
+        isDraggingSelection = false;
+        EndSelectionMove();
         StopSelectionAnimation();
 
         if (currentSelection.Width < 2 || currentSelection.Height < 2)
@@ -185,9 +188,7 @@ public partial class OverlayWindow : Window
 
         if ((e.Key == Key.Enter || e.Key == Key.Return) && pointMode && highlightedWindow is { } candidate)
         {
-            var center = OverlayGeometry.CandidateCenter(candidate);
-            Hide();
-            pointCompletion.TrySetResult(new PixelPoint((int)Math.Round(center.X), (int)Math.Round(center.Y)));
+            CompleteWindowSelection(candidate);
             e.Handled = true;
             return;
         }
@@ -199,16 +200,21 @@ public partial class OverlayWindow : Window
 
         isCancelled = true;
         ReleaseMouseCapture();
+        selectionDrag.End();
+        isDraggingSelection = false;
+        EndSelectionMove();
         StopSelectionAnimation();
         Hide();
         rectCompletion.TrySetResult(null);
-        pointCompletion.TrySetResult(null);
+        windowCompletion.TrySetResult(null);
         e.Handled = true;
     }
 
     protected override void OnClosed(EventArgs e)
     {
         StopSelectionAnimation();
+        rectCompletion.TrySetResult(null);
+        windowCompletion.TrySetResult(null);
         base.OnClosed(e);
     }
 
@@ -235,6 +241,7 @@ public partial class OverlayWindow : Window
         CoordinateText.Text = $"{(int)rect.Width} x {(int)rect.Height}";
         CoordinateTag.Visibility = Visibility.Visible;
         PositionTag(CoordinateTag, new WpfPoint(rect.Right + 8, rect.Bottom + 8));
+        PositionTag(HintTag, new WpfPoint(rect.X, rect.Bottom + 8));
 
         var intersectingMonitors = OverlayGeometry.CountIntersectingMonitors(rect, monitorBounds, Left, Top);
         if (intersectingMonitors > 1)
@@ -254,8 +261,9 @@ public partial class OverlayWindow : Window
         try
         {
             var screenPoint = OverlayGeometry.ToCapturePixelPoint(point, monitorBounds, Left, Top);
-            var candidate = windowSelectionService.WindowFromPoint(screenPoint)
-                ?? windowCandidates.FirstOrDefault(window => Contains(window.Bounds, screenPoint));
+            windowPointer = screenPoint;
+            overlappingWindowCandidates = WindowCandidatesUnderPoint(windowCandidates, screenPoint);
+            var candidate = overlappingWindowCandidates.FirstOrDefault();
             if (candidate is null)
             {
                 ClearWindowHighlight();
@@ -273,17 +281,41 @@ public partial class OverlayWindow : Window
 
     private void CycleWindowHighlight(int direction)
     {
-        if (windowCandidates.Count == 0)
+        if (windowPointer is not { } pointer)
         {
+            return;
+        }
+
+        overlappingWindowCandidates = WindowCandidatesUnderPoint(windowCandidates, pointer);
+        if (overlappingWindowCandidates.Count == 0)
+        {
+            ClearWindowHighlight();
             return;
         }
 
         var currentIndex = highlightedWindow is null
             ? -1
-            : Math.Max(-1, windowCandidates.ToList().FindIndex(window => window.Hwnd == highlightedWindow.Hwnd));
-        var nextIndex = (currentIndex + direction + windowCandidates.Count) % windowCandidates.Count;
-        highlightedWindow = windowCandidates[nextIndex];
+            : Math.Max(-1, overlappingWindowCandidates.ToList().FindIndex(window => window.Hwnd == highlightedWindow.Hwnd));
+        var nextIndex = currentIndex < 0
+            ? direction < 0 ? overlappingWindowCandidates.Count - 1 : 0
+            : (currentIndex + direction + overlappingWindowCandidates.Count) % overlappingWindowCandidates.Count;
+        highlightedWindow = overlappingWindowCandidates[nextIndex];
         DrawWindowHighlight(highlightedWindow);
+    }
+
+    private void CompleteWindowSelection(WindowCandidate? candidate)
+    {
+        WindowCandidate? refreshedCandidate = null;
+        try
+        {
+            refreshedCandidate = ResolveCandidateForCommit(candidate, windowSelectionService.EnumerateWindows());
+        }
+        catch
+        {
+        }
+
+        Hide();
+        windowCompletion.TrySetResult(refreshedCandidate);
     }
 
     private void DrawWindowHighlight(WindowCandidate candidate)
@@ -305,9 +337,22 @@ public partial class OverlayWindow : Window
     private void ClearWindowHighlight()
     {
         highlightedWindow = null;
+        overlappingWindowCandidates = [];
         WindowHighlight.Visibility = Visibility.Collapsed;
         WindowLabel.Visibility = Visibility.Collapsed;
     }
+
+    internal static IReadOnlyList<WindowCandidate> WindowCandidatesUnderPoint(
+        IReadOnlyList<WindowCandidate> candidates,
+        PixelPoint point) =>
+        candidates.Where(candidate => Contains(candidate.Bounds, point)).ToArray();
+
+    internal static WindowCandidate? ResolveCandidateForCommit(
+        WindowCandidate? selectedCandidate,
+        IReadOnlyList<WindowCandidate> refreshedCandidates) =>
+        selectedCandidate is null
+            ? null
+            : refreshedCandidates.FirstOrDefault(candidate => candidate.Hwnd == selectedCandidate.Hwnd);
 
     private async Task ShowCountdownAsync(int seconds)
     {
@@ -380,8 +425,27 @@ public partial class OverlayWindow : Window
         && point.X <= rect.X + rect.Width
         && point.Y <= rect.Y + rect.Height;
 
-    private static Rect Normalize(WpfPoint start, WpfPoint end) =>
-        new(Math.Min(start.X, end.X), Math.Min(start.Y, end.Y), Math.Abs(start.X - end.X), Math.Abs(start.Y - end.Y));
+    private void BeginSelectionMove()
+    {
+        if (isMovingSelection)
+        {
+            return;
+        }
+
+        isMovingSelection = true;
+        Cursor = System.Windows.Input.Cursors.SizeAll;
+    }
+
+    private void EndSelectionMove()
+    {
+        if (!isMovingSelection)
+        {
+            return;
+        }
+
+        isMovingSelection = false;
+        Cursor = System.Windows.Input.Cursors.Cross;
+    }
 
     private void StartSelectionAnimation()
     {

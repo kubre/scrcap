@@ -169,4 +169,6 @@ public sealed record ScrollingCaptureProgress(
 internal sealed record MonitorInfo(
     IntPtr Handle,
     PixelRect Bounds,
-    string DeviceName);
+    string DeviceName,
+    double DpiScaleX = 1,
+    double DpiScaleY = 1);

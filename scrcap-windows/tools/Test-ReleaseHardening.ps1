@@ -78,7 +78,12 @@ Assert-Contains $manualChecklistDoc "Windows 11 stable - dark taskbar" "Manual c
 
 Assert-Contains $editorCanvas "protected override void OnRender\(DrawingContext" "EditorCanvas must render committed shapes through OnRender."
 Assert-Contains $editorCanvas "foreach \(var shape in document\.Shapes\)" "EditorCanvas must render shape collections without creating per-shape controls."
-Assert-NotContains $editorCanvas "Children\.Add|new\s+(Line|Rectangle|Ellipse|TextBlock|Path)\b" "EditorCanvas appears to create WPF elements for shapes; use DrawingContext rendering instead."
+Assert-NotContains $editorCanvas "new\s+(Line|Rectangle|Ellipse|TextBlock|Path)\b" "EditorCanvas appears to create WPF elements for shapes; use DrawingContext rendering instead."
+$editorCanvasText = Get-Content -Raw $editorCanvas
+$childAdds = [regex]::Matches($editorCanvasText, "Children\.Add\(")
+if ($childAdds.Count -ne 1 -or $editorCanvasText -notmatch "Children\.Add\(editor\)") {
+  throw "EditorCanvas may add only its single transient inline text editor; committed shapes must use DrawingContext rendering."
+}
 
 Assert-NotContains $overlayXaml 'Storyboard RepeatBehavior="Forever"' "Overlay selection must not use a perpetual XAML Storyboard."
 Assert-Contains $overlayCode "DispatcherTimer" "Overlay selection must use a source-level timer that tests can inspect."

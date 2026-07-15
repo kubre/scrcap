@@ -7,19 +7,22 @@ using Microsoft.Win32;
 using Scrcap.Core;
 using Scrcap.Windows.Platform.Capture;
 using Scrcap.Windows.UI.Resources;
+using WpfColor = System.Windows.Media.Color;
 
 namespace Scrcap.Windows.UI.Editor;
 
 public partial class EditorWindow : Window
 {
     private readonly EditorViewModel viewModel;
-    private readonly Settings settings;
+    private Settings settings;
+    private readonly Action? copiedToClipboard;
     private readonly List<BitmapSource> bitmapHistory = [];
     private BitmapSource? sourceBitmap;
 
-    public EditorWindow(CaptureResult? capture = null, Settings? settings = null)
+    public EditorWindow(CaptureResult? capture = null, Settings? settings = null, Action? copiedToClipboard = null)
     {
         this.settings = settings ?? Settings.Defaults();
+        this.copiedToClipboard = copiedToClipboard;
         viewModel = new EditorViewModel(this.settings);
         if (System.Windows.Application.Current is { } app)
         {
@@ -27,9 +30,12 @@ public partial class EditorWindow : Window
         }
 
         InitializeComponent();
+        ChromeWindow.Attach(this);
         DataContext = viewModel;
 
         Canvas.CropCommitted += Canvas_CropCommitted;
+        Canvas.CanvasExpansionRequested += Canvas_CanvasExpansionRequested;
+        Canvas.DragOutRequested += Canvas_DragOutRequested;
         Canvas.DocumentChanged += (_, _) =>
         {
             RecordBitmapForDocumentCursor();
@@ -39,9 +45,12 @@ public partial class EditorWindow : Window
 
         if (capture is not null)
         {
-            LoadBitmap(BitmapSourceFromPixels(capture.Pixels));
-            Width = Math.Min(1200, Math.Max(720, capture.PixelWidth + 80));
-            Height = Math.Min(900, Math.Max(520, capture.PixelHeight + 120));
+            LoadBitmap(
+                BitmapSourceFromPixels(capture.Pixels),
+                pixelsPerDipX: capture.Metadata.DpiScaleX,
+                pixelsPerDipY: capture.Metadata.DpiScaleY);
+            Width = Math.Min(1200, Math.Max(720, capture.PixelWidth / Canvas.SourcePixelsPerDipX + 80));
+            Height = Math.Min(900, Math.Max(520, capture.PixelHeight / Canvas.SourcePixelsPerDipY + 120));
         }
         else
         {
@@ -59,6 +68,11 @@ public partial class EditorWindow : Window
     protected override void OnKeyDown(System.Windows.Input.KeyEventArgs e)
     {
         base.OnKeyDown(e);
+
+        if (Canvas.IsTextEditing)
+        {
+            return;
+        }
 
         if (Keyboard.Modifiers == ModifierKeys.Control && e.Key == Key.Z)
         {
@@ -152,32 +166,96 @@ public partial class EditorWindow : Window
 
     private void Canvas_CropCommitted(object? sender, CoreRect rect)
     {
-        if (sourceBitmap is null || !viewModel.Crop(rect))
+        if (sourceBitmap is null)
         {
             return;
         }
 
-        var crop = new Int32Rect(
-            Math.Clamp((int)Math.Round(rect.X), 0, Math.Max(0, sourceBitmap.PixelWidth - 1)),
-            Math.Clamp((int)Math.Round(rect.Y), 0, Math.Max(0, sourceBitmap.PixelHeight - 1)),
-            Math.Clamp((int)Math.Round(rect.Width), 1, sourceBitmap.PixelWidth),
-            Math.Clamp((int)Math.Round(rect.Height), 1, sourceBitmap.PixelHeight));
-        crop.Width = Math.Min(crop.Width, sourceBitmap.PixelWidth - crop.X);
-        crop.Height = Math.Min(crop.Height, sourceBitmap.PixelHeight - crop.Y);
-        LoadBitmap(new CroppedBitmap(sourceBitmap, crop), preserveDocument: true);
+        var aligned = EditorRasterGeometry.AlignCrop(
+            rect,
+            sourceBitmap.PixelWidth,
+            sourceBitmap.PixelHeight,
+            Canvas.SourcePixelsPerDipX,
+            Canvas.SourcePixelsPerDipY);
+        if (!viewModel.Crop(aligned.Logical))
+        {
+            return;
+        }
+
+        LoadBitmap(new CroppedBitmap(sourceBitmap, aligned.Pixels), preserveDocument: true);
         RecordBitmapForDocumentCursor();
         Canvas.InvalidateVisual();
     }
 
-    private void LoadBitmap(BitmapSource bitmap, bool preserveDocument = false)
+    private void Canvas_CanvasExpansionRequested(object? sender, CanvasExpansionRequestedEventArgs e)
+    {
+        if (sourceBitmap is null || viewModel.Document is null || !e.Expansion.HasWork)
+        {
+            return;
+        }
+
+        var aligned = EditorRasterGeometry.AlignExpansion(
+            e.Expansion,
+            Canvas.SourcePixelsPerDipX,
+            Canvas.SourcePixelsPerDipY);
+        var expanded = ExpandedBitmap(sourceBitmap, aligned, settings.CanvasExtensionBackgroundHex);
+        if (expanded is null || !viewModel.ExpandCanvas(aligned.Logical))
+        {
+            return;
+        }
+
+        sourceBitmap = expanded;
+        Canvas.SourceBitmap = expanded;
+        SyncSourceMetrics();
+        RecordBitmapForDocumentCursor();
+        e.MarkApplied(aligned.Logical);
+    }
+
+    private void LoadBitmap(
+        BitmapSource bitmap,
+        bool preserveDocument = false,
+        double pixelsPerDipX = 1,
+        double pixelsPerDipY = 1)
     {
         sourceBitmap = bitmap;
         Canvas.SourceBitmap = bitmap;
         if (!preserveDocument)
         {
-            viewModel.LoadDocument(bitmap.PixelWidth, bitmap.PixelHeight);
+            pixelsPerDipX = NormalizeSourceScale(pixelsPerDipX);
+            pixelsPerDipY = NormalizeSourceScale(pixelsPerDipY);
+            viewModel.LoadDocument(bitmap.PixelWidth / pixelsPerDipX, bitmap.PixelHeight / pixelsPerDipY);
             bitmapHistory.Clear();
             RecordBitmapForDocumentCursor();
+        }
+
+        SyncSourceMetrics();
+    }
+
+    private void Canvas_DragOutRequested(object? sender, EventArgs e)
+    {
+        var bytes = Canvas.FlattenPng(settings.ResolvedExportScale);
+        if (bytes.Length == 0)
+        {
+            return;
+        }
+
+        string? path = null;
+        try
+        {
+            path = DragOutPayload.CreateTempPng(bytes, settings.FilenamePattern, DateTimeOffset.Now);
+            var data = DragOutPayload.CreateDataObject(path);
+            System.Windows.DragDrop.DoDragDrop(Canvas, data, System.Windows.DragDropEffects.Copy);
+        }
+        catch (Exception ex)
+        {
+            ShowRecoverableError("scrcap drag failed", ex);
+        }
+        finally
+        {
+            if (path is not null)
+            {
+                DragOutPayload.ScheduleCleanup(path, TimeSpan.FromSeconds(60));
+            }
         }
     }
 
@@ -251,37 +329,9 @@ public partial class EditorWindow : Window
         }
     }
 
-    private void TextValue_KeyDown(object sender, System.Windows.Input.KeyEventArgs e)
-    {
-        if (e.Key != Key.Enter && e.Key != Key.Return)
-        {
-            return;
-        }
-
-        if (settings.TextEnterBehavior == TextEnterBehavior.Newline)
-        {
-            var caret = TextValue.CaretIndex;
-            TextValue.Text = TextValue.Text.Insert(caret, Environment.NewLine);
-            TextValue.CaretIndex = caret + Environment.NewLine.Length;
-        }
-        else
-        {
-            Canvas.Focus();
-        }
-
-        e.Handled = true;
-    }
-
     private void SelectTool(EditorTool tool)
     {
         viewModel.ActiveTool = tool;
-        if (tool == EditorTool.Text)
-        {
-            TextValue.Focus();
-            TextValue.SelectAll();
-            return;
-        }
-
         Canvas.Focus();
         Canvas.InvalidateVisual();
     }
@@ -318,7 +368,8 @@ public partial class EditorWindow : Window
 
         try
         {
-            System.Windows.Clipboard.SetImage(DecodePng(bytes));
+            System.Windows.Clipboard.SetDataObject(EditorClipboard.CreateDataObject(bytes), true);
+            copiedToClipboard?.Invoke();
             return true;
         }
         catch (Exception ex)
@@ -326,6 +377,13 @@ public partial class EditorWindow : Window
             ShowRecoverableError("scrcap copy failed", ex);
             return false;
         }
+    }
+
+    public void ApplySettings(Settings updatedSettings)
+    {
+        settings = updatedSettings ?? throw new ArgumentNullException(nameof(updatedSettings));
+        viewModel.ApplySettings(settings);
+        Canvas.InvalidateVisual();
     }
 
     private void SaveConfiguredAndClose()
@@ -396,14 +454,57 @@ public partial class EditorWindow : Window
         var bitmap = BitmapSource.Create(
             pixels.PixelWidth,
             pixels.PixelHeight,
-            96,
-            96,
+            96 * NormalizeSourceScale(pixels.Metadata.DpiScaleX),
+            96 * NormalizeSourceScale(pixels.Metadata.DpiScaleY),
             PixelFormats.Bgra32,
             null,
             bytes,
             pixels.Stride);
         bitmap.Freeze();
         return bitmap;
+    }
+
+    private static BitmapSource? ExpandedBitmap(BitmapSource source, PixelAlignedCanvasExpansion expansion, string fillHex)
+    {
+        var left = expansion.LeftPixels;
+        var top = expansion.TopPixels;
+        var right = expansion.RightPixels;
+        var bottom = expansion.BottomPixels;
+        var width = source.PixelWidth + left + right;
+        var height = source.PixelHeight + top + bottom;
+        if (width <= source.PixelWidth && height <= source.PixelHeight)
+        {
+            return null;
+        }
+
+        var fill = ColorFromHex(fillHex);
+        var visual = new DrawingVisual();
+        using (var context = visual.RenderOpen())
+        {
+            context.DrawRectangle(new SolidColorBrush(fill), null, new Rect(0, 0, width, height));
+            context.DrawImage(source, new Rect(left, top, source.PixelWidth, source.PixelHeight));
+        }
+
+        var bitmap = new RenderTargetBitmap(width, height, 96, 96, PixelFormats.Pbgra32);
+        bitmap.Render(visual);
+        bitmap.Freeze();
+        return bitmap;
+    }
+
+    private static WpfColor ColorFromHex(string hex)
+    {
+        try
+        {
+            return (WpfColor)System.Windows.Media.ColorConverter.ConvertFromString(hex);
+        }
+        catch (FormatException)
+        {
+            return Colors.White;
+        }
+        catch (NotSupportedException)
+        {
+            return Colors.White;
+        }
     }
 
     public static CapturedPixels CapturedPixelsFromBitmapSource(BitmapSource source, CaptureMetadata metadata)
@@ -435,29 +536,8 @@ public partial class EditorWindow : Window
             _ => string.Empty,
         };
 
-    private static void CleanupOldDragFiles()
-    {
-        var folder = Path.Combine(Path.GetTempPath(), "scrcap-drag");
-        if (!Directory.Exists(folder))
-        {
-            return;
-        }
-
-        foreach (var file in Directory.EnumerateFiles(folder, "*.png"))
-        {
-            try
-            {
-                if (File.GetCreationTimeUtc(file) < DateTime.UtcNow.AddHours(-24))
-                {
-                    File.Delete(file);
-                }
-            }
-            catch
-            {
-                // Best-effort cleanup only.
-            }
-        }
-    }
+    private static void CleanupOldDragFiles() =>
+        DragOutPayload.CleanupOldFiles(Path.Combine(Path.GetTempPath(), "scrcap-drag"), DateTime.UtcNow.AddHours(-24));
 
     private void RecordBitmapForDocumentCursor()
     {
@@ -490,5 +570,21 @@ public partial class EditorWindow : Window
 
         sourceBitmap = bitmapHistory[viewModel.Document.Cursor];
         Canvas.SourceBitmap = sourceBitmap;
+        SyncSourceMetrics();
     }
+
+    private void SyncSourceMetrics()
+    {
+        if (sourceBitmap is null || viewModel.Document is null)
+        {
+            return;
+        }
+
+        Canvas.SetSourcePixelsPerDip(
+            sourceBitmap.PixelWidth / viewModel.Document.Size.Width,
+            sourceBitmap.PixelHeight / viewModel.Document.Size.Height);
+    }
+
+    private static double NormalizeSourceScale(double value) =>
+        double.IsFinite(value) && value > 0 ? value : 1;
 }

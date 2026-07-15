@@ -5,6 +5,8 @@ using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
 using Scrcap.Core;
+using Scrcap.Windows.Platform.Startup;
+using Scrcap.Windows.Platform.Updates;
 using Scrcap.Windows.UI.Preferences;
 using Scrcap.Windows.UI.Resources;
 
@@ -16,6 +18,11 @@ public sealed class PreferencesImplementationTests
     public void PreferencesTabsExposeAutomationTargetsForEveryTabAndEditableSetting()
     {
         var xaml = ReadRepoFile("src/Scrcap.Windows.UI/Preferences/PreferencesWindow.xaml");
+
+        Assert.Contains("WindowStyle=\"None\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("<shell:WindowChrome CaptionHeight=\"0\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("GlassFrameThickness=\"0\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("UseAeroCaptionButtons=\"False\"", xaml, StringComparison.Ordinal);
 
         foreach (var tab in new[] { "General", "Capture", "Shortcuts", "Editor", "Output", "About" })
         {
@@ -31,20 +38,48 @@ public sealed class PreferencesImplementationTests
                      "WindowCaptureTarget",
                      "IncludeCursor",
                      "CaptureDelaySeconds",
+                     "CaptureDelaySecondsValue",
                      "CaptureRegionHotkey",
                      "StrokeWidth",
+                     "StrokeWidthValue",
                      "TextSize",
+                     "TextSizeValue",
                      "AutoExpandCanvas",
+                     "WindowBackgroundValue",
+                     "CanvasExtensionBackgroundValue",
                      "FilenamePattern",
                      "ExportScale",
                      "SuppressCopyNotification",
                      "ResetAllPreferences",
-                     "SavePreferences",
+                     "PreferencesError",
+                     "OpenSource",
+                     "CheckForUpdates",
+                     "OpenLatestRelease",
                      "ClosePreferences",
                  })
         {
             Assert.Contains($"AutomationProperties.AutomationId=\"{automationId}\"", xaml, StringComparison.Ordinal);
         }
+
+        Assert.Contains("Style=\"{StaticResource ColorSwatchButton}\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Style=\"{StaticResource ValueBadge}\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("ControlTemplate TargetType=\"TextBox\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("ControlTemplate TargetType=\"CheckBox\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("ControlTemplate TargetType=\"Slider\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("IsReadOnly=\"True\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("GotKeyboardFocus=\"ShortcutTextBox_GotKeyboardFocus\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("LostKeyboardFocus=\"ShortcutTextBox_LostKeyboardFocus\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Text=\"{Binding CaptureRegionHotkeyDisplay, Mode=OneWay}\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Click=\"PickColor_Click\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Fill=\"{Binding Palette1Brush}\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Text=\"{Binding Palette1}\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Fill=\"{Binding CanvasExtensionBackgroundBrush}\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Text=\"{Binding CanvasExtensionBackgroundHex}\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("ElementName=CaptureDelaySlider", xaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("<TextBox AutomationProperties.AutomationId=\"Palette1\"", xaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("Text=\"Canvas extension background hex\"", xaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("AutomationProperties.AutomationId=\"SavePreferences\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("github.com/kubre/scrcap", xaml, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -81,7 +116,7 @@ public sealed class PreferencesImplementationTests
     }
 
     [Fact]
-    public void PreferencesSaveWritesJsonAndReopenedStoreLoadsChangedSettingPerEditableTab()
+    public void PreferencesChangesPersistImmediatelyAndReopenFromDisk()
     {
         using var temp = new TempDirectory();
         var store = new SettingsStore(temp.Path);
@@ -100,7 +135,6 @@ public sealed class PreferencesImplementationTests
         };
 
         Assert.True(viewModel.RecordShortcut(AppAction.CaptureDelayed, Key.D7, ModifierKeys.Control | ModifierKeys.Shift));
-        Assert.True(viewModel.Save());
 
         var settingsPath = System.IO.Path.Combine(temp.Path, "settings.json");
         Assert.True(File.Exists(settingsPath));
@@ -125,6 +159,23 @@ public sealed class PreferencesImplementationTests
     }
 
     [Fact]
+    public void ColorPickerUpdatesEditorColorsAsNormalizedHex()
+    {
+        using var temp = new TempDirectory();
+        var store = new SettingsStore(temp.Path);
+        var viewModel = new PreferencesViewModel(store);
+
+        Assert.True(viewModel.SetColor(nameof(viewModel.Palette1), "0a84ff"));
+        Assert.True(viewModel.SetColor(nameof(viewModel.CanvasExtensionBackgroundHex), "#112233"));
+        Assert.False(viewModel.SetColor(nameof(viewModel.Palette2), "not-a-color"));
+
+        var reopened = new PreferencesViewModel(new SettingsStore(temp.Path));
+        Assert.Equal("#0A84FF", reopened.Palette1);
+        Assert.Equal("#112233", reopened.CanvasExtensionBackgroundHex);
+        Assert.Equal(Settings.DefaultPalette[1], reopened.Palette2);
+    }
+
+    [Fact]
     public void PreferencesResetDefaultsRestoresEditableTabsAndPersistsDefaults()
     {
         using var temp = new TempDirectory();
@@ -142,7 +193,6 @@ public sealed class PreferencesImplementationTests
         Assert.True(viewModel.RecordShortcut(AppAction.CaptureRegion, Key.D8, ModifierKeys.Control | ModifierKeys.Shift));
 
         viewModel.ResetAll();
-        Assert.True(viewModel.Save());
 
         var defaults = Settings.Defaults();
         var reopened = new PreferencesViewModel(new SettingsStore(temp.Path));
@@ -157,18 +207,61 @@ public sealed class PreferencesImplementationTests
     }
 
     [Fact]
+    public void LaunchAtLoginFailureIsSurfacedAndDoesNotPersistToggle()
+    {
+        using var temp = new TempDirectory();
+        var launch = new FakeLaunchAtLoginService
+        {
+            NextResult = LaunchAtLoginResult.Failure("Startup folder is read-only."),
+        };
+        var viewModel = new PreferencesViewModel(new SettingsStore(temp.Path), launch);
+
+        viewModel.LaunchAtLogin = true;
+
+        Assert.False(viewModel.LaunchAtLogin);
+        Assert.Contains("Startup folder is read-only", viewModel.LastError, StringComparison.Ordinal);
+        Assert.False(new SettingsStore(temp.Path).Settings.LaunchAtLogin);
+    }
+
+    [Fact]
+    public async Task UpdateCheckReportsAvailableReleaseAndRealRepositoryLink()
+    {
+        using var temp = new TempDirectory();
+        var release = new GitHubRelease("v99.0.0", "scrcap 99", new Uri("https://github.com/kubre/scrcap/releases/tag/v99.0.0"));
+        var viewModel = new PreferencesViewModel(
+            new SettingsStore(temp.Path),
+            new FakeLaunchAtLoginService(),
+            new FakeUpdateChecker(new UpdateCheckResult(UpdateAvailability.Available, "1.0.0", release)));
+
+        await viewModel.CheckForUpdatesAsync();
+
+        Assert.Equal("https://github.com/kubre/scrcap", viewModel.SourceLink);
+        Assert.True(viewModel.HasLatestRelease);
+        Assert.Equal(release.HtmlUrl, viewModel.LatestReleaseUrl);
+        Assert.Contains("v99.0.0 is available", viewModel.UpdateStatus, StringComparison.Ordinal);
+        Assert.Null(viewModel.LastError);
+    }
+
+    [Fact]
     public void ShortcutRecorderStoresUsableChordAndClearsConflict()
     {
         using var temp = new TempDirectory();
         var store = new SettingsStore(temp.Path);
         var viewModel = new PreferencesViewModel(store);
 
+        viewModel.BeginShortcutRecording(AppAction.CaptureRegion);
+        Assert.Equal("Recording...", viewModel.CaptureRegionHotkeyDisplay);
+        Assert.Contains("Recording Capture Region shortcut", viewModel.ShortcutRecorderStatus, StringComparison.Ordinal);
+
         Assert.True(viewModel.RecordShortcut(AppAction.CaptureRegion, Key.D6, ModifierKeys.Control | ModifierKeys.Shift));
         Assert.Equal("ctrl+shift+6", viewModel.CaptureRegionHotkey);
+        Assert.Equal("Ctrl+Shift+6", viewModel.CaptureRegionHotkeyDisplay);
 
         Assert.True(viewModel.RecordShortcut(AppAction.CaptureWindow, Key.D6, ModifierKeys.Control | ModifierKeys.Shift));
         Assert.Empty(viewModel.CaptureRegionHotkey);
+        Assert.Empty(viewModel.CaptureRegionHotkeyDisplay);
         Assert.Equal("ctrl+shift+6", viewModel.CaptureWindowHotkey);
+        Assert.Equal("Ctrl+Shift+6", viewModel.CaptureWindowHotkeyDisplay);
         Assert.Contains("Capture Region was cleared", viewModel.ShortcutRecorderStatus, StringComparison.Ordinal);
     }
 
@@ -180,10 +273,14 @@ public sealed class PreferencesImplementationTests
         var viewModel = new PreferencesViewModel(store);
         var original = viewModel.CaptureWindowHotkey;
 
+        viewModel.BeginShortcutRecording(AppAction.CaptureWindow);
         Assert.False(viewModel.RecordShortcut(AppAction.CaptureWindow, Key.F4, ModifierKeys.Alt));
 
         Assert.Equal(original, viewModel.CaptureWindowHotkey);
+        Assert.Equal("Recording...", viewModel.CaptureWindowHotkeyDisplay);
         Assert.Contains("reserved by Windows", viewModel.ShortcutRecorderStatus, StringComparison.Ordinal);
+        viewModel.EndShortcutRecording(AppAction.CaptureWindow);
+        Assert.NotEqual("Recording...", viewModel.CaptureWindowHotkeyDisplay);
     }
 
     [Fact]
@@ -320,5 +417,30 @@ public sealed class PreferencesImplementationTests
                 // Best-effort test cleanup.
             }
         }
+    }
+
+    private sealed class FakeLaunchAtLoginService : ILaunchAtLoginService
+    {
+        public bool Enabled { get; private set; }
+
+        public LaunchAtLoginResult NextResult { get; set; } = LaunchAtLoginResult.Success;
+
+        public bool IsEnabled() => Enabled;
+
+        public LaunchAtLoginResult SetEnabled(bool enabled, string? executablePath = null)
+        {
+            if (NextResult.Succeeded)
+            {
+                Enabled = enabled;
+            }
+
+            return NextResult;
+        }
+    }
+
+    private sealed class FakeUpdateChecker(UpdateCheckResult result) : IUpdateChecker
+    {
+        public Task<UpdateCheckResult> CheckAsync(string currentVersion, CancellationToken cancellationToken = default) =>
+            Task.FromResult(result with { CurrentVersion = currentVersion });
     }
 }

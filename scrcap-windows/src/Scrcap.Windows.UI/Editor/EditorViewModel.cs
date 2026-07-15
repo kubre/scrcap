@@ -12,6 +12,8 @@ public sealed class EditorViewModel : INotifyPropertyChanged
     private int colorIndex;
     private ShapeSize activeSize = ShapeSize.Small;
     private double zoom = 1;
+    private double panOffsetX;
+    private double panOffsetY;
     private string pendingText = "Text";
     private bool hasSource;
 
@@ -24,7 +26,7 @@ public sealed class EditorViewModel : INotifyPropertyChanged
         ActiveSize = ShapeSize.Small;
     }
 
-    public Settings Settings { get; }
+    public Settings Settings { get; private set; }
 
     public AnnotationDocument? Document { get; private set; }
 
@@ -100,6 +102,18 @@ public sealed class EditorViewModel : INotifyPropertyChanged
 
     public string ZoomPercent => $"{Math.Round(Zoom * 100):0}%";
 
+    public double PanOffsetX
+    {
+        get => panOffsetX;
+        private set => Set(ref panOffsetX, value);
+    }
+
+    public double PanOffsetY
+    {
+        get => panOffsetY;
+        private set => Set(ref panOffsetY, value);
+    }
+
     public string DoneText => Settings.EscBehavior == EscBehavior.CopyAndClose ? "Copy & Close" : "Close";
 
     public string PendingText
@@ -163,6 +177,25 @@ public sealed class EditorViewModel : INotifyPropertyChanged
     {
         Document = new AnnotationDocument(width, height);
         HasSource = true;
+        RefreshPaletteBrushes();
+
+        OnDocumentChanged();
+    }
+
+    public void ApplySettings(Settings settings)
+    {
+        Settings = settings ?? throw new ArgumentNullException(nameof(settings));
+        ColorIndex = Math.Clamp(ColorIndex, 0, Settings.PaletteSlotCount - 1);
+        RefreshPaletteBrushes();
+        OnPropertyChanged(nameof(DoneText));
+        OnPropertyChanged(nameof(Palette));
+        OnPropertyChanged(nameof(PaletteBrushes));
+        OnPropertyChanged(nameof(ActiveColor));
+        OnPropertyChanged(nameof(StrokeWidth));
+    }
+
+    private void RefreshPaletteBrushes()
+    {
         PaletteBrushes = Settings.PaletteHex
             .Take(Settings.PaletteSlotCount)
             .Select(hex => (WpfBrush)new WpfSolidColorBrush((System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString(hex)))
@@ -171,8 +204,6 @@ public sealed class EditorViewModel : INotifyPropertyChanged
         {
             brush.Freeze();
         }
-
-        OnDocumentChanged();
     }
 
     public void SelectToolByKey(string key)
@@ -231,6 +262,28 @@ public sealed class EditorViewModel : INotifyPropertyChanged
         OnDocumentChanged();
     }
 
+    public void CommitText(CorePoint anchor, string text)
+    {
+        if (Document is null)
+        {
+            return;
+        }
+
+        var value = text.Trim();
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return;
+        }
+
+        Document.AppendShape(new Shape(
+            new ShapeKind.Text(value, Settings.TextSize),
+            ColorIndex,
+            ActiveSize,
+            anchor,
+            anchor));
+        OnDocumentChanged();
+    }
+
     public bool Crop(CoreRect rect)
     {
         if (Document is null || !Document.Crop(rect))
@@ -238,6 +291,18 @@ public sealed class EditorViewModel : INotifyPropertyChanged
             return false;
         }
 
+        OnDocumentChanged();
+        return true;
+    }
+
+    public bool ExpandCanvas(CanvasExpansion expansion)
+    {
+        if (Document is null || !expansion.HasWork)
+        {
+            return false;
+        }
+
+        Document.ExpandCanvas(expansion);
         OnDocumentChanged();
         return true;
     }
@@ -264,22 +329,69 @@ public sealed class EditorViewModel : INotifyPropertyChanged
         return true;
     }
 
-    public void ZoomIn() => Zoom = NextZoom(+1);
+    public void ZoomIn() => SetZoomKeepingViewport(NextZoom(+1));
 
-    public void ZoomOut() => Zoom = NextZoom(-1);
+    public void ZoomOut() => SetZoomKeepingViewport(NextZoom(-1));
 
-    public void ResetZoom() => Zoom = 1;
+    public void ResetZoom()
+    {
+        SetZoomKeepingViewport(1);
+        ResetPan();
+    }
 
     public void FitZoom(double viewportWidth, double viewportHeight)
     {
         if (Document is null || viewportWidth <= 0 || viewportHeight <= 0)
         {
             Zoom = 1;
+            ResetPan();
             return;
         }
 
         var fit = Math.Min(viewportWidth * 0.9 / Document.Size.Width, viewportHeight * 0.9 / Document.Size.Height);
         Zoom = fit >= 1 ? 1 : fit;
+        ResetPan();
+    }
+
+    public void PanBy(double deltaX, double deltaY)
+    {
+        PanOffsetX += deltaX;
+        PanOffsetY += deltaY;
+    }
+
+    public void SetPan(double offsetX, double offsetY)
+    {
+        PanOffsetX = offsetX;
+        PanOffsetY = offsetY;
+    }
+
+    public void ResetPan() => SetPan(0, 0);
+
+    public void ZoomAt(int direction, double viewportX, double viewportY, double viewportWidth, double viewportHeight)
+    {
+        if (Document is null || viewportWidth <= 0 || viewportHeight <= 0)
+        {
+            SetZoomKeepingViewport(NextZoom(direction));
+            return;
+        }
+
+        var oldZoom = Zoom;
+        var nextZoom = NextZoom(direction);
+        if (Math.Abs(nextZoom - oldZoom) < 0.001)
+        {
+            return;
+        }
+
+        var oldImageX = ImageOriginX(Document.Size.Width, viewportWidth, oldZoom, PanOffsetX);
+        var oldImageY = ImageOriginY(Document.Size.Height, viewportHeight, oldZoom, PanOffsetY);
+        var imageX = (viewportX - oldImageX) / oldZoom;
+        var imageY = (viewportY - oldImageY) / oldZoom;
+
+        Zoom = nextZoom;
+
+        var centeredX = Math.Max(0, (viewportWidth - Document.Size.Width * nextZoom) / 2);
+        var centeredY = Math.Max(0, (viewportHeight - Document.Size.Height * nextZoom) / 2);
+        SetPan(viewportX - imageX * nextZoom - centeredX, viewportY - imageY * nextZoom - centeredY);
     }
 
     private double NextZoom(int direction)
@@ -301,6 +413,14 @@ public sealed class EditorViewModel : INotifyPropertyChanged
         ZoomSteps.OrderBy(step => Math.Abs(step - value)).First();
 
     private static double[] ZoomSteps { get; } = [0.25, 0.33, 0.5, 0.67, 0.75, 1, 1.25, 1.5, 2, 3, 4];
+
+    private void SetZoomKeepingViewport(double value) => Zoom = value;
+
+    private static double ImageOriginX(double documentWidth, double viewportWidth, double zoom, double panOffsetX) =>
+        Math.Max(0, (viewportWidth - documentWidth * zoom) / 2) + panOffsetX;
+
+    private static double ImageOriginY(double documentHeight, double viewportHeight, double zoom, double panOffsetY) =>
+        Math.Max(0, (viewportHeight - documentHeight * zoom) / 2) + panOffsetY;
 
     private void OnDocumentChanged()
     {

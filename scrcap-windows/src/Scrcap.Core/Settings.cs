@@ -112,6 +112,8 @@ public sealed class Settings
 
     public bool SuppressCopyNotification { get; set; }
 
+    public bool HasShownFirstLaunchNotice { get; set; }
+
     public int ResolvedExportScale => ExportScale == 1 ? 1 : 2;
 
     public static Settings Defaults()
@@ -254,6 +256,12 @@ public sealed class SettingsStore
 
     public Settings Settings { get; private set; }
 
+    /// <summary>
+    /// Raised after a settings update has been normalized, written atomically,
+    /// and installed as the new in-memory source of truth.
+    /// </summary>
+    public event EventHandler? SettingsChanged;
+
     public static string DefaultDirectory() =>
         Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
@@ -271,6 +279,7 @@ public sealed class SettingsStore
         }
 
         Settings = next;
+        SettingsChanged?.Invoke(this, EventArgs.Empty);
         return true;
     }
 

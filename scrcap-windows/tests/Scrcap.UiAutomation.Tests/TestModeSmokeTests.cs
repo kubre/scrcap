@@ -14,9 +14,10 @@ public sealed class TestModeSmokeTests
         using var temp = new TempDirectory();
         RunDump(appDll, temp.Path, "editor-light.png", "light", openPreferences: false);
         RunDump(appDll, temp.Path, "preferences-dark.png", "dark", openPreferences: true);
+        RunDump(appDll, temp.Path, "onboarding-light.png", "light", openOnboarding: true);
     }
 
-    private static void RunDump(string appDll, string tempRoot, string fileName, string theme, bool openPreferences)
+    private static void RunDump(string appDll, string tempRoot, string fileName, string theme, bool openPreferences = false, bool openOnboarding = false)
     {
         var settingsDir = Path.Combine(tempRoot, Path.GetFileNameWithoutExtension(fileName) + "-settings");
         Directory.CreateDirectory(settingsDir);
@@ -33,6 +34,11 @@ public sealed class TestModeSmokeTests
         if (openPreferences)
         {
             startInfo.ArgumentList.Add("--open-preferences");
+        }
+
+        if (openOnboarding)
+        {
+            startInfo.ArgumentList.Add("--open-onboarding");
         }
 
         startInfo.ArgumentList.Add("--dump-window-png");
