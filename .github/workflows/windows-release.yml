@@ -1,0 +1,56 @@
+name: Windows release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release-windows:
+    runs-on: windows-latest
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Test and publish self-contained Windows build
+        shell: powershell
+        working-directory: scrcap-windows
+        run: .\tools\Test-ReleaseGuardrails.ps1 -PublishMode self-contained
+
+      - name: Package Windows release
+        id: package
+        shell: powershell
+        run: |
+          $tag = "${{ github.ref_name }}"
+          $releaseRoot = Join-Path $PWD "scrcap-windows\artifacts\scrcap-windows-self-contained"
+          $zipPath = Join-Path $PWD "scrcap-windows\artifacts\scrcap-$tag-windows-x64.zip"
+          $checksumPath = "$zipPath.sha256"
+
+          Compress-Archive -Path (Join-Path $releaseRoot "*") -DestinationPath $zipPath -CompressionLevel Optimal
+          $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $zipPath).Hash.ToLowerInvariant()
+          "$hash  $(Split-Path -Leaf $zipPath)" | Set-Content -LiteralPath $checksumPath -Encoding ascii
+
+          "zip_path=$zipPath" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "checksum_path=$checksumPath" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+
+      - name: Create GitHub release
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ github.ref_name }}" `
+            "${{ steps.package.outputs.zip_path }}" `
+            "${{ steps.package.outputs.checksum_path }}" `
+            --repo "${{ github.repository }}" `
+            --title "scrcap ${{ github.ref_name }}" `
+            --generate-notes `
+            --verify-tag
