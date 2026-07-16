@@ -32,8 +32,8 @@ Requires macOS 14+.
 3. Drag `scrcap.app` to `Applications`.
 4. Open `scrcap` from Applications.
 
-Because scrcap is not notarized by Apple yet, macOS may show **"scrcap" Not
-Opened** the first time. If that happens:
+Older or explicitly unnotarized builds may show **"scrcap" Not Opened** the
+first time. If that happens:
 
 1. Click **Done**.
 2. Open **System Settings**.
@@ -72,12 +72,19 @@ because ad-hoc signing makes macOS treat every rebuild as a new app, forcing
 you to re-grant Screen Recording. For a throwaway build only, run
 `SCRCAP_ALLOW_ADHOC=1 scripts/make_app.sh`.
 
-For manual release packaging, build from an exact version tag or pass
-`SCRCAP_VERSION`:
+For a trusted manual release, store App Store Connect credentials once and
+build with a Developer ID identity:
 
 ```sh
+xcrun notarytool store-credentials scrcap-notary
+CODESIGN_IDENTITY="Developer ID Application: Your Name (TEAMID)" \
+SCRCAP_NOTARY_PROFILE=scrcap-notary \
 SCRCAP_VERSION=1.0.0 scripts/make_app.sh --prod
 ```
+
+For an intentional unnotarized release, add
+`SCRCAP_ALLOW_UNNOTARIZED=1`. Development builds continue to use the local
+`scrcap-dev` identity.
 
 `--prod` creates a fresh `dist/` containing only:
 
@@ -94,7 +101,9 @@ To publish a GitHub Release manually, create a version tag and upload
 
 ```sh
 git tag v1.0.0
-SCRCAP_VERSION=1.0.0 scripts/make_app.sh --prod
+CODESIGN_IDENTITY="Developer ID Application: Your Name (TEAMID)" \
+SCRCAP_NOTARY_PROFILE=scrcap-notary \
+scripts/make_app.sh --prod
 ```
 
 ## Default hotkeys (all remappable in Preferences → Shortcuts)

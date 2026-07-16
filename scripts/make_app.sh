@@ -3,10 +3,9 @@
 # also create release zip and DMG artifacts for manual publishing.
 # Usage: scripts/make_app.sh [--prod] [output-dir]   (default: ./dist)
 #
-# Signing: uses $CODESIGN_IDENTITY if set; otherwise auto-detects the
-# "scrcap-dev" self-signed identity. Stable signing is required so TCC
-# permissions survive rebuilds. Set SCRCAP_ALLOW_ADHOC=1 only for throwaway
-# builds that are expected to need fresh permissions.
+# Development builds use $CODESIGN_IDENTITY or the local "scrcap-dev"
+# identity. Production builds require Developer ID + notarization unless
+# SCRCAP_ALLOW_UNNOTARIZED=1 is set explicitly.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -66,21 +65,32 @@ if [[ ! "$BUILD_NUMBER" =~ ^[0-9]+$ ]]; then
     exit 1
 fi
 
+if [[ "$OUT" != "dist" && ! "$OUT" =~ ^dist-[A-Za-z0-9._-]+$ ]]; then
+    echo "✗ output must be dist or a dist-* directory name" >&2
+    exit 1
+fi
+OUT="$ROOT/$OUT"
 APP="$OUT/scrcap.app"
 ZIP="$OUT/scrcap-macos.zip"
 DMG="$OUT/scrcap-macos.dmg"
-OUT_PARENT="$(dirname "$OUT")"
-OUT_NAME="$(basename "$OUT")"
-OUT_ABS="$(mkdir -p "$OUT_PARENT" && cd "$OUT_PARENT" && pwd -P)/$OUT_NAME"
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT
 
-case "$OUT_ABS" in
-    "$ROOT"|"$HOME"|"/")
-        echo "✗ refusing to clean unsafe output directory: $OUT_ABS" >&2
+IDENTITY="${CODESIGN_IDENTITY:-}"
+ALLOW_UNNOTARIZED="${SCRCAP_ALLOW_UNNOTARIZED:-}"
+NOTARY_PROFILE="${SCRCAP_NOTARY_PROFILE:-}"
+if [ "$PROD" -eq 1 ] && [ "$ALLOW_UNNOTARIZED" != "1" ]; then
+    if [[ "$IDENTITY" != *"Developer ID Application"* ]]; then
+        echo "✗ production builds require CODESIGN_IDENTITY='Developer ID Application: …'" >&2
+        echo "  For an intentional unnotarized build: SCRCAP_ALLOW_UNNOTARIZED=1" >&2
         exit 1
-        ;;
-esac
+    fi
+    if [ -z "$NOTARY_PROFILE" ]; then
+        echo "✗ production builds require SCRCAP_NOTARY_PROFILE" >&2
+        echo "  Create one with: xcrun notarytool store-credentials <profile>" >&2
+        exit 1
+    fi
+fi
 
 echo "▸ building release (-Osize, whole-module, dead-strip)…"
 swift build -c release \
@@ -124,13 +134,16 @@ PLIST
 
 # A stable signing identity keeps TCC grants across rebuilds; an ad-hoc
 # signature ("-") changes identity every build and resets permissions.
-IDENTITY="${CODESIGN_IDENTITY:-}"
 if [ -z "$IDENTITY" ] && security find-identity -v -p codesigning 2>/dev/null | grep -q "scrcap-dev"; then
     IDENTITY="scrcap-dev"
 fi
 if [ -n "$IDENTITY" ]; then
     echo "▸ signing with identity: $IDENTITY"
-    codesign --force --sign "$IDENTITY" --identifier com.scrcap.app "$APP"
+    SIGN_ARGS=(--force --sign "$IDENTITY" --identifier com.scrcap.app)
+    if [ "$PROD" -eq 1 ] && [ "$ALLOW_UNNOTARIZED" != "1" ]; then
+        SIGN_ARGS+=(--options runtime --timestamp)
+    fi
+    codesign "${SIGN_ARGS[@]}" "$APP"
 elif [ "${SCRCAP_ALLOW_ADHOC:-}" = "1" ]; then
     echo "▸ signing ad-hoc (TCC permissions will reset on rebuild)"
     codesign --force --sign - --identifier com.scrcap.app "$APP"
@@ -140,6 +153,7 @@ else
     echo "  For a throwaway build only: SCRCAP_ALLOW_ADHOC=1 scripts/make_app.sh" >&2
     exit 1
 fi
+codesign --verify --deep --strict --verbose=2 "$APP"
 
 echo "▸ checking release budgets…"
 scripts/check_budgets.sh "$APP"
@@ -151,12 +165,24 @@ if [ "$PROD" -ne 1 ]; then
 fi
 
 echo "▸ creating compressed release zip…"
-rm -f "$ZIP"
-(
-    cd "$OUT"
-    COPYFILE_DISABLE=1 zip -qry -9 "$(basename "$ZIP")" "$(basename "$APP")" \
-        -x "*.DS_Store" "*/.DS_Store" "__MACOSX/*" "*/._*"
-)
+create_zip() {
+    rm -f "$ZIP"
+    (
+        cd "$OUT"
+        COPYFILE_DISABLE=1 zip -qry -9 "$(basename "$ZIP")" "$(basename "$APP")" \
+            -x "*.DS_Store" "*/.DS_Store" "__MACOSX/*" "*/._*"
+    )
+}
+create_zip
+
+if [ "$ALLOW_UNNOTARIZED" = "1" ]; then
+    echo "⚠ production artifact is intentionally unnotarized"
+else
+    echo "▸ notarizing app…"
+    xcrun notarytool submit "$ZIP" --keychain-profile "$NOTARY_PROFILE" --wait
+    xcrun stapler staple "$APP"
+    create_zip
+fi
 
 if unzip -Z1 "$ZIP" | grep -E '(^|/)(__MACOSX|\.DS_Store|\.build|[^/]*\._|.*\.dSYM(/|$)|.*\.swiftmodule$|.*\.swiftdoc$|.*\.swiftinterface$|.*\.o$|.*\.a$|.*\.pcm$)' >/dev/null; then
     echo "✗ release zip FAIL: $ZIP contains development files" >&2
@@ -176,6 +202,15 @@ hdiutil create -quiet \
     -format UDZO \
     -imagekey zlib-level=9 \
     "$DMG"
+
+if [ "$ALLOW_UNNOTARIZED" != "1" ]; then
+    echo "▸ notarizing DMG…"
+    xcrun notarytool submit "$DMG" --keychain-profile "$NOTARY_PROFILE" --wait
+    xcrun stapler staple "$DMG"
+    xcrun stapler validate "$APP"
+    xcrun stapler validate "$DMG"
+    spctl --assess --type execute --verbose=2 "$APP"
+fi
 
 echo "✓ $APP"
 echo "✓ $ZIP ($(du -sh "$ZIP" | cut -f1))"
