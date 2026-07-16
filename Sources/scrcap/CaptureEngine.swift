@@ -78,7 +78,7 @@ final class CaptureEngine: CaptureProviding {
         guard let display = content.displays.first(where: { $0.displayID == displayID }) else {
             throw CaptureError.displayNotFound
         }
-        let sourceRect = GeometryMapper.cgRect(fromCocoa: rect, on: screen)
+        let sourceRect = GeometryMapper.displayLocalRect(fromCocoa: rect, on: screen)
             .intersection(CGRect(origin: .zero, size: screen.frame.size))
         guard !sourceRect.isEmpty else {
             throw CaptureError.cropFailed

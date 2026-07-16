@@ -61,7 +61,7 @@ public struct Settings: Codable, Equatable, Sendable {
     public var hotkeys: [String: String]
     /// CaptureMode.rawValue → behavior.
     public var afterCapture: [String: AfterCaptureBehavior]
-    /// 7 palette slots as #RRGGBB. Slot 0 is the boot default (red).
+    /// 5 palette slots as #RRGGBB. Slot 0 is the boot default (red).
     public var paletteHex: [String]
     public var escBehavior: EscBehavior
     public var strokeWidth: Double

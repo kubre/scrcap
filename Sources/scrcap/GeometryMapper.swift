@@ -4,30 +4,32 @@
 import AppKit
 
 enum GeometryMapper {
-    static func cgRect(fromCocoa rect: NSRect) -> CGRect {
-        cgRect(fromCocoa: rect, on: screenUnderMouse())
-    }
-
-    /// Backward-compatible overload for any callers that don't have an NSScreen
-    /// handy. Uses the screen under the mouse, which is the prior default.
-    static func cocoaRect(fromCG rect: CGRect) -> NSRect {
-        cocoaRect(fromCG: rect, on: screenUnderMouse())
-    }
-
-    /// Cocoa global rect → CG global rect (top-left origin).
-    static func cgRect(fromCocoa rect: NSRect, on screen: NSScreen) -> CGRect {
-        CGRect(
-            x: rect.minX - screen.frame.minX,
-            y: screen.frame.maxY - rect.maxY,
+    /// Cocoa global rect → Quartz global rect (top-left origin).
+    static func quartzGlobalRect(fromCocoa rect: NSRect) -> CGRect {
+        let top = NSScreen.screens.first(where: { displayID(of: $0) == CGMainDisplayID() })?.frame.maxY ?? 0
+        return CGRect(
+            x: rect.minX,
+            y: top - rect.maxY,
             width: rect.width,
             height: rect.height
         )
     }
 
-    /// CG global rect → Cocoa global rect.
-    static func cocoaRect(fromCG rect: CGRect, on screen: NSScreen) -> NSRect {
-        NSRect(
-            x: rect.minX + screen.frame.minX,
+    /// Quartz global rect → Cocoa global rect.
+    static func cocoaGlobalRect(fromQuartz rect: CGRect) -> NSRect {
+        let top = NSScreen.screens.first(where: { displayID(of: $0) == CGMainDisplayID() })?.frame.maxY ?? 0
+        return NSRect(
+            x: rect.minX,
+            y: top - rect.maxY,
+            width: rect.width,
+            height: rect.height
+        )
+    }
+
+    /// Cocoa global rect expressed in display-local ScreenCaptureKit points.
+    static func displayLocalRect(fromCocoa rect: NSRect, on screen: NSScreen) -> CGRect {
+        CGRect(
+            x: rect.minX - screen.frame.minX,
             y: screen.frame.maxY - rect.maxY,
             width: rect.width,
             height: rect.height

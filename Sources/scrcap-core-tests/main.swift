@@ -437,6 +437,18 @@ test("tolerance allows small noise") {
     checkEqual(alignment, .init(newContentStart: 60))
 }
 
+test("perceptual alignment tolerates rerasterized rows") {
+    func signature(_ row: Int, noise: Int = 0) -> StitchEngine.RowSignature {
+        StitchEngine.RowSignature(bins: (0..<32).map { bucket in
+            UInt8(min(255, 24 + ((row * 37 + bucket * 11) % 200) + noise))
+        })
+    }
+    let accumulated = (0..<100).map { signature($0) }
+    let frame = (40..<140).map { signature($0, noise: $0 < 100 ? 2 : 0) }
+    let alignment = StitchEngine.align(accumulated: accumulated, frame: frame)
+    checkEqual(alignment, .init(newContentStart: 60))
+}
+
 test("fixedEdges detects sticky header") {
     let header = docRows(9000..<9010)
     let frames = [
@@ -541,6 +553,14 @@ test("safeFilenameStem all-invalid input returns scrcap") {
 
 test("safeFilenameStem trims interior whitespace segments") {
     checkEqual(FilenameGenerator.safeFilenameStem("foo  /  bar"), "foo-bar")
+}
+
+test("available filename advances past collisions") {
+    let existing = Set(["scrcap.png", "scrcap-2.png"])
+    checkEqual(
+        FilenameGenerator.availableFilename("scrcap.png", exists: existing.contains),
+        "scrcap-3.png"
+    )
 }
 
 TestRun.shared.finish()

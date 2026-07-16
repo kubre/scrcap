@@ -8,15 +8,23 @@ import AppKit
 final class CountdownController {
     private var window: NSWindow?
     private var timer: Timer?
-    private var escMonitor: Any?
+    private var localEscMonitor: Any?
+    private var globalEscMonitor: Any?
     private var remaining = 0
     private var onFire: (() -> Void)?
+    private var onCancel: (() -> Void)?
 
     /// Counts down `seconds` over `screen`, then fires `completion`. Esc cancels.
-    func start(seconds: Int, on screen: NSScreen, completion: @escaping () -> Void) {
+    func start(
+        seconds: Int,
+        on screen: NSScreen,
+        onCancel: (() -> Void)? = nil,
+        completion: @escaping () -> Void
+    ) {
         cancel()
         remaining = max(1, seconds)
         onFire = completion
+        self.onCancel = onCancel
 
         let view = CountdownView(frame: NSRect(origin: .zero, size: screen.frame.size))
         view.value = remaining
@@ -36,9 +44,13 @@ final class CountdownController {
         win.orderFrontRegardless()
         window = win
 
-        escMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+        localEscMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             if event.keyCode == 53 { self?.cancel(); return nil } // Esc
             return event
+        }
+        globalEscMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard event.keyCode == 53 else { return }
+            DispatchQueue.main.async { self?.cancel() }
         }
 
         timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
@@ -50,7 +62,7 @@ final class CountdownController {
         remaining -= 1
         if remaining <= 0 {
             let fire = onFire
-            teardown()
+            teardown(cancelled: false)
             // Let the window fully disappear before the capture reads the screen.
             DispatchQueue.main.async { fire?() }
             return
@@ -59,17 +71,22 @@ final class CountdownController {
     }
 
     func cancel() {
-        teardown()
+        teardown(cancelled: true)
     }
 
-    private func teardown() {
+    private func teardown(cancelled: Bool) {
+        let cancellation = cancelled ? onCancel : nil
         timer?.invalidate()
         timer = nil
-        if let escMonitor { NSEvent.removeMonitor(escMonitor) }
-        escMonitor = nil
+        if let localEscMonitor { NSEvent.removeMonitor(localEscMonitor) }
+        localEscMonitor = nil
+        if let globalEscMonitor { NSEvent.removeMonitor(globalEscMonitor) }
+        globalEscMonitor = nil
         window?.orderOut(nil)
         window = nil
         onFire = nil
+        onCancel = nil
+        cancellation?()
     }
 }
 

@@ -29,4 +29,23 @@ public enum FilenameGenerator {
         let stem = parts.joined(separator: "-")
         return stem.isEmpty ? "scrcap" : stem
     }
+
+    /// Returns `filename`, then `filename-2.ext`, `filename-3.ext`, and so on
+    /// until the supplied existence check reports a free name.
+    public static func availableFilename(
+        _ filename: String,
+        exists: (String) -> Bool
+    ) -> String {
+        guard exists(filename) else { return filename }
+
+        let name = filename as NSString
+        let stem = name.deletingPathExtension
+        let ext = name.pathExtension
+        var suffix = 2
+        while true {
+            let candidate = ext.isEmpty ? "\(stem)-\(suffix)" : "\(stem)-\(suffix).\(ext)"
+            if !exists(candidate) { return candidate }
+            suffix += 1
+        }
+    }
 }

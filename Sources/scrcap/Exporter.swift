@@ -21,6 +21,10 @@ enum ExportError: LocalizedError {
 }
 
 enum Exporter {
+    private static let dragDirectoryName = "scrcap-drag"
+    private static let dragDirectoryLock = NSLock()
+    private static var preparedDragDirectory: URL?
+
     /// Flattens the bitmap and annotation vectors into a single CGImage at
     /// the image's native pixel scale (capture at 2×, annotate in points,
     /// export at 2×).
@@ -162,6 +166,32 @@ enum Exporter {
         try png.write(to: url, options: .atomic)
     }
 
+    /// Writes without replacing an existing file. The exclusive write closes
+    /// the small race between choosing a name and creating it.
+    static func writeUniquePNG(
+        _ image: CGImage,
+        pointScale: CGFloat,
+        directory: URL,
+        filename: String
+    ) throws -> URL {
+        guard let png = pngData(image, pointScale: pointScale) else { throw ExportError.pngEncodeFailed }
+        let fileManager = FileManager.default
+        var reservedNames = Set<String>()
+
+        while true {
+            let candidateName = FilenameGenerator.availableFilename(filename) { name in
+                reservedNames.contains(name) || fileManager.fileExists(atPath: directory.appendingPathComponent(name).path)
+            }
+            let url = directory.appendingPathComponent(candidateName)
+            do {
+                try png.write(to: url, options: [.atomic, .withoutOverwriting])
+                return url
+            } catch CocoaError.fileWriteFileExists {
+                reservedNames.insert(candidateName)
+            }
+        }
+    }
+
     /// Expands {date} and {time} tokens, e.g. "scrcap-2026-06-11-14.32.05".
     static func filename(pattern: String, now: Date = Date()) -> String {
         FilenameGenerator.filename(pattern: pattern, now: now)
@@ -178,29 +208,33 @@ enum Exporter {
 
     /// Temp PNG used as the payload for drag-out.
     static func tempFileForDrag(_ image: CGImage, pattern: String, pointScale: CGFloat) -> URL? {
-        let dir = FileManager.default.temporaryDirectory
-            .appendingPathComponent("scrcap-drag", isDirectory: true)
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        cleanOldDragFiles(in: dir)
+        let dir = prepareDragDirectory()
 
         let stem = (filename(pattern: pattern) as NSString).deletingPathExtension
         let url = dir.appendingPathComponent("\(stem)-\(UUID().uuidString).png")
         return (try? writePNG(image, pointScale: pointScale, to: url)) != nil ? url : nil
     }
 
-    private static func cleanOldDragFiles(in dir: URL) {
-        guard let files = try? FileManager.default.contentsOfDirectory(
-            at: dir,
-            includingPropertiesForKeys: [.contentModificationDateKey],
-            options: [.skipsHiddenFiles]
-        ) else { return }
+    /// Called when the first editor is created. Leftovers from a terminated
+    /// drag are removed once, while files from other open editors stay intact.
+    @discardableResult
+    static func prepareDragDirectory() -> URL {
+        dragDirectoryLock.lock()
+        defer { dragDirectoryLock.unlock() }
+        if let preparedDragDirectory { return preparedDragDirectory }
 
-        let cutoff = Date().addingTimeInterval(-24 * 60 * 60)
-        for file in files {
-            let values = try? file.resourceValues(forKeys: [.contentModificationDateKey])
-            if (values?.contentModificationDate ?? .distantPast) < cutoff {
-                try? FileManager.default.removeItem(at: file)
-            }
+        let fileManager = FileManager.default
+        let dir = fileManager.temporaryDirectory.appendingPathComponent(dragDirectoryName, isDirectory: true)
+        try? fileManager.createDirectory(
+            at: dir,
+            withIntermediateDirectories: true,
+            attributes: [.posixPermissions: 0o700]
+        )
+        try? fileManager.setAttributes([.posixPermissions: 0o700], ofItemAtPath: dir.path)
+        if let files = try? fileManager.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil) {
+            for file in files { try? fileManager.removeItem(at: file) }
         }
+        preparedDragDirectory = dir
+        return dir
     }
 }

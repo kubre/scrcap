@@ -121,8 +121,7 @@ final class OverlayController {
             guard cgRect.isUsableWindowRect else { return nil }
             let owner = entry[kCGWindowOwnerName as String] as? String ?? ""
             let name = entry[kCGWindowName as String] as? String ?? ""
-            let windowScreen = GeometryMapper.screen(containing: NSPoint(x: cgRect.midX, y: cgRect.midY))
-            let frame = GeometryMapper.cocoaRect(fromCG: cgRect, on: windowScreen)
+            let frame = GeometryMapper.cocoaGlobalRect(fromQuartz: cgRect)
             guard frame.isUsableWindowRect else { return nil }
             return PickableWindow(
                 windowID: id,

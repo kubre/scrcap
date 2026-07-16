@@ -6,8 +6,27 @@ import AppKit
 import ApplicationServices
 import ScrcapCore
 
+enum ScrollingCaptureError: LocalizedError {
+    case accessibilityPermissionRequired
+    case noMovement
+    case couldNotAlign
+
+    var errorDescription: String? {
+        switch self {
+        case .accessibilityPermissionRequired:
+            return "Accessibility permission was requested. Enable scrcap in System Settings, then try Scrolling Capture again."
+        case .noMovement:
+            return "The selected area did not scroll. Select the scrollable content area and make sure scrcap has Accessibility permission."
+        case .couldNotAlign:
+            return "The page scrolled, but its frames could not be aligned. Try a tighter selection around the scrolling content."
+        }
+    }
+}
+
 final class ScrollCaptureController {
     private static let maxAccumulatedPixelBytes = 256 * 1024 * 1024
+    private static let scrollPulseCount = 2
+    private static let scrollLinesPerPulse: Int32 = -4
 
     private let capture: CaptureProviding
     private let settingsStore: SettingsStore
@@ -16,6 +35,7 @@ final class ScrollCaptureController {
     private var progressPanel: NSPanel?
     private var progressLabel: NSTextField?
     private var escMonitor: Any?
+    private var localEscMonitor: Any?
 
     init(capture: CaptureProviding, settingsStore: SettingsStore) {
         self.capture = capture
@@ -25,8 +45,7 @@ final class ScrollCaptureController {
     static func ensureAccessibility() -> Bool {
         if AXIsProcessTrusted() { return true }
         let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
-        AXIsProcessTrustedWithOptions(options)
-        return false
+        return AXIsProcessTrustedWithOptions(options)
     }
 
     /// Runs the scroll-and-stitch loop over `rect` and returns the composite,
@@ -34,20 +53,49 @@ final class ScrollCaptureController {
     /// scroll. Calls `completion` on the main thread.
     func run(rect: NSRect, screen: NSScreen, completion: @escaping (Result<CaptureResult, Error>) -> Void) {
         stopped = false
+        if let engine = capture as? CaptureEngine {
+            engine.includeCursor = false
+        }
+        activateTargetApplication(under: NSPoint(x: rect.midX, y: rect.midY))
+
+        let quartzRect = GeometryMapper.quartzGlobalRect(fromCocoa: rect)
+        let scrollLocation = CGPoint(x: quartzRect.midX, y: quartzRect.midY)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
+            self?.start(rect: rect, screen: screen, scrollLocation: scrollLocation, completion: completion)
+        }
+    }
+
+    private func start(
+        rect: NSRect,
+        screen: NSScreen,
+        scrollLocation: CGPoint,
+        completion: @escaping (Result<CaptureResult, Error>) -> Void
+    ) {
         showProgress(on: screen)
 
-        // Cursor must be over the region for scroll events to land there.
-        let cgCenter = GeometryMapper.cgRect(fromCocoa: rect, on: screen)
-        CGWarpMouseCursorPosition(CGPoint(x: cgCenter.midX, y: cgCenter.midY))
+        CGWarpMouseCursorPosition(scrollLocation)
+        if let move = CGEvent(
+            mouseEventSource: nil,
+            mouseType: .mouseMoved,
+            mouseCursorPosition: scrollLocation,
+            mouseButton: .left
+        ) {
+            move.post(tap: .cghidEventTap)
+        }
 
         escMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] event in
             if event.keyCode == 53 { self?.stopped = true }
+        }
+        localEscMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard event.keyCode == 53 else { return event }
+            self?.stopped = true
+            return nil
         }
 
         Task { @MainActor in
             defer { self.teardown() }
             do {
-                let result = try await self.stitchLoop(rect: rect, screen: screen)
+                let result = try await self.stitchLoop(rect: rect, screen: screen, scrollLocation: scrollLocation)
                 completion(.success(result))
             } catch {
                 completion(.failure(error))
@@ -56,76 +104,122 @@ final class ScrollCaptureController {
     }
 
     @MainActor
-    private func stitchLoop(rect: NSRect, screen: NSScreen) async throws -> CaptureResult {
+    private func stitchLoop(rect: NSRect, screen: NSScreen, scrollLocation: CGPoint) async throws -> CaptureResult {
         let scale = screen.backingScaleFactor
-        let scrollStepPoints = Int32(rect.height * 0.7)
 
         let firstCapture = try await capture.captureRegion(rect, on: screen)
-        let first = Self.extractRows(from: firstCapture.image)
+        let first = await Self.extractRowsOffMain(from: firstCapture.image)
         let maxRows = Self.effectiveMaxRows(
             configuredMaxRows: settingsStore.settings.scrollingMaxHeight,
-            initialRows: first.hashes.count,
-            bytesPerRow: first.bytesPerRow
+            initialRows: first.signatures.count,
+            bytesPerRow: first.bytesPerRow,
+            frameBytes: first.bytes.count
         )
         var accumulatedBytes = first.bytes
-        var accumulatedHashes = first.hashes
-        var previousFrameHashes = first.hashes
+        var accumulatedSignatures = first.signatures
+        var previousFullHashes = first.hashes
+        var previousFullSignatures = first.signatures
+        var fixedTopBytes: [UInt8] = []
+        var fixedBottomBytes: [UInt8] = []
+        var fixedTop = 0
+        var fixedBottom = 0
+        var fixedEdgesResolved = false
         let width = first.width
         var consecutiveNoNewRows = 0
+        var appendedAnyRows = false
 
         while !stopped {
-            let remainingRows = maxRows - accumulatedHashes.count
+            let totalRows = fixedTop + accumulatedSignatures.count + fixedBottom
+            let remainingRows = maxRows - totalRows
             guard remainingRows > 0 else { break }
 
-            updateProgress(rows: accumulatedHashes.count)
-            injectScroll(amount: scrollStepPoints)
+            updateProgress(rows: totalRows)
+            await injectScroll(at: scrollLocation)
             try await settle(rect: rect, screen: screen)
             guard !stopped else { break }
 
             var next = try await frame(rect: rect, screen: screen)
             guard next.width == width else { break }
 
-            // Sticky header: rows identical at the same index in consecutive
-            // frames didn't scroll — crop them from this frame before aligning.
-            var fixedTop = 0
-            while fixedTop < next.hashes.count,
-                  fixedTop < previousFrameHashes.count,
-                  next.hashes[fixedTop] == previousFrameHashes[fixedTop] {
-                fixedTop += 1
-            }
-            previousFrameHashes = next.hashes
-            if fixedTop > 0, fixedTop < Int(Double(next.hashes.count) * 0.9) {
-                next.hashes.removeFirst(fixedTop)
-                next.bytes.removeFirst(fixedTop * next.bytesPerRow)
-            } else if fixedTop >= Int(Double(next.hashes.count) * 0.9) {
-                // Nothing moved at all — non-scrollable or bottom.
+            let frameUnchanged = next.hashes == previousFullHashes
+            let edges = await Self.fixedEdgesOffMain(previousFullSignatures, next.signatures)
+            previousFullHashes = next.hashes
+            previousFullSignatures = next.signatures
+            if frameUnchanged {
                 consecutiveNoNewRows += 1
-                if consecutiveNoNewRows >= 2 { break }
+                if consecutiveNoNewRows >= 2 {
+                    if appendedAnyRows { break }
+                    throw ScrollingCaptureError.noMovement
+                }
                 continue
             }
 
-            guard let alignment = StitchEngine.align(accumulated: accumulatedHashes, frame: next.hashes) else {
-                // Content replaced wholesale (e.g. page navigation) — stop
-                // with what we have rather than stitching garbage.
-                break
+            if !fixedEdgesResolved {
+                fixedEdgesResolved = true
+                fixedTop = edges.top
+                fixedBottom = edges.bottom
+                if fixedTop + fixedBottom < first.signatures.count {
+                    fixedTopBytes = Array(first.bytes.prefix(fixedTop * first.bytesPerRow))
+                    fixedBottomBytes = Array(first.bytes.suffix(fixedBottom * first.bytesPerRow))
+                    let bodyStart = fixedTop
+                    let bodyEnd = first.signatures.count - fixedBottom
+                    accumulatedSignatures = Array(first.signatures[bodyStart..<bodyEnd])
+                    accumulatedBytes = Array(first.bytes[(bodyStart * first.bytesPerRow)..<(bodyEnd * first.bytesPerRow)])
+                }
             }
 
-            if alignment.newContentStart >= next.hashes.count {
+            if fixedTop + fixedBottom >= next.signatures.count { continue }
+            if fixedBottom > 0 {
+                fixedBottomBytes = Array(next.bytes.suffix(fixedBottom * next.bytesPerRow))
+            }
+            let bodyEnd = next.signatures.count - fixedBottom
+            next.signatures = Array(next.signatures[fixedTop..<bodyEnd])
+            next.bytes = Array(next.bytes[(fixedTop * next.bytesPerRow)..<(bodyEnd * next.bytesPerRow)])
+
+            var alignment = await Self.alignOffMain(accumulatedSignatures, next.signatures)
+            if alignment == nil {
+                try await Task.sleep(nanoseconds: 180_000_000)
+                var retry = try await frame(rect: rect, screen: screen)
+                if retry.width == width, fixedTop + fixedBottom < retry.signatures.count {
+                    if fixedBottom > 0 {
+                        fixedBottomBytes = Array(retry.bytes.suffix(fixedBottom * retry.bytesPerRow))
+                    }
+                    let retryBodyEnd = retry.signatures.count - fixedBottom
+                    retry.signatures = Array(retry.signatures[fixedTop..<retryBodyEnd])
+                    retry.bytes = Array(
+                        retry.bytes[(fixedTop * retry.bytesPerRow)..<(retryBodyEnd * retry.bytesPerRow)]
+                    )
+                    if let retryAlignment = await Self.alignOffMain(accumulatedSignatures, retry.signatures) {
+                        next = retry
+                        alignment = retryAlignment
+                    }
+                }
+            }
+            guard let alignment else {
+                if appendedAnyRows { break }
+                throw ScrollingCaptureError.couldNotAlign
+            }
+
+            if alignment.newContentStart >= next.signatures.count {
                 consecutiveNoNewRows += 1
                 if consecutiveNoNewRows >= 2 { break } // bottom reached
                 continue
             }
             consecutiveNoNewRows = 0
-            let availableRows = next.hashes.count - alignment.newContentStart
+            let availableRows = next.signatures.count - alignment.newContentStart
             guard availableRows > 0 else { continue }
             let appendedCount = min(availableRows, remainingRows)
             let end = alignment.newContentStart + appendedCount
 
-            accumulatedHashes.append(contentsOf: next.hashes[alignment.newContentStart..<end])
+            accumulatedSignatures.append(contentsOf: next.signatures[alignment.newContentStart..<end])
             let startByte = alignment.newContentStart * next.bytesPerRow
             let endByte = end * next.bytesPerRow
             accumulatedBytes.append(contentsOf: next.bytes[startByte..<endByte])
-            assert(accumulatedHashes.count * first.bytesPerRow == accumulatedBytes.count, "Rows and bytes must stay aligned.")
+            appendedAnyRows = true
+            assert(
+                accumulatedSignatures.count * first.bytesPerRow == accumulatedBytes.count,
+                "Rows and bytes must stay aligned."
+            )
 
             if appendedCount < availableRows {
                 break
@@ -134,10 +228,11 @@ final class ScrollCaptureController {
 
         // Nothing scrolled → hand back the pristine first capture (native
         // color space, no byte-buffer round trip) instead of compositing.
-        if accumulatedHashes.count == first.hashes.count {
+        if !appendedAnyRows {
             return CaptureResult(image: firstCapture.image, scale: scale)
         }
-        let image = try composite(bytes: accumulatedBytes, width: width)
+        let chunks = [fixedTopBytes, accumulatedBytes, fixedBottomBytes]
+        let image = try await Self.compositeOffMain(chunks: chunks, width: width)
         return CaptureResult(image: image, scale: scale)
     }
 
@@ -146,6 +241,7 @@ final class ScrollCaptureController {
     private struct FrameData {
         var bytes: [UInt8]
         var hashes: [UInt64]
+        var signatures: [StitchEngine.RowSignature]
         var width: Int
         var bytesPerRow: Int
     }
@@ -153,41 +249,91 @@ final class ScrollCaptureController {
     @MainActor
     private func frame(rect: NSRect, screen: NSScreen) async throws -> FrameData {
         let result = try await capture.captureRegion(rect, on: screen)
-        return Self.extractRows(from: result.image)
+        return await Self.extractRowsOffMain(from: result.image)
     }
 
-    /// Hashes only — settle polling runs this several times per scroll step,
+    /// Signatures only — settle polling runs this several times per scroll step,
     /// so it must not copy every pixel row the way extractRows does.
     @MainActor
-    private func frameHashes(rect: NSRect, screen: NSScreen) async throws -> [UInt64] {
+    private func frameSignatures(
+        rect: NSRect,
+        screen: NSScreen
+    ) async throws -> [StitchEngine.RowSignature] {
         let result = try await capture.captureRegion(rect, on: screen)
-        return Self.renderRows(from: result.image) { _, rowBytes, hashes in
-            hashes.append(StitchEngine.rowHash(rowBytes))
-        }
+        return await Self.signaturesOffMain(from: result.image)
     }
 
     private static func extractRows(from image: CGImage) -> FrameData {
         let bytesPerRow = image.width * 4
         var bytes: [UInt8] = []
         bytes.reserveCapacity(bytesPerRow * image.height)
-        let hashes = renderRows(from: image) { _, rowBytes, hashes in
+        var hashes: [UInt64] = []
+        let signatures = renderRows(from: image) { _, rowBytes, signatures in
             bytes.append(contentsOf: rowBytes)
             hashes.append(StitchEngine.rowHash(rowBytes))
+            signatures.append(StitchEngine.rowSignature(rowBytes))
         }
-        return FrameData(bytes: bytes, hashes: hashes, width: image.width, bytesPerRow: bytesPerRow)
+        return FrameData(
+            bytes: bytes,
+            hashes: hashes,
+            signatures: signatures,
+            width: image.width,
+            bytesPerRow: bytesPerRow
+        )
     }
 
-    private static func effectiveMaxRows(configuredMaxRows: Int, initialRows: Int, bytesPerRow: Int) -> Int {
+    private static func effectiveMaxRows(
+        configuredMaxRows: Int,
+        initialRows: Int,
+        bytesPerRow: Int,
+        frameBytes: Int
+    ) -> Int {
         guard bytesPerRow > 0 else { return configuredMaxRows }
-        let memoryLimitedRows = max(initialRows, maxAccumulatedPixelBytes / bytesPerRow)
+        // At the peak we can hold a captured frame, extracted frame bytes,
+        // accumulated rows, the final contiguous buffer, and its Data copy.
+        let overhead = min(maxAccumulatedPixelBytes, frameBytes * 2)
+        let outputBudget = max(frameBytes, (maxAccumulatedPixelBytes - overhead) / 3)
+        let memoryLimitedRows = max(initialRows, outputBudget / bytesPerRow)
         return max(initialRows, min(configuredMaxRows, memoryLimitedRows))
     }
 
+    private static func extractRowsOffMain(from image: CGImage) async -> FrameData {
+        await Task.detached(priority: .userInitiated) { extractRows(from: image) }.value
+    }
+
+    private static func signaturesOffMain(
+        from image: CGImage
+    ) async -> [StitchEngine.RowSignature] {
+        await Task.detached(priority: .userInitiated) {
+            renderRows(from: image) { _, rowBytes, signatures in
+                signatures.append(StitchEngine.rowSignature(rowBytes))
+            }
+        }.value
+    }
+
+    private static func fixedEdgesOffMain(
+        _ previous: [StitchEngine.RowSignature],
+        _ next: [StitchEngine.RowSignature]
+    ) async -> (top: Int, bottom: Int) {
+        await Task.detached(priority: .userInitiated) {
+            StitchEngine.fixedEdges(frames: [previous, next])
+        }.value
+    }
+
+    private static func alignOffMain(
+        _ accumulated: [StitchEngine.RowSignature],
+        _ frame: [StitchEngine.RowSignature]
+    ) async -> StitchEngine.Alignment? {
+        await Task.detached(priority: .userInitiated) {
+            StitchEngine.align(accumulated: accumulated, frame: frame)
+        }.value
+    }
+
     /// Draws the image once into an RGBA buffer and walks it row by row.
-    private static func renderRows(
+    private static func renderRows<Value>(
         from image: CGImage,
-        _ visit: (Int, UnsafeRawBufferPointer, inout [UInt64]) -> Void
-    ) -> [UInt64] {
+        _ visit: (Int, UnsafeRawBufferPointer, inout [Value]) -> Void
+    ) -> [Value] {
         let width = image.width
         let height = image.height
         let bytesPerRow = width * 4
@@ -202,18 +348,27 @@ final class ScrollCaptureController {
             ) else { return }
             ctx.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
         }
-        var hashes: [UInt64] = []
-        hashes.reserveCapacity(height)
+        var values: [Value] = []
+        values.reserveCapacity(height)
         buffer.withUnsafeBytes { raw in
             for y in 0..<height {
                 let row = UnsafeRawBufferPointer(rebasing: raw[(y * bytesPerRow)..<((y + 1) * bytesPerRow)])
-                visit(y, row, &hashes)
+                visit(y, row, &values)
             }
         }
-        return hashes
+        return values
     }
 
-    private func composite(bytes: [UInt8], width: Int) throws -> CGImage {
+    private static func compositeOffMain(chunks: [[UInt8]], width: Int) async throws -> CGImage {
+        try await Task.detached(priority: .userInitiated) {
+            try composite(chunks: chunks, width: width)
+        }.value
+    }
+
+    private static func composite(chunks: [[UInt8]], width: Int) throws -> CGImage {
+        var bytes: [UInt8] = []
+        bytes.reserveCapacity(chunks.reduce(0) { $0 + $1.count })
+        for chunk in chunks { bytes.append(contentsOf: chunk) }
         let bytesPerRow = width * 4
         guard bytesPerRow > 0, bytes.count.isMultiple(of: bytesPerRow) else {
             throw CaptureError.cropFailed
@@ -236,30 +391,46 @@ final class ScrollCaptureController {
 
     // MARK: Scroll injection & settling
 
-    private func injectScroll(amount: Int32) {
-        guard let event = CGEvent(
-            scrollWheelEvent2Source: nil,
-            units: .pixel,
-            wheelCount: 1,
-            wheel1: -amount,
-            wheel2: 0,
-            wheel3: 0
-        ) else { return }
-        event.post(tap: .cghidEventTap)
+    private func injectScroll(at location: CGPoint) async {
+        let source = CGEventSource(stateID: .hidSystemState)
+        for pulse in 0..<Self.scrollPulseCount {
+            guard let event = CGEvent(
+                scrollWheelEvent2Source: source,
+                units: .line,
+                wheelCount: 1,
+                wheel1: Self.scrollLinesPerPulse,
+                wheel2: 0,
+                wheel3: 0
+            ) else { return }
+            event.location = location
+            event.post(tap: .cghidEventTap)
+            if pulse + 1 < Self.scrollPulseCount {
+                try? await Task.sleep(nanoseconds: 25_000_000)
+            }
+        }
     }
 
-    /// Waits for two consecutive identical frames (handles bounce,
-    /// lazy-loading, animations) with a 600 ms timeout.
+    /// Waits for two nearly identical frames so small animations and carets do
+    /// not keep a scrolling capture permanently unsettled.
     @MainActor
     private func settle(rect: NSRect, screen: NSScreen) async throws {
-        let deadline = Date().addingTimeInterval(0.6)
-        var lastHashes: [UInt64]? = nil
+        let deadline = Date().addingTimeInterval(1.2)
+        var lastSignatures: [StitchEngine.RowSignature]? = nil
         while Date() < deadline, !stopped {
             try await Task.sleep(nanoseconds: 120_000_000)
-            let current = try await frameHashes(rect: rect, screen: screen)
-            if let last = lastHashes, last == current { return }
-            lastHashes = current
+            let current = try await frameSignatures(rect: rect, screen: screen)
+            if let last = lastSignatures, StitchEngine.similarity(last, current) >= 0.90 { return }
+            lastSignatures = current
         }
+    }
+
+    private func activateTargetApplication(under point: NSPoint) {
+        guard let pid = OverlayController.listWindows()
+            .first(where: { NSMouseInRect(point, $0.frame, false) })?
+            .ownerPID
+        else { return }
+        NSRunningApplication(processIdentifier: pid_t(pid))?
+            .activate(options: [])
     }
 
     // MARK: Progress UI
@@ -311,7 +482,9 @@ final class ScrollCaptureController {
 
     private func teardown() {
         if let escMonitor { NSEvent.removeMonitor(escMonitor) }
+        if let localEscMonitor { NSEvent.removeMonitor(localEscMonitor) }
         escMonitor = nil
+        localEscMonitor = nil
         progressPanel?.orderOut(nil)
         progressPanel = nil
         progressLabel = nil

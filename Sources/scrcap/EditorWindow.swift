@@ -28,6 +28,7 @@ final class EditorWindowController: NSObject, NSWindowDelegate {
     /// auto-expand fires before the shape commit within a single drag, so
     /// grouping from the first mutation keeps "draw past the edge" one undo step.
     private var pendingUndoBase: DocumentSnapshot?
+    private var exportInProgress = false
     private var onClose: (() -> Void)?
     private var pendingZoomWindowPoint: NSPoint?
     /// When true, mutating `zoomScale` won't push an incremental zoom update —
@@ -45,6 +46,7 @@ final class EditorWindowController: NSObject, NSWindowDelegate {
     private var tool: EditorTool = .arrow {
         didSet {
             if oldValue == .text { canvas.commitTextEditing() }
+            if oldValue != tool { canvas.abortInteraction() }
             toolbar.select(tool: tool)
             canvas.refreshToolCursor()
         }
@@ -84,6 +86,8 @@ final class EditorWindowController: NSObject, NSWindowDelegate {
         )
 
         super.init()
+
+        Exporter.prepareDragDirectory()
 
         window.delegate = self
         window.keyHandler = { [weak self] event in self?.handleKey(event) ?? false }
@@ -178,17 +182,19 @@ final class EditorWindowController: NSObject, NSWindowDelegate {
 
     private func undo() {
         canvas.cancelTextEditing()
+        canvas.abortInteraction()
         pendingUndoBase = nil
         guard let previous = undoStack.popLast() else { return }
-        redoStack.append(currentSnapshot())
+        appendSnapshot(currentSnapshot(), to: &redoStack)
         apply(previous)
     }
 
     private func redo() {
         canvas.cancelTextEditing()
+        canvas.abortInteraction()
         pendingUndoBase = nil
         guard let next = redoStack.popLast() else { return }
-        undoStack.append(currentSnapshot())
+        appendSnapshot(currentSnapshot(), to: &undoStack)
         apply(next)
     }
 
@@ -213,8 +219,21 @@ final class EditorWindowController: NSObject, NSWindowDelegate {
     private func commitUndoStep() {
         guard let base = pendingUndoBase else { return }
         pendingUndoBase = nil
-        undoStack.append(base)
+        appendSnapshot(base, to: &undoStack)
         redoStack.removeAll()
+    }
+
+    private func appendSnapshot(_ snapshot: DocumentSnapshot, to history: inout [DocumentSnapshot]) {
+        let maxCount = 20
+        let maxBytes = 256 * 1024 * 1024
+        history.append(snapshot)
+        var bytes = history.reduce(0) { total, item in
+            total + item.bitmap.bytesPerRow * item.bitmap.height
+        }
+        while history.count > maxCount || bytes > maxBytes {
+            let removed = history.removeFirst()
+            bytes -= removed.bitmap.bytesPerRow * removed.bitmap.height
+        }
     }
 
     private func apply(_ snapshot: DocumentSnapshot) {
@@ -311,15 +330,27 @@ final class EditorWindowController: NSObject, NSWindowDelegate {
     /// ⌘S: write straight to the default folder with the filename template,
     /// then confirm with a toast and close. No panel, no Finder.
     private func quickSave() {
+        guard !exportInProgress else { return }
         let settings = settingsStore.settings
         let folder = Exporter.defaultSaveFolder(settings: settings)
-        let url = folder.appendingPathComponent(Exporter.filename(pattern: settings.filenamePattern))
-        do {
-            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-            try Exporter.writePNG(flattened(), pointScale: exportPointScale, to: url)
-            finishSave(to: url)
-        } catch {
-            presentError(error)
+        let filename = Exporter.filename(pattern: settings.filenamePattern)
+        let image = flattened()
+        let pointScale = exportPointScale
+        exportInProgress = true
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            do {
+                try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+                let url = try Exporter.writeUniquePNG(image, pointScale: pointScale, directory: folder, filename: filename)
+                DispatchQueue.main.async { [weak self] in
+                    self?.exportInProgress = false
+                    self?.finishSave(to: url)
+                }
+            } catch {
+                DispatchQueue.main.async { [weak self] in
+                    self?.exportInProgress = false
+                    self?.presentError(error)
+                }
+            }
         }
     }
 
@@ -333,11 +364,23 @@ final class EditorWindowController: NSObject, NSWindowDelegate {
         panel.nameFieldStringValue = Exporter.filename(pattern: settings.filenamePattern)
         panel.beginSheetModal(for: window) { [weak self] response in
             guard let self, response == .OK, let url = panel.url else { return }
-            do {
-                try Exporter.writePNG(self.flattened(), pointScale: self.exportPointScale, to: url)
-                self.finishSave(to: url)
-            } catch {
-                self.presentError(error)
+            guard !self.exportInProgress else { return }
+            let image = self.flattened()
+            let pointScale = self.exportPointScale
+            self.exportInProgress = true
+            DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+                do {
+                    try Exporter.writePNG(image, pointScale: pointScale, to: url)
+                    DispatchQueue.main.async { [weak self] in
+                        self?.exportInProgress = false
+                        self?.finishSave(to: url)
+                    }
+                } catch {
+                    DispatchQueue.main.async { [weak self] in
+                        self?.exportInProgress = false
+                        self?.presentError(error)
+                    }
+                }
             }
         }
     }
@@ -516,7 +559,8 @@ extension EditorWindowController: CanvasDataSource {
         }
 
         private static func growth(for missing: CGFloat) -> CGFloat {
-            missing > 0 ? ceil(missing) : 0
+            let chunk: CGFloat = 128
+            return missing > 0 ? ceil(missing / chunk) * chunk : 0
         }
 
         var hasWork: Bool {
@@ -535,7 +579,12 @@ extension EditorWindowController: CanvasDataSource {
 
         let newWidth = bitmap.width + leftPixels + rightPixels
         let newHeight = bitmap.height + topPixels + bottomPixels
+        let maxDimension = 16_384
+        let maxBytes = 400 * 1024 * 1024
         guard newWidth > bitmap.width || newHeight > bitmap.height,
+              newWidth <= maxDimension,
+              newHeight <= maxDimension,
+              newWidth <= maxBytes / 4 / max(newHeight, 1),
               let ctx = CGContext(
                   data: nil,
                   width: newWidth,
@@ -1496,6 +1545,7 @@ final class CanvasView: NSView, NSDraggingSource {
             return
         }
         guard let source = dataSource else { return }
+        abortInteraction()
         let point = canvasPoint(event)
         let core = CorePoint(x: point.x, y: point.y)
         dragStart = point
@@ -1593,13 +1643,11 @@ final class CanvasView: NSView, NSDraggingSource {
     override func mouseUp(with event: NSEvent) {
         if isSpacePanning?() == true {
             forwardSpacePanMouseUp?(event)
+            abortInteraction()
             return
         }
         defer {
-            liveShape = nil
-            dragStart = nil
-            isDragOut = false
-            dataSource?.endInteraction()
+            abortInteraction()
         }
         guard let source = dataSource else { return }
 
@@ -1632,6 +1680,15 @@ final class CanvasView: NSView, NSDraggingSource {
         let dy = abs(shape.end.y - shape.start.y)
         guard dx > 3 || dy > 3 else { return } // ignore accidental clicks
         source.commit(shape: shape)
+    }
+
+    func abortInteraction() {
+        liveShape = nil
+        liveCropRect = nil
+        dragStart = nil
+        isDragOut = false
+        dataSource?.endInteraction()
+        needsDisplay = true
     }
 
     private func drawCropPreview(_ rect: NSRect) {

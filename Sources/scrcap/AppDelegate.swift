@@ -29,6 +29,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var lastCapture: LastCapture?
     private var permissionPollTimer: Timer?
     private var screenPermissionRequestInFlight = false
+    private var updateCheckInFlight = false
+    private var captureCancelMonitor: Any?
+
+    private enum CapturePhase: Equatable {
+        case selection
+        case countdown
+        case capture
+        case scrolling
+    }
+
+    private var activeCapture: (token: UUID, phase: CapturePhase)?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         settingsStore = SettingsStore(directory: SettingsStore.defaultDirectory())
@@ -38,20 +49,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Hotkeys live before any UI work.
         hotkeyService = HotkeyService()
         hotkeyService.onAction = { [weak self] action in self?.perform(action) }
-        hotkeyService.register(keymap: settingsStore.settings.keymap)
+        let initialHotkeyResult = hotkeyService.register(keymap: settingsStore.settings.keymap)
 
         captureEngine = CaptureEngine()
         overlay = OverlayController()
         preferences = PreferencesWindowController(store: settingsStore)
+        preferences.applyHotkeyRegistrationResult(initialHotkeyResult)
 
         setupStatusItem()
 
         NotificationCenter.default.addObserver(
             forName: .scrcapSettingsChanged, object: nil, queue: .main
-        ) { [weak self] _ in
+        ) { [weak self] note in
             guard let self else { return }
             self.applyTheme()
-            self.hotkeyService.register(keymap: self.settingsStore.settings.keymap)
+            let result = self.hotkeyService.register(keymap: self.settingsStore.settings.keymap)
+            (note.object as? SettingsModel)?.applyHotkeyRegistrationResult(result)
             self.rebuildMenu()
         }
 
@@ -62,9 +75,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ) { [weak self] note in
             guard let self else { return }
             let recording = note.object as? Bool ?? false
-            self.hotkeyService.register(
-                keymap: recording ? Keymap(bindings: [:]) : self.settingsStore.settings.keymap
-            )
+            let result = self.hotkeyService.setSuspended(recording)
+            if !recording {
+                self.preferences.applyHotkeyRegistrationResult(result)
+                self.rebuildMenu()
+            }
         }
 
         NotificationCenter.default.addObserver(
@@ -130,13 +145,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// design review without Screen Recording permission. Run with:
     /// SCRCAP_SMOKE=ui .build/debug/scrcap
     private func runUISnapshotSmokeTest() {
-        func writePNG(_ view: NSView, _ name: String) {
+        func writePNG(_ view: NSView, _ name: String) -> Bool {
             view.layoutSubtreeIfNeeded()
-            guard let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { return }
+            guard let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { return false }
             view.cacheDisplay(in: view.bounds, to: rep)
-            guard let data = rep.representation(using: .png, properties: [:]) else { return }
-            try? data.write(to: URL(fileURLWithPath: "/tmp/scrcap-ui-\(name).png"))
+            guard let data = rep.representation(using: .png, properties: [:]) else { return false }
+            do {
+                try data.write(to: URL(fileURLWithPath: "/tmp/scrcap-ui-\(name).png"))
+            } catch {
+                print("SMOKE FAIL: could not write \(name): \(error)")
+                return false
+            }
             print("wrote /tmp/scrcap-ui-\(name).png")
+            return true
         }
 
         // Synthetic screenshot: soft gradient so annotations stay legible.
@@ -159,23 +180,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         editor.show()
 
         DispatchQueue.main.async {
+            var snapshots: Set<String> = []
+            func snapshot(_ view: NSView, _ name: String) {
+                if writePNG(view, name) { snapshots.insert(name) }
+            }
             for (appearance, suffix) in [(NSAppearance.Name.aqua, "light"), (.darkAqua, "dark")] {
                 NSApp.appearance = NSAppearance(named: appearance)
                 if let content = editor.debugContentView {
-                    writePNG(content, "editor-\(suffix)")
+                    snapshot(content, "editor-\(suffix)")
                 }
             }
             NSApp.appearance = nil
 
-            writePNG(ScrollCaptureController.debugHUDView(), "scroll-hud")
+            snapshot(ScrollCaptureController.debugHUDView(), "scroll-hud")
 
             if let screen = NSScreen.main {
                 let overlay = OverlayView(frame: NSRect(x: 0, y: 0, width: 720, height: 420), screen: screen)
                 overlay.reset(mode: .region)
                 overlay.debugSetSelection(from: NSPoint(x: 180, y: 110), to: NSPoint(x: 540, y: 330))
-                writePNG(overlay, "overlay-region")
+                snapshot(overlay, "overlay-region")
                 overlay.reset(mode: .window)
-                writePNG(overlay, "overlay-window")
+                snapshot(overlay, "overlay-window")
                 overlay.stopAnimation()
             }
 
@@ -199,7 +224,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 exit(1)
             }
             if let view = prefsHost.contentView {
-                writePNG(view, "prefs")
+                snapshot(view, "prefs")
+            }
+            let expected: Set<String> = [
+                "editor-light", "editor-dark", "scroll-hud",
+                "overlay-region", "overlay-window", "prefs",
+            ]
+            guard snapshots == expected else {
+                print("SMOKE FAIL: missing snapshots \(expected.subtracting(snapshots).sorted())")
+                exit(1)
             }
             exit(0)
         }
@@ -322,17 +355,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func checkForUpdates() {
+        guard !updateCheckInFlight else { return }
+        updateCheckInFlight = true
         let currentVersion = currentAppVersion
-        Task {
+        Task { @MainActor in
+            defer { updateCheckInFlight = false }
             do {
                 let result = try await GitHubUpdateChecker().check(currentVersion: currentVersion)
-                await MainActor.run {
-                    self.presentUpdateResult(result)
-                }
+                self.presentUpdateResult(result)
             } catch {
-                await MainActor.run {
-                    self.presentUpdateError(error)
-                }
+                self.presentUpdateError(error)
             }
         }
     }
@@ -386,7 +418,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func perform(_ action: AppAction) {
         guard ensureScreenPermission() else { return }
-        guard !overlay.isActive else { return }
+        recoverCancelledSelection()
+        guard activeCapture == nil else { return }
         captureEngine.includeCursor = settingsStore.settings.includeCursor
         captureEngine.windowBackground = settingsStore.settings.windowBackgroundTransparent
             ? nil
@@ -395,16 +428,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         switch action {
         case .captureFullscreen:
             let screen = GeometryMapper.screenUnderMouse()
-            lastCapture = .fullscreen(screen)
-            runCapture(mode: .fullscreen, metadata: { .fullscreen(on: screen) }) {
+            let token = beginSession(.capture)
+            runCapture(token: token, mode: .fullscreen, repeatValue: .fullscreen(screen), metadata: { .fullscreen(on: screen) }) {
                 try await self.captureEngine.captureDisplay(screen: screen)
             }
 
         case .captureRegion:
+            let token = beginSession(.selection)
             overlay.beginRegionSelection { [weak self] rect, screen in
-                guard let self else { return }
-                self.lastCapture = .region(rect, screen)
-                self.runCapture(mode: .region, metadata: { .region(rect, on: screen) }) {
+                guard let self, self.moveSession(token, to: .capture) else { return }
+                self.runCapture(token: token, mode: .region, repeatValue: .region(rect, screen), metadata: { .region(rect, on: screen) }) {
                     try await self.captureEngine.captureRegion(rect, on: screen)
                 }
             }
@@ -413,49 +446,53 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             switch settingsStore.settings.windowCaptureTarget {
             case .active:
                 if let window = OverlayController.listWindows().first {
-                    captureWindow(window)
+                    let token = beginSession(.capture)
+                    captureWindow(window, token: token)
                 } else {
-                    beginWindowPick()
+                    beginWindowPick(token: beginSession(.selection))
                 }
             case .selected:
-                beginWindowPick()
+                beginWindowPick(token: beginSession(.selection))
             }
 
         case .captureScrolling:
-            startScrollingCapture()
+            startScrollingCapture(token: beginSession(.selection))
 
         case .captureDelayed:
-            startDelayedCapture()
+            startDelayedCapture(token: beginSession(.selection))
 
         case .repeatLast:
             repeatLastCapture()
         }
     }
 
-    private func startDelayedCapture() {
+    private func startDelayedCapture(token: UUID) {
         overlay.beginRegionSelection { [weak self] rect, screen in
-            guard let self else { return }
-            self.lastCapture = .region(rect, screen)
+            guard let self, self.moveSession(token, to: .countdown) else { return }
             let seconds = self.settingsStore.settings.captureDelaySeconds
-            self.countdown.start(seconds: seconds, on: screen) { [weak self] in
-                guard let self else { return }
-                self.runCapture(mode: .region, metadata: { .region(rect, on: screen) }) {
+            self.countdown.start(
+                seconds: seconds,
+                on: screen,
+                onCancel: { [weak self] in self?.finishSession(token) }
+            ) { [weak self] in
+                guard let self, self.moveSession(token, to: .capture) else { return }
+                self.runCapture(token: token, mode: .region, repeatValue: .region(rect, screen), metadata: { .region(rect, on: screen) }) {
                     try await self.captureEngine.captureRegion(rect, on: screen)
                 }
             }
         }
     }
 
-    private func beginWindowPick() {
+    private func beginWindowPick(token: UUID) {
         overlay.beginWindowPick { [weak self] window in
-            self?.captureWindow(window)
+            guard let self, self.moveSession(token, to: .capture) else { return }
+            self.captureWindow(window, token: token)
         }
     }
 
-    private func captureWindow(_ window: PickableWindow) {
-        lastCapture = .window(window)
+    private func captureWindow(_ window: PickableWindow, token: UUID) {
         let includeShadow = settingsStore.settings.includeWindowShadow
-        runCapture(mode: .window, metadata: { .window(window) }) {
+        runCapture(token: token, mode: .window, repeatValue: .window(window), metadata: { .window(window) }) {
             try await self.captureEngine.captureWindow(
                 windowID: window.windowID,
                 includeShadow: includeShadow
@@ -466,16 +503,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func repeatLastCapture() {
         switch lastCapture {
         case .region(let rect, let screen):
-            runCapture(mode: .region, metadata: { .region(rect, on: screen) }) {
+            let token = beginSession(.capture)
+            runCapture(token: token, mode: .region, metadata: { .region(rect, on: screen) }) {
                 try await self.captureEngine.captureRegion(rect, on: screen)
             }
         case .window(let window):
+            let token = beginSession(.capture)
             let includeShadow = settingsStore.settings.includeWindowShadow
-            runCapture(mode: .window, metadata: { .window(window) }) {
+            runCapture(token: token, mode: .window, metadata: { .window(window) }) {
                 try await self.captureEngine.captureWindow(windowID: window.windowID, includeShadow: includeShadow)
             }
         case .fullscreen(let screen):
-            runCapture(mode: .fullscreen, metadata: { .fullscreen(on: screen) }) {
+            let token = beginSession(.capture)
+            runCapture(token: token, mode: .fullscreen, metadata: { .fullscreen(on: screen) }) {
                 try await self.captureEngine.captureDisplay(screen: screen)
             }
         case nil:
@@ -483,16 +523,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    private func startScrollingCapture() {
-        guard ScrollCaptureController.ensureAccessibility() else { return }
+    private func startScrollingCapture(token: UUID) {
+        guard ScrollCaptureController.ensureAccessibility() else {
+            finishSession(token)
+            presentError(ScrollingCaptureError.accessibilityPermissionRequired)
+            return
+        }
         overlay.beginRegionSelection { [weak self] rect, screen in
-            guard let self else { return }
+            guard let self, self.moveSession(token, to: .scrolling) else { return }
             let metadata = CaptureMetadata.region(rect, on: screen, mode: .scrolling)
+            self.captureEngine.includeCursor = false
             let controller = ScrollCaptureController(capture: self.captureEngine, settingsStore: self.settingsStore)
             self.scrollCapture = controller
             controller.run(rect: rect, screen: screen) { [weak self] result in
-                guard let self else { return }
+                guard let self, self.activeCapture?.token == token else { return }
                 self.scrollCapture = nil
+                self.finishSession(token)
                 switch result {
                 case .success(let capture):
                     self.deliver(capture.withMetadata(metadata), mode: .scrolling)
@@ -504,18 +550,67 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func runCapture(
+        token: UUID,
         mode: CaptureMode,
+        repeatValue: LastCapture? = nil,
         metadata: @escaping () -> CaptureMetadata? = { nil },
         _ body: @escaping () async throws -> CaptureResult
     ) {
         Task { @MainActor in
             do {
                 let result = try await body()
+                guard self.activeCapture?.token == token else { return }
+                if let repeatValue { self.lastCapture = repeatValue }
                 self.deliver(result.withMetadata(metadata()), mode: mode)
+                self.finishSession(token)
             } catch {
+                guard self.activeCapture?.token == token else { return }
                 self.presentError(error)
+                self.finishSession(token)
             }
         }
+    }
+
+    private func beginSession(_ phase: CapturePhase) -> UUID {
+        let token = UUID()
+        activeCapture = (token, phase)
+        if phase == .selection {
+            monitorCancellation(token: token)
+        }
+        return token
+    }
+
+    @discardableResult
+    private func moveSession(_ token: UUID, to phase: CapturePhase) -> Bool {
+        guard activeCapture?.token == token else { return false }
+        activeCapture = (token, phase)
+        removeCancelMonitor()
+        return true
+    }
+
+    private func finishSession(_ token: UUID) {
+        guard activeCapture?.token == token else { return }
+        activeCapture = nil
+        removeCancelMonitor()
+    }
+
+    private func recoverCancelledSelection() {
+        guard let activeCapture, activeCapture.phase == .selection, !overlay.isActive else { return }
+        finishSession(activeCapture.token)
+    }
+
+    private func monitorCancellation(token: UUID) {
+        removeCancelMonitor()
+        captureCancelMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard event.keyCode == 53 else { return event }
+            DispatchQueue.main.async { self?.finishSession(token) }
+            return event
+        }
+    }
+
+    private func removeCancelMonitor() {
+        if let captureCancelMonitor { NSEvent.removeMonitor(captureCancelMonitor) }
+        captureCancelMonitor = nil
     }
 
     private func deliver(_ capture: CaptureResult, mode: CaptureMode) {

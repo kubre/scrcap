@@ -47,6 +47,8 @@ final class SettingsModel: ObservableObject {
     /// what makes SwiftUI controls reliably reflect changes: @Published emits
     /// objectWillChange *before* the value changes, as SwiftUI requires.
     @Published private(set) var settings: AppSettings
+    @Published private(set) var hotkeyRegistrationWarning: String?
+    private var pendingSave: DispatchWorkItem?
 
     init(store: SettingsStore) {
         self.store = store
@@ -54,13 +56,61 @@ final class SettingsModel: ObservableObject {
     }
 
     func update(_ mutate: (inout AppSettings) -> Void) {
+        flushPendingUpdate()
         let saved = store.update(mutate) // persist + normalize (source of truth)
         settings = store.settings        // re-sync the published mirror → notifies SwiftUI
         guard saved else {
             presentSaveFailure()
             return
         }
-        NotificationCenter.default.post(name: .scrcapSettingsChanged, object: nil)
+        NotificationCenter.default.post(name: .scrcapSettingsChanged, object: self)
+    }
+
+    func updateContinuously(_ mutate: (inout AppSettings) -> Void) {
+        pendingSave?.cancel()
+        mutate(&settings)
+        settings.normalize()
+        let work = DispatchWorkItem { [weak self] in self?.persistPendingUpdate() }
+        pendingSave = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25, execute: work)
+    }
+
+    func flushPendingUpdate() {
+        guard pendingSave != nil else { return }
+        pendingSave?.cancel()
+        persistPendingUpdate()
+    }
+
+    func applyHotkeyRegistrationResult(_ result: HotkeyRegistrationResult) {
+        guard !result.succeeded else {
+            hotkeyRegistrationWarning = nil
+            return
+        }
+        let failed = result.failures.map { "\($0.chord.displayValue) for \($0.action.title)" }.joined(separator: ", ")
+        hotkeyRegistrationWarning = "Could not register \(failed). Settings now show the shortcuts that remain active."
+        let saved = store.update { $0.apply(result.activeKeymap) }
+        settings = store.settings
+        if !saved { presentSaveFailure() }
+    }
+
+    func refreshLaunchAtLogin() {
+        let status = SMAppService.mainApp.status
+        let registered = status == .enabled || status == .requiresApproval
+        guard settings.launchAtLogin != registered else { return }
+        update { $0.launchAtLogin = registered }
+    }
+
+    private func persistPendingUpdate() {
+        guard pendingSave != nil else { return }
+        pendingSave = nil
+        let pending = settings
+        let saved = store.update { $0 = pending }
+        settings = store.settings
+        guard saved else {
+            presentSaveFailure()
+            return
+        }
+        NotificationCenter.default.post(name: .scrcapSettingsChanged, object: self)
     }
 
     private func presentSaveFailure() {
@@ -73,12 +123,13 @@ final class SettingsModel: ObservableObject {
     }
 }
 
-final class PreferencesWindowController {
+final class PreferencesWindowController: NSObject, NSWindowDelegate {
     private var window: NSWindow?
     private let model: SettingsModel
 
     init(store: SettingsStore) {
         model = SettingsModel(store: store)
+        super.init()
     }
 
     func show() {
@@ -96,11 +147,21 @@ final class PreferencesWindowController {
             w.hasShadow = true
             w.isMovableByWindowBackground = true
             w.isReleasedWhenClosed = false
+            w.delegate = self
             window = w
         }
+        model.refreshLaunchAtLogin()
         NSApp.activate(ignoringOtherApps: true)
         window?.center()
         window?.makeKeyAndOrderFront(nil)
+    }
+
+    func windowWillClose(_ notification: Notification) {
+        model.flushPendingUpdate()
+    }
+
+    func applyHotkeyRegistrationResult(_ result: HotkeyRegistrationResult) {
+        model.applyHotkeyRegistrationResult(result)
     }
 }
 
@@ -767,11 +828,12 @@ struct GeneralTab: View {
         PrefSection(title: "Reset") {
             PrefRow(label: "Restore every setting to its default", divider: false) {
                 Button("Reset all", role: .destructive) {
-                    model.update { $0 = .defaults }
+                    resetAll()
                 }
                 .buttonStyle(PrefButtonStyle(tone: .destructive))
             }
         }
+        .onAppear { model.refreshLaunchAtLogin() }
     }
 
     private var themeModeBinding: Binding<ThemeMode> {
@@ -789,18 +851,37 @@ struct GeneralTab: View {
                 do {
                     if value { try SMAppService.mainApp.register() }
                     else { try SMAppService.mainApp.unregister() }
-                    model.update { $0.launchAtLogin = value }
+                    model.refreshLaunchAtLogin()
                 } catch {
                     NSLog("scrcap: launch-at-login toggle failed: \(error)")
-                    let alert = NSAlert()
-                    alert.messageText = "Could not update Launch at Login"
-                    alert.informativeText = error.localizedDescription
-                    alert.alertStyle = .warning
-                    alert.runModal()
-                    model.objectWillChange.send()
+                    model.refreshLaunchAtLogin()
+                    presentLaunchAtLoginFailure(error)
                 }
             }
         )
+    }
+
+    private func resetAll() {
+        var unregisterError: Error?
+        do {
+            if SMAppService.mainApp.status != .notRegistered {
+                try SMAppService.mainApp.unregister()
+            }
+        } catch {
+            NSLog("scrcap: reset launch-at-login unregister failed: \(error)")
+            unregisterError = error
+        }
+        model.update { $0 = .defaults }
+        model.refreshLaunchAtLogin()
+        if let unregisterError { presentLaunchAtLoginFailure(unregisterError) }
+    }
+
+    private func presentLaunchAtLoginFailure(_ error: Error) {
+        let alert = NSAlert()
+        alert.messageText = "Could not update Launch at Login"
+        alert.informativeText = error.localizedDescription
+        alert.alertStyle = .warning
+        alert.runModal()
     }
 }
 
@@ -891,7 +972,7 @@ struct CaptureTab: View {
     private var captureDelayBinding: Binding<Int> {
         Binding(
             get: { model.settings.captureDelaySeconds },
-            set: { value in model.update { $0.captureDelaySeconds = value } }
+            set: { value in model.updateContinuously { $0.captureDelaySeconds = value } }
         )
     }
 
@@ -936,7 +1017,7 @@ struct CaptureTab: View {
         Binding(
             get: { model.settings.scrollingMaxHeight },
             set: { value in
-                model.update {
+                model.updateContinuously {
                     $0.scrollingMaxHeight = min(
                         max(AppSettings.minScrollingMaxHeight, value),
                         AppSettings.maxScrollingMaxHeight
@@ -951,7 +1032,7 @@ struct CaptureTab: View {
 
 struct ShortcutsTab: View {
     @ObservedObject var model: SettingsModel
-    @State private var recordingAction: AppAction?
+    @StateObject private var recorder = ShortcutRecordingController()
     @State private var warning: String?
 
     var body: some View {
@@ -960,10 +1041,10 @@ struct ShortcutsTab: View {
                 PrefRow(label: action.title, divider: index < AppAction.shortcutOrder.count - 1) {
                     ShortcutRecorderButton(
                         chord: model.settings.keymap.chord(for: action),
-                        isRecording: recordingAction == action,
-                        onBeginRecording: { recordingAction = action },
-                        onChord: { chord in record(chord, for: action) },
-                        onCancel: { recordingAction = nil }
+                        isRecording: recorder.recordingAction == action,
+                        onToggleRecording: {
+                            recorder.toggle(action: action) { chord in record(chord, for: action) }
+                        }
                     )
                 }
             }
@@ -973,11 +1054,16 @@ struct ShortcutsTab: View {
                 .font(PrefFont.mono)
                 .foregroundStyle(PrefColor.warn)
         }
+        if let registrationWarning = model.hotkeyRegistrationWarning {
+            Label(registrationWarning, systemImage: "exclamationmark.triangle.fill")
+                .font(PrefFont.mono)
+                .foregroundStyle(PrefColor.warn)
+        }
         PrefCaption("click a shortcut, press any combination · esc cancels")
+            .onDisappear { recorder.stop() }
     }
 
     private func record(_ chord: KeyChord, for action: AppAction) {
-        recordingAction = nil
         if Keymap.isSystemReserved(chord) {
             warning = "\(chord.displayValue) is a macOS system shortcut — pick another."
             return
@@ -989,21 +1075,55 @@ struct ShortcutsTab: View {
     }
 }
 
-/// AppKit-backed key recorder: a button that, while recording, swallows the
-/// next keyDown via a local monitor and reports it as a KeyChord.
+final class ShortcutRecordingController: ObservableObject {
+    @Published private(set) var recordingAction: AppAction?
+    private var monitor: Any?
+
+    func toggle(action: AppAction, onChord: @escaping (KeyChord) -> Void) {
+        if recordingAction == action {
+            stop()
+            return
+        }
+        stop()
+        recordingAction = action
+        NotificationCenter.default.post(name: .scrcapShortcutRecording, object: true)
+        monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard let self else { return event }
+            if event.keyCode == 53 {
+                self.stop()
+                return nil
+            }
+            if let chord = KeyCodeMap.chord(from: event), !chord.modifiers.isEmpty {
+                self.stop()
+                onChord(chord)
+            }
+            return nil
+        }
+    }
+
+    func stop() {
+        if let monitor { NSEvent.removeMonitor(monitor) }
+        monitor = nil
+        guard recordingAction != nil else { return }
+        recordingAction = nil
+        NotificationCenter.default.post(name: .scrcapShortcutRecording, object: false)
+    }
+
+    deinit {
+        if let monitor { NSEvent.removeMonitor(monitor) }
+        if recordingAction != nil {
+            NotificationCenter.default.post(name: .scrcapShortcutRecording, object: false)
+        }
+    }
+}
+
 struct ShortcutRecorderButton: View {
     let chord: KeyChord?
     let isRecording: Bool
-    let onBeginRecording: () -> Void
-    let onChord: (KeyChord) -> Void
-    let onCancel: () -> Void
-
-    @State private var monitor: Any?
+    let onToggleRecording: () -> Void
 
     var body: some View {
-        Button {
-            isRecording ? stopRecording(cancelled: true) : startRecording()
-        } label: {
+        Button(action: onToggleRecording) {
             Text(isRecording ? "RECORDING…" : (chord?.displayValue ?? "—"))
                 .font(.system(size: 11.5, weight: .medium, design: .monospaced))
                 .padding(.horizontal, 10)
@@ -1020,31 +1140,6 @@ struct ShortcutRecorderButton: View {
                 )
         }
         .buttonStyle(.plain)
-        .onDisappear { stopRecording(cancelled: true) }
-    }
-
-    private func startRecording() {
-        onBeginRecording()
-        NotificationCenter.default.post(name: .scrcapShortcutRecording, object: true)
-        monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
-            if event.keyCode == 53 { // esc cancels
-                stopRecording(cancelled: true)
-                return nil
-            }
-            if let chord = KeyCodeMap.chord(from: event), !chord.modifiers.isEmpty {
-                stopRecording(cancelled: false)
-                onChord(chord)
-                return nil
-            }
-            return nil // swallow modifier-less keys while recording
-        }
-    }
-
-    private func stopRecording(cancelled: Bool) {
-        if let monitor { NSEvent.removeMonitor(monitor) }
-        monitor = nil
-        NotificationCenter.default.post(name: .scrcapShortcutRecording, object: false)
-        if cancelled { onCancel() }
     }
 }
 
@@ -1166,14 +1261,14 @@ struct EditorTab: View {
     private var strokeBinding: Binding<Double> {
         Binding(
             get: { model.settings.strokeWidth },
-            set: { value in model.update { $0.strokeWidth = value } }
+            set: { value in model.updateContinuously { $0.strokeWidth = value } }
         )
     }
 
     private var textSizeBinding: Binding<Double> {
         Binding(
             get: { model.settings.textSize },
-            set: { value in model.update { $0.textSize = value } }
+            set: { value in model.updateContinuously { $0.textSize = value } }
         )
     }
 
@@ -1266,14 +1361,14 @@ struct OutputTab: View {
     private var saveFolderBinding: Binding<String> {
         Binding(
             get: { model.settings.saveFolder ?? "" },
-            set: { value in model.update { $0.saveFolder = value.isEmpty ? nil : value } }
+            set: { value in model.updateContinuously { $0.saveFolder = value.isEmpty ? nil : value } }
         )
     }
 
     private var patternBinding: Binding<String> {
         Binding(
             get: { model.settings.filenamePattern },
-            set: { value in model.update { $0.filenamePattern = value } }
+            set: { value in model.updateContinuously { $0.filenamePattern = value } }
         )
     }
 
