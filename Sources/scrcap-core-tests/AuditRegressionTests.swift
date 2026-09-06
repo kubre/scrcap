@@ -4,6 +4,17 @@ import ScrcapCore
 func runAuditRegressionTests() {
     print("\nAudit regressions")
 
+    test("counter numbering does not reuse a surviving number after cropping") {
+        var stack = AnnotationStack()
+        stack.append(Shape(kind: .counter(number: 2), colorIndex: 0,
+                           start: CorePoint(x: 0, y: 0), end: CorePoint(x: 0, y: 0)))
+        checkEqual(stack.nextCounterNumber, 3)
+        stack.undo()
+        checkEqual(stack.nextCounterNumber, 1)
+        stack.redo()
+        checkEqual(stack.nextCounterNumber, 3)
+    }
+
     test("settings reject zero and negative schema versions before migration") {
         for version in [0, -1, Int.min] {
             let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)

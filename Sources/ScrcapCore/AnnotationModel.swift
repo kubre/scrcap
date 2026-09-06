@@ -101,11 +101,10 @@ public struct AnnotationStack: Equatable, Sendable {
         return true
     }
 
-    /// The number the next counter stamp should carry: visible counters + 1.
-    /// Auto-increments as you stamp, decrements on undo.
+    /// One above the highest visible stamp; cropping may leave numbering gaps.
     public var nextCounterNumber: Int {
         visible.reduce(into: 1) { n, s in
-            if case .counter = s.kind { n += 1 }
+            if case .counter(let number) = s.kind { n = max(n, number + 1) }
         }
     }
 }

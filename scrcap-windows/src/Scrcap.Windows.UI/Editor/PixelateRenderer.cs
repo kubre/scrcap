@@ -6,9 +6,24 @@ namespace Scrcap.Windows.UI.Editor;
 
 internal sealed class PixelateRenderer
 {
-    private const int MaxCacheEntries = 24;
-
     private readonly Dictionary<PixelateCacheKey, BitmapSource> cache = [];
+    private readonly HashSet<PixelateCacheKey> used = [];
+    private readonly List<PixelateCacheKey> stale = [];
+
+    internal int CachedRegionCount => cache.Count;
+
+    public void BeginFrame() => used.Clear();
+
+    public void EndFrame()
+    {
+        stale.Clear();
+        foreach (var key in cache.Keys)
+        {
+            if (!used.Contains(key)) { stale.Add(key); }
+        }
+        foreach (var key in stale) { cache.Remove(key); }
+        stale.Clear();
+    }
     private BitmapSource? source;
     private long sourceVersion;
 
@@ -29,17 +44,13 @@ internal sealed class PixelateRenderer
         }
 
         var key = new PixelateCacheKey(sourceVersion, sourceBounds, Math.Max(1, blockSize), exportScale);
+        used.Add(key);
         if (cache.TryGetValue(key, out var cached))
         {
             return cached;
         }
 
         var bitmap = CreatePixelatedBitmap(sourceBitmap, sourceBounds, key.BlockSize);
-        if (cache.Count >= MaxCacheEntries)
-        {
-            cache.Clear();
-        }
-
         cache[key] = bitmap;
         return bitmap;
     }

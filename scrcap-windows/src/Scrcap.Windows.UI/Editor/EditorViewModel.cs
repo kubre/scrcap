@@ -81,6 +81,7 @@ public sealed class EditorViewModel : INotifyPropertyChanged
             }
 
             OnPropertyChanged(nameof(StrokeWidth));
+            OnPropertyChanged(nameof(TextSize));
             OnPropertyChanged(nameof(IsSmallSizeActive));
             OnPropertyChanged(nameof(IsMediumSizeActive));
             OnPropertyChanged(nameof(IsLargeSizeActive));
@@ -140,6 +141,8 @@ public sealed class EditorViewModel : INotifyPropertyChanged
         (System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString(Settings.PaletteHex[Math.Clamp(ColorIndex, 0, Settings.PaletteSlotCount - 1)]);
 
     public double StrokeWidth => Settings.StrokeWidth * ActiveSize.Scale();
+
+    public double TextSize => Settings.TextSize * ActiveSize.Scale();
 
     public string DocumentSizeText => Document is null
         ? string.Empty
@@ -252,7 +255,7 @@ public sealed class EditorViewModel : INotifyPropertyChanged
             EditorTool.Arrow => new ShapeKind.Arrow(),
             EditorTool.Rectangle => new ShapeKind.Rectangle(),
             EditorTool.Counter => new ShapeKind.Counter(Document.NextCounterNumber),
-            EditorTool.Text => new ShapeKind.Text(textValue, Settings.TextSize),
+            EditorTool.Text => new ShapeKind.Text(textValue, TextSize),
             EditorTool.Pixelate => new ShapeKind.Pixelate(),
             EditorTool.Crop => new ShapeKind.Rectangle(),
             _ => throw new ArgumentOutOfRangeException(),
@@ -269,14 +272,14 @@ public sealed class EditorViewModel : INotifyPropertyChanged
             return;
         }
 
-        var value = text.Trim();
+        var value = text;
         if (string.IsNullOrWhiteSpace(value))
         {
             return;
         }
 
         Document.AppendShape(new Shape(
-            new ShapeKind.Text(value, Settings.TextSize),
+            new ShapeKind.Text(value, TextSize),
             ColorIndex,
             ActiveSize,
             anchor,
@@ -349,7 +352,8 @@ public sealed class EditorViewModel : INotifyPropertyChanged
         }
 
         var fit = Math.Min(viewportWidth * 0.9 / Document.Size.Width, viewportHeight * 0.9 / Document.Size.Height);
-        Zoom = fit >= 1 ? 1 : fit;
+        var fitted = double.IsFinite(fit) && fit > 0 ? Math.Min(1, fit) : 1;
+        if (Set(ref zoom, fitted, nameof(Zoom))) { OnPropertyChanged(nameof(ZoomPercent)); }
         ResetPan();
     }
 
@@ -396,25 +400,36 @@ public sealed class EditorViewModel : INotifyPropertyChanged
 
     private double NextZoom(int direction)
     {
-        var index = Array.FindIndex(ZoomSteps, step => Math.Abs(step - Zoom) < 0.001);
-        if (index < 0)
+        if (direction > 0)
         {
-            index = Array.FindIndex(ZoomSteps, step => step > Zoom);
-            if (index < 0)
+            foreach (var step in ZoomSteps) { if (step > Zoom) { return step; } }
+        }
+        else
+        {
+            for (var index = ZoomSteps.Length - 1; index >= 0; index--)
             {
-                index = ZoomSteps.Length - 1;
+                if (ZoomSteps[index] < Zoom) { return ZoomSteps[index]; }
             }
         }
-
-        return ZoomSteps[Math.Clamp(index + direction, 0, ZoomSteps.Length - 1)];
+        return Zoom;
     }
 
-    private static double ClosestZoom(double value) =>
-        ZoomSteps.OrderBy(step => Math.Abs(step - value)).First();
+    private static double ClosestZoom(double value)
+    {
+        var closest = ZoomSteps[0];
+        foreach (var step in ZoomSteps)
+        {
+            if (Math.Abs(step - value) < Math.Abs(closest - value)) { closest = step; }
+        }
+        return closest;
+    }
 
     private static double[] ZoomSteps { get; } = [0.25, 0.33, 0.5, 0.67, 0.75, 1, 1.25, 1.5, 2, 3, 4];
 
-    private void SetZoomKeepingViewport(double value) => Zoom = value;
+    private void SetZoomKeepingViewport(double value)
+    {
+        if (value != Zoom) { Zoom = value; }
+    }
 
     private static double ImageOriginX(double documentWidth, double viewportWidth, double zoom, double panOffsetX) =>
         Math.Max(0, (viewportWidth - documentWidth * zoom) / 2) + panOffsetX;
