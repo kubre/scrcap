@@ -13,23 +13,23 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  source-snapshot:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Archive source under test
-        run: git archive --format=tar HEAD > audit-source.tar
-      - uses: actions/upload-artifact@v4
-        with:
-          name: audit-source
-          path: audit-source.tar
-
   macos:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Build, core tests, and AppKit smoke tests
-        run: bash scripts/test.sh
+      - name: Build, core tests, AppKit regressions, and release compilation
+        run: |
+          set -euo pipefail
+          swift --version | tee macos-tests.log
+          bash scripts/test.sh 2>&1 | tee -a macos-tests.log
+          swift build --configuration release 2>&1 | tee -a macos-tests.log
+      - name: Preserve macOS test receipts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-test-results
+          path: macos-tests.log
+          if-no-files-found: warn
 
   windows:
     runs-on: windows-latest
@@ -40,11 +40,17 @@ jobs:
           dotnet-version: 8.0.x
       - name: Build and run all Windows test projects
         working-directory: scrcap-windows
-        run: dotnet test Scrcap.sln --configuration Release --logger trx
-      - name: Preserve test receipts
+        shell: pwsh
+        run: |
+          dotnet --info | Tee-Object -FilePath windows-tests.log
+          dotnet test Scrcap.sln --configuration Release --logger trx --logger "console;verbosity=normal" 2>&1 | Tee-Object -FilePath windows-tests.log -Append
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Preserve Windows test receipts and allocation measurements
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: windows-test-results
-          path: scrcap-windows/tests/**/TestResults/*.trx
+          path: |
+            scrcap-windows/windows-tests.log
+            scrcap-windows/tests/**/TestResults/*.trx
           if-no-files-found: warn
