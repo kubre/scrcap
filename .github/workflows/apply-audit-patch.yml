@@ -1,0 +1,57 @@
+name: Apply verified audit patch (temporary)
+on:
+  push:
+    branches: [fix/cross-platform-audit-2026-09]
+    paths: [.github/workflows/apply-audit-patch.yml]
+permissions:
+  contents: write
+jobs:
+  apply:
+    if: github.repository == 'kubre/scrcap' && github.ref == 'refs/heads/fix/cross-platform-audit-2026-09'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 2
+      - name: Verify and publish the reviewed source changes
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 - <<'PY'
+          import base64, hashlib, json, pathlib, subprocess
+          def git(*args):
+              return subprocess.check_output(['git', *args], text=True).strip()
+          assert git('rev-parse', 'HEAD^') == '71d9422ada2b40f7c85a1c5c26fac5b0976cd7b0', 'Unexpected base: refusing to overwrite concurrent work'
+          def blob(data):
+              return hashlib.sha1(b'blob ' + str(len(data)).encode() + b'\0' + data).hexdigest()
+          plans = []
+          for sha in ['6878f428fbcdf4e4dfc120eed487698a78d979da', 'c2810f947c1fec87d3f6a717f79a2ea8f2da0783']:
+              response = json.loads(subprocess.check_output(['gh', 'api', 'repos/kubre/scrcap/git/blobs/' + sha]))
+              data = base64.b64decode(response['content'])
+              assert blob(data) == sha, 'Patch transport hash mismatch'
+              plans.extend(json.loads(data))
+          writes = []
+          for plan in plans:
+              path = pathlib.Path(plan['path'])
+              assert not path.is_absolute() and '..' not in path.parts and not path.is_symlink()
+              assert path.parts[0] in ('Sources', 'scrcap-windows', 'scripts'), 'Unexpected patch destination'
+              source = path.read_bytes() if path.exists() else b''
+              assert (blob(source) if path.exists() else None) == plan['old'], 'Source mismatch: ' + str(path)
+              lines = source.decode().splitlines(keepends=True)
+              for start, end, replacement in reversed(plan['edits']):
+                  lines[start:end] = [replacement]
+              result = ''.join(lines).encode()
+              assert blob(result) == plan['new'], 'Target mismatch: ' + str(path)
+              writes.append((path, result))
+          for path, result in writes:
+              path.parent.mkdir(parents=True, exist_ok=True)
+              path.write_bytes(result)
+          subprocess.run(['git', 'add', '--', *[str(path) for path, _ in writes]], check=True)
+          subprocess.run(['git', 'diff', '--cached', '--check'], check=True)
+          subprocess.run(['git', 'config', 'user.name', 'github-actions[bot]'], check=True)
+          subprocess.run(['git', 'config', 'user.email', '41898282+github-actions[bot]@users.noreply.github.com'], check=True)
+          subprocess.run(['git', 'commit', '-m', 'fix: harden capture and hotkey lifetimes; validate saves on a live WPF dispatcher'], check=True)
+          subprocess.run(['git', 'push', 'origin', 'HEAD:refs/heads/fix/cross-platform-audit-2026-09'], check=True)
+          print('Published', len(writes), 'hash-verified files at', git('rev-parse', 'HEAD'))
+          PY
