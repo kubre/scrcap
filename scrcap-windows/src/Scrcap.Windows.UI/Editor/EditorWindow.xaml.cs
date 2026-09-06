@@ -381,31 +381,46 @@ public partial class EditorWindow : Window
 
     private async void SaveConfiguredAndClose()
     {
-        var folder = string.IsNullOrWhiteSpace(settings.SaveFolder)
-            ? Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory)
-            : settings.SaveFolder;
-        var filename = FilenameGenerator.Filename(settings.FilenamePattern, DateTimeOffset.Now);
-        await SaveDocumentAsync(bytes =>
+        try
         {
-            Directory.CreateDirectory(folder);
-            return ScreenshotFileWriter.WriteUnique(bytes, folder, filename);
-        });
+            var folder = string.IsNullOrWhiteSpace(settings.SaveFolder)
+                ? Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory)
+                : settings.SaveFolder;
+            var filename = FilenameGenerator.Filename(settings.FilenamePattern, DateTimeOffset.Now);
+            await SaveDocumentAsync(bytes =>
+            {
+                Directory.CreateDirectory(folder);
+                return ScreenshotFileWriter.WriteUnique(bytes, folder, filename);
+            });
+        }
+        catch (Exception error) { PresentSaveError(error); }
     }
 
     private async void SaveAsAndClose()
     {
-        var dialog = new Microsoft.Win32.SaveFileDialog
+        try
         {
-            Filter = "PNG image (*.png)|*.png",
-            FileName = FilenameGenerator.Filename(settings.FilenamePattern, DateTimeOffset.Now),
-            InitialDirectory = string.IsNullOrWhiteSpace(settings.SaveFolder)
-                ? Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory)
-                : settings.SaveFolder,
-        };
-        if (dialog.ShowDialog(this) == true)
-        {
-            await SaveDocumentAsync(bytes => ScreenshotFileWriter.WriteReplacing(bytes, dialog.FileName));
+            var dialog = new Microsoft.Win32.SaveFileDialog
+            {
+                Filter = "PNG image (*.png)|*.png",
+                FileName = FilenameGenerator.Filename(settings.FilenamePattern, DateTimeOffset.Now),
+                InitialDirectory = string.IsNullOrWhiteSpace(settings.SaveFolder)
+                    ? Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory)
+                    : settings.SaveFolder,
+            };
+            if (dialog.ShowDialog(this) == true)
+            {
+                var path = dialog.FileName;
+                await SaveDocumentAsync(bytes => ScreenshotFileWriter.WriteReplacing(bytes, path));
+            }
         }
+        catch (Exception error) { PresentSaveError(error); }
+    }
+
+    private void PresentSaveError(Exception error)
+    {
+        if (!isClosed) { ShowRecoverableError("scrcap save failed", error); }
+        else { System.Diagnostics.Trace.TraceError($"Screenshot save failed after editor closed: {error}"); }
     }
 
     internal async Task SaveDocumentAsync(Func<byte[], string> write)
@@ -427,11 +442,6 @@ public partial class EditorWindow : Window
             {
                 Close();
             }
-        }
-        catch (Exception error)
-        {
-            if (!isClosed) { ShowRecoverableError("scrcap save failed", error); }
-            else { System.Diagnostics.Trace.TraceError($"Screenshot save failed after editor closed: {error}"); }
         }
         finally { isSaving = false; }
     }

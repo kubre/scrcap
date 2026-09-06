@@ -55,7 +55,7 @@ public sealed class GitHubUpdateChecker : IUpdateChecker
         await using var content = await response.Content.ReadAsStreamAsync(timeout.Token).ConfigureAwait(false);
         var release = await JsonSerializer.DeserializeAsync<GitHubRelease>(content, cancellationToken: timeout.Token).ConfigureAwait(false)
                       ?? throw new InvalidDataException("GitHub returned an invalid release response.");
-        if (string.IsNullOrWhiteSpace(release.TagName) || !release.HtmlUrl.IsAbsoluteUri)
+        if (string.IsNullOrWhiteSpace(release.TagName) || release.HtmlUrl is not { IsAbsoluteUri: true })
         {
             throw new InvalidDataException("GitHub returned an incomplete release response.");
         }

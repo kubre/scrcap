@@ -10,6 +10,31 @@ namespace Scrcap.Windows.Platform.Tests;
 public sealed class PreferencesPlatformTests
 {
     [Fact]
+    public void StartupScriptPreservesUnicodeAndDisablesDelayedExpansion()
+    {
+        using var temp = new TempDirectory();
+        var executable = Path.Combine(temp.Path, "scrcap-é-चित्र-!test!.exe");
+        File.WriteAllBytes(executable, []);
+        var service = new StartupFolderLaunchAtLoginService(temp.Path);
+        Assert.True(service.SetEnabled(true, executable).Succeeded);
+        var script = File.ReadAllText(Path.Combine(temp.Path, "scrcap.cmd"));
+        Assert.Contains(executable, script);
+        Assert.Contains("chcp 65001 >nul", script);
+        Assert.Contains("setlocal DisableDelayedExpansion", script);
+    }
+
+    [Fact]
+    public async Task MissingReleaseUrlProducesAUsefulProtocolError()
+    {
+        using var client = new HttpClient(new StubHttpHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent("{\"tag_name\":\"v2.0.0\"}", Encoding.UTF8, "application/json"),
+        }));
+        var error = await Assert.ThrowsAsync<InvalidDataException>(() => new GitHubUpdateChecker(client).CheckAsync("1.0"));
+        Assert.Contains("incomplete release response", error.Message);
+    }
+
+    [Fact]
     public void StartupFolderServiceCreatesAndRemovesPerUserLaunchScript()
     {
         using var temp = new TempDirectory();
