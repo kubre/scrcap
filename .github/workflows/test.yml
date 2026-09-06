@@ -1,0 +1,50 @@
+name: Cross-platform tests
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  source-snapshot:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Archive source under test
+        run: git archive --format=tar HEAD > audit-source.tar
+      - uses: actions/upload-artifact@v4
+        with:
+          name: audit-source
+          path: audit-source.tar
+
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build, core tests, and AppKit smoke tests
+        run: bash scripts/test.sh
+
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+      - name: Build and run all Windows test projects
+        working-directory: scrcap-windows
+        run: dotnet test Scrcap.sln --configuration Release --logger trx
+      - name: Preserve test receipts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-test-results
+          path: scrcap-windows/tests/**/TestResults/*.trx
+          if-no-files-found: warn
