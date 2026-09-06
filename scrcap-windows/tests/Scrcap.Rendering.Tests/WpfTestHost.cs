@@ -1,4 +1,5 @@
 using System.Windows;
+using System.Windows.Threading;
 using Scrcap.Windows.UI.Resources;
 
 namespace Scrcap.Rendering.Tests;
@@ -17,6 +18,8 @@ internal static class WpfTestHost
                 try
                 {
                     EnsureApplication();
+                    SynchronizationContext.SetSynchronizationContext(
+                        new DispatcherSynchronizationContext(Dispatcher.CurrentDispatcher));
                     action();
                 }
                 catch (Exception ex)
