@@ -101,8 +101,14 @@ public sealed class VisualBaselineTests
 
         viewModel.ActiveTool = EditorTool.Text;
         viewModel.ColorIndex = 3;
+        // This canonical fixture has a base-size (22 point) label. Explicitly
+        // select Small now that text correctly honors the size control. Keep
+        // the toolbar in Medium afterward, matching the existing screenshot.
+        viewModel.ActiveSize = ShapeSize.Small;
         viewModel.PendingText = "Baseline";
         viewModel.CommitShape(new CorePoint(74, 196), new CorePoint(74, 196));
+        Assert.Equal(22, Assert.IsType<ShapeKind.Text>(viewModel.VisibleShapes.Last().Kind).Size);
+        viewModel.ActiveSize = ShapeSize.Medium;
     }
 
     private static Settings BaselineSettings(ThemeMode theme)

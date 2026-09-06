@@ -46,7 +46,10 @@ public sealed class ScreenshotFileWriterTests
         {
             var path = Path.Combine(directory, "occupied");
             Directory.CreateDirectory(path);
-            Assert.ThrowsAny<IOException>(() => ScreenshotFileWriter.WriteReplacing([1, 2, 3], path));
+            var error = Record.Exception(() => ScreenshotFileWriter.WriteReplacing([1, 2, 3], path));
+            // Windows reports a directory destination as access denied; Unix may
+            // report an IO error. The contract is failure with no staging leak.
+            Assert.True(error is IOException or UnauthorizedAccessException, error?.ToString() ?? "Expected publication to fail.");
             Assert.Empty(Directory.GetFiles(directory));
         });
     }

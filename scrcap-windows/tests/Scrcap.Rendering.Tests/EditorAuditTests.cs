@@ -30,12 +30,15 @@ public sealed class EditorAuditTests
         Assert.Contains(ReadPixels(image), value => value != 0);
     });
 
-    [Fact]
-    public void ExportCommitsPendingTextWithSpacingAndSelectedSize() => WpfTestHost.Run(() =>
+    [Theory]
+    [InlineData(ShapeSize.Small)]
+    [InlineData(ShapeSize.Medium)]
+    [InlineData(ShapeSize.Large)]
+    public void ExportCommitsPendingTextWithSpacingAndSelectedSize(ShapeSize size) => WpfTestHost.Run(() =>
     {
         var (canvas, viewModel) = CreateCanvas();
         viewModel.ActiveTool = EditorTool.Text;
-        viewModel.ActiveSize = ShapeSize.Large;
+        viewModel.ActiveSize = size;
         canvas.Measure(new Size(100, 100));
         canvas.Arrange(new Rect(0, 0, 100, 100));
         typeof(EditorCanvas).GetMethod("BeginTextEditing", BindingFlags.NonPublic | BindingFlags.Instance)!
@@ -46,7 +49,7 @@ public sealed class EditorAuditTests
         _ = canvas.FlattenBitmap(1);
         var text = Assert.IsType<ShapeKind.Text>(Assert.Single(viewModel.VisibleShapes).Kind);
         Assert.Equal("  indented\nline  ", text.Value);
-        Assert.Equal(viewModel.Settings.TextSize * ShapeSize.Large.Scale(), text.Size);
+        Assert.Equal(viewModel.Settings.TextSize * size.Scale(), text.Size);
         Assert.False(canvas.IsTextEditing);
     });
 
@@ -92,6 +95,9 @@ public sealed class EditorAuditTests
     public void SaveEncodesOffDispatcherAndKeepsNewerEdits() => WpfTestHost.Run(() =>
     {
         var window = new EditorWindow(settings: Settings.Defaults());
+        // Show completes the Canvas ViewModel binding, just as in the real UI.
+        window.Show();
+        window.UpdateLayout();
         var closed = false;
         window.Closed += (_, _) => closed = true;
         var dispatcherThread = Environment.CurrentManagedThreadId;
