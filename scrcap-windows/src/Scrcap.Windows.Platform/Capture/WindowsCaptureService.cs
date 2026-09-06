@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Drawing;
 using System.Drawing.Imaging;
 using System.Runtime.InteropServices;
@@ -111,12 +112,12 @@ public sealed class WindowsCaptureService : IWindowsCaptureService
                 var frameRequest = request with { IncludeCursor = request.IncludeCursor && frames.Count == 0 };
                 using var rawCapture = await CaptureScrollingFrameBitmapAsync(rect, frameRequest, options, cancellationToken).ConfigureAwait(false);
                 RecordBackend(rawCapture, ref backendUsed, ref fallbackReason);
-                var frame = CloneBitmap(rawCapture.Bitmap);
+                var frame = rawCapture.Bitmap;
                 var hashes = RowHashes(frame);
 
                 if (frames.Count == 0)
                 {
-                    frames.Add(frame);
+                    frames.Add(CloneBitmap(frame));
                     firstFrameHashes = hashes;
                     previousFrameHashes = hashes;
                     accumulatedHashes.AddRange(hashes);
@@ -129,25 +130,19 @@ public sealed class WindowsCaptureService : IWindowsCaptureService
 
                     if (newContentStart is null)
                     {
-                        frame.Dispose();
                         stopReason = ScrollingCaptureStopReason.AlignmentFailed;
                         ReportProgress(options, frames, rect.Width, maxRows, stopReason);
                         break;
                     }
 
                     var noNewRows = newContentStart.Value >= frame.Height;
-                    if (noNewRows)
-                    {
-                        frame.Dispose();
-                    }
-                    else
+                    if (!noNewRows)
                     {
                         var top = Math.Clamp(newContentStart.Value, 0, frame.Height - 1);
                         var cropped = CropBitmap(frame, new Rectangle(0, top, frame.Width, frame.Height - top));
                         if (!CanRetainExtraRows(frames, rect.Width, cropped.Height, options.MemoryCapBytes))
                         {
                             cropped.Dispose();
-                            frame.Dispose();
                             stopReason = ScrollingCaptureStopReason.MemoryCapReached;
                             ReportProgress(options, frames, rect.Width, maxRows, stopReason);
                             break;
@@ -155,7 +150,6 @@ public sealed class WindowsCaptureService : IWindowsCaptureService
 
                         frames.Add(cropped);
                         accumulatedHashes.AddRange(hashes.Skip(top));
-                        frame.Dispose();
                         bottomProbeCount = 0;
                         ReportProgress(options, frames, rect.Width, maxRows);
                     }
@@ -270,21 +264,32 @@ public sealed class WindowsCaptureService : IWindowsCaptureService
         ScrollingCaptureOptions options,
         CancellationToken cancellationToken)
     {
-        if (options.BeforeScreenCapture is not null)
-        {
-            await options.BeforeScreenCapture(cancellationToken).ConfigureAwait(false);
-        }
-
+        BackendCapture? capture = null;
         try
         {
-            return await CaptureRegionBitmapAsync(rect, request, cancellationToken).ConfigureAwait(false);
-        }
-        finally
-        {
-            if (options.AfterScreenCapture is not null)
+            try
             {
-                await options.AfterScreenCapture(cancellationToken).ConfigureAwait(false);
+                if (options.BeforeScreenCapture is not null)
+                {
+                    await options.BeforeScreenCapture(cancellationToken).ConfigureAwait(false);
+                }
+                capture = await CaptureRegionBitmapAsync(rect, request, cancellationToken).ConfigureAwait(false);
             }
+            finally
+            {
+                if (options.AfterScreenCapture is not null)
+                {
+                    // UI restoration must run even when the capture was cancelled.
+                    await options.AfterScreenCapture(CancellationToken.None).ConfigureAwait(false);
+                }
+            }
+            return capture;
+        }
+        catch
+        {
+            // A failed restoration callback must not lose ownership of a capture.
+            capture?.Dispose();
+            throw;
         }
     }
 
@@ -333,8 +338,8 @@ public sealed class WindowsCaptureService : IWindowsCaptureService
     {
         IReadOnlyList<ulong>? previousProbe = null;
         var stableProbes = 0;
-        var deadline = DateTimeOffset.UtcNow.AddMilliseconds(options.SettleTimeoutMilliseconds);
-        while (DateTimeOffset.UtcNow < deadline)
+        var started = Stopwatch.GetTimestamp();
+        while (Stopwatch.GetElapsedTime(started).TotalMilliseconds < options.SettleTimeoutMilliseconds)
         {
             cancellationToken.ThrowIfCancellationRequested();
             await Task.Delay(options.SettlePollMilliseconds, cancellationToken).ConfigureAwait(false);
@@ -388,9 +393,10 @@ public sealed class WindowsCaptureService : IWindowsCaptureService
 
     private static CapturedPixels CopyBgraPixels(Bitmap bitmap, CaptureMetadata metadata)
     {
-        using var normalized = CloneBitmap(bitmap);
-        var stride = normalized.Width * 4;
-        var pixels = new byte[stride * normalized.Height];
+        using var converted = bitmap.PixelFormat == PixelFormat.Format32bppArgb ? null : CloneBitmap(bitmap);
+        var normalized = converted ?? bitmap;
+        var stride = checked(normalized.Width * 4);
+        var pixels = new byte[checked(stride * normalized.Height)];
         var data = normalized.LockBits(new Rectangle(0, 0, normalized.Width, normalized.Height), ImageLockMode.ReadOnly, PixelFormat.Format32bppArgb);
         try
         {

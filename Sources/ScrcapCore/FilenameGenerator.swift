@@ -7,8 +7,12 @@ public enum FilenameGenerator {
     /// `now` is injectable for testing.
     public static func filename(pattern: String, now: Date = Date()) -> String {
         let date = DateFormatter()
+        date.locale = Locale(identifier: "en_US_POSIX")
+        date.calendar = Calendar(identifier: .gregorian)
         date.dateFormat = "yyyy-MM-dd"
         let time = DateFormatter()
+        time.locale = Locale(identifier: "en_US_POSIX")
+        time.calendar = Calendar(identifier: .gregorian)
         time.dateFormat = "HH.mm.ss"
         let expanded = pattern
             .replacingOccurrences(of: "{date}", with: date.string(from: now))

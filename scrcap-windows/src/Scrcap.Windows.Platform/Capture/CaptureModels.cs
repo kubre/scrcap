@@ -62,7 +62,7 @@ public sealed record CapturedPixels(
     int Stride,
     CaptureMetadata Metadata)
 {
-    public int RequiredByteLength => Math.Max(0, PixelHeight) * Math.Abs(Stride);
+    public long RequiredByteLength => (long)Math.Max(0, PixelHeight) * Math.Abs((long)Stride);
 
     public void Validate()
     {
@@ -76,14 +76,14 @@ public sealed record CapturedPixels(
             throw new ArgumentOutOfRangeException(nameof(PixelHeight), "Pixel height must be positive.");
         }
 
-        if (Stride < PixelWidth * 4)
+        if (Stride < (long)PixelWidth * 4)
         {
-            throw new ArgumentOutOfRangeException(nameof(Stride), "Stride must fit one BGRA row.");
+            throw new ArgumentOutOfRangeException(nameof(Stride), Stride, $"Stride must fit one BGRA row: required={(long)PixelWidth * 4} bytes, width={PixelWidth}.");
         }
 
         if (Bgra32.Length < RequiredByteLength)
         {
-            throw new ArgumentException("Pixel buffer is shorter than the declared dimensions and stride.", nameof(Bgra32));
+            throw new ArgumentException($"Pixel buffer is too short: required={RequiredByteLength} bytes, actual={Bgra32.Length}, width={PixelWidth}, height={PixelHeight}, stride={Stride}.", nameof(Bgra32));
         }
     }
 }

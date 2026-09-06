@@ -9,6 +9,8 @@ import ScrcapCore
 enum ExportError: LocalizedError {
     case clipboardWriteFailed
     case pngEncodeFailed
+    case invalidScale(CGFloat)
+    case bitmapRenderFailed(width: Int, height: Int)
 
     var errorDescription: String? {
         switch self {
@@ -16,6 +18,10 @@ enum ExportError: LocalizedError {
             return "Could not write the screenshot to the clipboard."
         case .pngEncodeFailed:
             return "Could not encode the screenshot as PNG."
+        case .invalidScale(let scale):
+            return "Cannot export with capture scale=\(scale); expected a finite positive pixels-per-point value."
+        case .bitmapRenderFailed(let width, let height):
+            return "Could not render the \(width) × \(height) pixel export. No unannotated image was exported."
         }
     }
 }
@@ -34,27 +40,21 @@ enum Exporter {
         palette: [String],
         strokeWidth: CGFloat,
         scale: CGFloat,
-        exportScale: Int = 2
-    ) -> CGImage {
+        exportScale: Int = 2,
+        makeContext: (Int, Int, CGColorSpace) -> CGContext? = bitmapContext
+    ) throws -> CGImage {
+        guard scale.isFinite, scale > 0 else { throw ExportError.invalidScale(scale) }
         // No annotations → no repaint. Keeps the capture's exact pixels and
         // color space (Retina captures are Display P3; redrawing into sRGB
         // would clamp them for nothing).
         if shapes.isEmpty {
-            return scaledOutput(image: bitmap, captureScale: scale, exportScale: exportScale)
+            return try scaledOutput(image: bitmap, captureScale: scale, exportScale: exportScale, makeContext: makeContext)
         }
 
         let pixelWidth = bitmap.width
         let pixelHeight = bitmap.height
-        guard let ctx = CGContext(
-            data: nil,
-            width: pixelWidth,
-            height: pixelHeight,
-            bitsPerComponent: 8,
-            bytesPerRow: 0,
-            space: rgbColorSpace(of: bitmap),
-            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
-        ) else {
-            return bitmap
+        guard let ctx = makeContext(pixelWidth, pixelHeight, rgbColorSpace(of: bitmap)) else {
+            throw ExportError.bitmapRenderFailed(width: pixelWidth, height: pixelHeight)
         }
 
         ctx.draw(bitmap, in: CGRect(x: 0, y: 0, width: pixelWidth, height: pixelHeight))
@@ -71,32 +71,44 @@ enum Exporter {
             NSGraphicsContext.restoreGraphicsState()
         }
 
-        return scaledOutput(image: ctx.makeImage() ?? bitmap, captureScale: scale, exportScale: exportScale)
+        guard let rendered = ctx.makeImage() else {
+            throw ExportError.bitmapRenderFailed(width: pixelWidth, height: pixelHeight)
+        }
+        return try scaledOutput(image: rendered, captureScale: scale, exportScale: exportScale, makeContext: makeContext)
     }
 
-    private static func scaledOutput(image: CGImage, captureScale: CGFloat, exportScale: Int) -> CGImage {
+    private static func scaledOutput(
+        image: CGImage,
+        captureScale: CGFloat,
+        exportScale: Int,
+        makeContext: (Int, Int, CGColorSpace) -> CGContext?
+    ) throws -> CGImage {
         let resolvedScale = min(exportScale == 1 ? 1.0 : 2.0, max(captureScale, 1.0))
         let ratio = resolvedScale / captureScale
         if ratio == 1 { return image }
 
-        let targetWidth = max(1, Int((CGFloat(image.width) * ratio).rounded(.toNearestOrAwayFromZero)))
-        let targetHeight = max(1, Int((CGFloat(image.height) * ratio).rounded(.toNearestOrAwayFromZero)))
+        guard let roundedWidth = Int(exactly: (CGFloat(image.width) * ratio).rounded(.toNearestOrAwayFromZero)),
+              let roundedHeight = Int(exactly: (CGFloat(image.height) * ratio).rounded(.toNearestOrAwayFromZero))
+        else { throw ExportError.invalidScale(captureScale) }
+        let targetWidth = max(1, roundedWidth)
+        let targetHeight = max(1, roundedHeight)
 
-        guard let context = CGContext(
-            data: nil,
-            width: targetWidth,
-            height: targetHeight,
-            bitsPerComponent: 8,
-            bytesPerRow: 0,
-            space: rgbColorSpace(of: image),
-            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
-        ) else {
-            return image
+        guard let context = makeContext(targetWidth, targetHeight, rgbColorSpace(of: image)) else {
+            throw ExportError.bitmapRenderFailed(width: targetWidth, height: targetHeight)
         }
 
         context.interpolationQuality = .high
         context.draw(image, in: CGRect(x: 0, y: 0, width: targetWidth, height: targetHeight))
-        return context.makeImage() ?? image
+        guard let scaled = context.makeImage() else {
+            throw ExportError.bitmapRenderFailed(width: targetWidth, height: targetHeight)
+        }
+        return scaled
+    }
+
+    static func bitmapContext(width: Int, height: Int, space: CGColorSpace) -> CGContext? {
+        CGContext(data: nil, width: width, height: height, bitsPerComponent: 8,
+                  bytesPerRow: 0, space: space,
+                  bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
     }
 
     /// The image's own RGB color space (Display P3 for Retina captures), or
@@ -111,6 +123,7 @@ enum Exporter {
     /// physical size — without it, every app treats a 2× capture as a
     /// double-size 72 DPI image and resamples it down, which reads as blur.
     static func pngData(_ image: CGImage, pointScale: CGFloat) -> Data? {
+        guard pointScale.isFinite, pointScale > 0 else { return nil }
         let data = NSMutableData()
         guard let dest = CGImageDestinationCreateWithData(data, UTType.png.identifier as CFString, 1, nil) else {
             return nil
@@ -175,21 +188,7 @@ enum Exporter {
         filename: String
     ) throws -> URL {
         guard let png = pngData(image, pointScale: pointScale) else { throw ExportError.pngEncodeFailed }
-        let fileManager = FileManager.default
-        var reservedNames = Set<String>()
-
-        while true {
-            let candidateName = FilenameGenerator.availableFilename(filename) { name in
-                reservedNames.contains(name) || fileManager.fileExists(atPath: directory.appendingPathComponent(name).path)
-            }
-            let url = directory.appendingPathComponent(candidateName)
-            do {
-                try png.write(to: url, options: [.atomic, .withoutOverwriting])
-                return url
-            } catch CocoaError.fileWriteFileExists {
-                reservedNames.insert(candidateName)
-            }
-        }
+        return try UniqueFileWriter.write(png, directory: directory, filename: filename)
     }
 
     /// Expands {date} and {time} tokens, e.g. "scrcap-2026-06-11-14.32.05".

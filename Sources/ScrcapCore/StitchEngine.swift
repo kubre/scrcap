@@ -108,7 +108,8 @@ public enum StitchEngine {
         minOverlap: Int = 16,
         tolerance: Double = 0.98
     ) -> Alignment? {
-        guard !accumulated.isEmpty, !frame.isEmpty else { return nil }
+        guard minOverlap > 0, tolerance.isFinite, (0...1).contains(tolerance),
+              !accumulated.isEmpty, !frame.isEmpty else { return nil }
 
         // Identical frame → no new rows (settle/bounce/bottom).
         if frame.count <= accumulated.count,
@@ -136,7 +137,10 @@ public enum StitchEngine {
         requiredMatchRatio: Double = 0.85,
         maximumMeanDistance: Double = 5
     ) -> Alignment? {
-        guard !accumulated.isEmpty, !frame.isEmpty else { return nil }
+        guard minOverlap > 0, rowTolerance.isFinite, rowTolerance >= 0,
+              requiredMatchRatio.isFinite, (0...1).contains(requiredMatchRatio),
+              maximumMeanDistance.isFinite, maximumMeanDistance >= 0,
+              !accumulated.isEmpty, !frame.isEmpty else { return nil }
 
         if frame.count <= accumulated.count {
             let stats = signatureStats(

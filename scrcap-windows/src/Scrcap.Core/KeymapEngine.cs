@@ -14,9 +14,13 @@ public readonly record struct KeyChord(string Key, ChordModifiers Modifiers)
 {
     public string Key { get; } = Key.ToLowerInvariant();
 
-    public static bool TryParse(string value, out KeyChord chord)
+    public static bool TryParse(string? value, out KeyChord chord)
     {
         chord = default;
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return false;
+        }
         ChordModifiers modifiers = ChordModifiers.None;
         string? key = null;
 

@@ -8,3 +8,4 @@ swift run scrcap-core-tests
 
 SCRCAP_SMOKE=text .build/debug/scrcap
 SCRCAP_SMOKE=ui .build/debug/scrcap
+SCRCAP_SMOKE=audit .build/debug/scrcap

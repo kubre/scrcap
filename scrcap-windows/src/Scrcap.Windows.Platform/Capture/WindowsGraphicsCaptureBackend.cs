@@ -61,41 +61,44 @@ internal sealed class WindowsGraphicsCaptureBackend
             throw new NotSupportedException("Windows.Graphics.Capture is not supported on this Windows version.");
         }
 
+        cancellationToken.ThrowIfCancellationRequested();
         using var direct3DDevice = Direct3DDeviceFactory.Create();
-        var frameReady = new TaskCompletionSource<Direct3D11CaptureFrame>(TaskCreationOptions.RunContinuationsAsynchronously);
-        var framePool = Direct3D11CaptureFramePool.CreateFreeThreaded(
+        using var framePool = Direct3D11CaptureFramePool.CreateFreeThreaded(
             direct3DDevice.Device,
             DirectXPixelFormat.B8G8R8A8UIntNormalized,
             1,
             item.Size);
-        var session = framePool.CreateCaptureSession(item);
+        using var session = framePool.CreateCaptureSession(item);
+        using var frames = new CaptureFrameMailbox<Direct3D11CaptureFrame>();
 
+        void OnFrameArrived(Direct3D11CaptureFramePool pool, object args)
+        {
+            try
+            {
+                if (pool.TryGetNextFrame() is { } frame)
+                {
+                    frames.Offer(frame);
+                }
+            }
+            catch (Exception exception)
+            {
+                frames.Fail(exception);
+            }
+        }
+
+        framePool.FrameArrived += OnFrameArrived;
         try
         {
             TrySetCursorCapture(session, includeCursor);
-            framePool.FrameArrived += (pool, _) =>
-            {
-                try
-                {
-                    if (pool.TryGetNextFrame() is { } frame)
-                    {
-                        frameReady.TrySetResult(frame);
-                    }
-                }
-                catch (Exception exception)
-                {
-                    frameReady.TrySetException(exception);
-                }
-            };
-
             session.StartCapture();
-            using var frame = await frameReady.Task.WaitAsync(TimeSpan.FromSeconds(3), cancellationToken).ConfigureAwait(false);
+            // The mailbox owns the selected frame until conversion completes,
+            // and disposes late/duplicate frames even after timeout or cancellation.
+            var frame = await frames.Task.WaitAsync(TimeSpan.FromSeconds(3), cancellationToken).ConfigureAwait(false);
             return await frameConverter.ConvertAsync(frame.Surface, cancellationToken).ConfigureAwait(false);
         }
         finally
         {
-            DisposeIfNeeded(session);
-            DisposeIfNeeded(framePool);
+            framePool.FrameArrived -= OnFrameArrived;
         }
     }
 
@@ -139,27 +142,33 @@ internal sealed class WindowsGraphicsCaptureBackend
                 D3DFeatureLevel.Level100,
             };
 
-            var hr = D3D11CreateDevice(
-                IntPtr.Zero,
-                D3DDriverType.Hardware,
-                IntPtr.Zero,
-                D3D11CreateDeviceBgraSupport,
-                featureLevels,
-                featureLevels.Length,
-                D3D11SdkVersion,
-                out var d3dDevice,
-                out _,
-                out var d3dContext);
-            ThrowIfFailed(hr, "D3D11CreateDevice failed.");
+            IntPtr d3dDevice = IntPtr.Zero;
+            IntPtr d3dContext = IntPtr.Zero;
+            IntPtr dxgiDevice = IntPtr.Zero;
+            IntPtr winRtDevice = IntPtr.Zero;
+            try
+            {
+                var hr = D3D11CreateDevice(
+                    IntPtr.Zero, D3DDriverType.Hardware, IntPtr.Zero,
+                    D3D11CreateDeviceBgraSupport, featureLevels, featureLevels.Length,
+                    D3D11SdkVersion, out d3dDevice, out _, out d3dContext);
+                ThrowIfFailed(hr, "D3D11CreateDevice failed.");
+                hr = Marshal.QueryInterface(d3dDevice, ref IidDxgiDevice, out dxgiDevice);
+                ThrowIfFailed(hr, "Could not query IDXGIDevice.");
+                hr = CreateDirect3D11DeviceFromDXGIDevice(dxgiDevice, out winRtDevice);
+                ThrowIfFailed(hr, "CreateDirect3D11DeviceFromDXGIDevice failed.");
 
-            hr = Marshal.QueryInterface(d3dDevice, ref IidDxgiDevice, out var dxgiDevice);
-            ThrowIfFailed(hr, "Could not query IDXGIDevice.");
-
-            hr = CreateDirect3D11DeviceFromDXGIDevice(dxgiDevice, out var winRtDevice);
-            ThrowIfFailed(hr, "CreateDirect3D11DeviceFromDXGIDevice failed.");
-
-            var device = MarshalInterface<IDirect3DDevice>.FromAbi(winRtDevice);
-            return new Direct3DDeviceFactory(d3dDevice, d3dContext, dxgiDevice, winRtDevice, device);
+                var device = MarshalInterface<IDirect3DDevice>.FromAbi(winRtDevice);
+                return new Direct3DDeviceFactory(d3dDevice, d3dContext, dxgiDevice, winRtDevice, device);
+            }
+            catch
+            {
+                ReleaseIfNeeded(winRtDevice);
+                ReleaseIfNeeded(dxgiDevice);
+                ReleaseIfNeeded(d3dContext);
+                ReleaseIfNeeded(d3dDevice);
+                throw;
+            }
         }
 
         public void Dispose()
@@ -235,16 +244,34 @@ internal sealed class WindowsGraphicsCaptureBackend
         {
             var iid = IidGraphicsCaptureItem;
             using var factory = GraphicsCaptureItemFactory.Create();
-            ThrowIfFailed(factory.Interop.CreateForWindow(hwnd, ref iid, out var item), "CreateForWindow failed.");
-            return MarshalInterface<GraphicsCaptureItem>.FromAbi(item);
+            IntPtr item = IntPtr.Zero;
+            try
+            {
+                ThrowIfFailed(factory.Interop.CreateForWindow(hwnd, ref iid, out item), "CreateForWindow failed.");
+                // FromAbi creates its own reference; release the ABI caller's reference.
+                return MarshalInterface<GraphicsCaptureItem>.FromAbi(item);
+            }
+            finally
+            {
+                ReleaseIfNeeded(item);
+            }
         }
 
         public static GraphicsCaptureItem CreateForMonitor(IntPtr monitor)
         {
             var iid = IidGraphicsCaptureItem;
             using var factory = GraphicsCaptureItemFactory.Create();
-            ThrowIfFailed(factory.Interop.CreateForMonitor(monitor, ref iid, out var item), "CreateForMonitor failed.");
-            return MarshalInterface<GraphicsCaptureItem>.FromAbi(item);
+            IntPtr item = IntPtr.Zero;
+            try
+            {
+                ThrowIfFailed(factory.Interop.CreateForMonitor(monitor, ref iid, out item), "CreateForMonitor failed.");
+                // FromAbi creates its own reference; release the ABI caller's reference.
+                return MarshalInterface<GraphicsCaptureItem>.FromAbi(item);
+            }
+            finally
+            {
+                ReleaseIfNeeded(item);
+            }
         }
 
         private static readonly Guid IidGraphicsCaptureItem = new("79c3f95b-31f7-4ec2-a464-632ef5d30760");
@@ -267,15 +294,17 @@ internal sealed class WindowsGraphicsCaptureBackend
             {
                 const string activatableClass = "Windows.Graphics.Capture.GraphicsCaptureItem";
                 ThrowIfFailed(WindowsCreateString(activatableClass, activatableClass.Length, out var classId), "WindowsCreateString failed.");
+                IntPtr factoryPointer = IntPtr.Zero;
                 try
                 {
                     var iid = IidGraphicsCaptureItemInterop;
-                    ThrowIfFailed(RoGetActivationFactory(classId, ref iid, out var factoryPointer), "RoGetActivationFactory failed.");
+                    ThrowIfFailed(RoGetActivationFactory(classId, ref iid, out factoryPointer), "RoGetActivationFactory failed.");
                     var interop = (IGraphicsCaptureItemInterop)Marshal.GetObjectForIUnknown(factoryPointer);
                     return new GraphicsCaptureItemFactory(classId, factoryPointer, interop);
                 }
                 catch
                 {
+                    ReleaseIfNeeded(factoryPointer);
                     WindowsDeleteString(classId);
                     throw;
                 }
@@ -326,7 +355,7 @@ internal sealed class SoftwareBitmapFrameConverter : IFrameConverter
         using var bitmap = SoftwareBitmap.Convert(source, BitmapPixelFormat.Bgra8, BitmapAlphaMode.Straight);
         var width = bitmap.PixelWidth;
         var height = bitmap.PixelHeight;
-        var bytes = new byte[width * height * 4];
+        var bytes = new byte[checked(width * height * 4)];
         var buffer = new global::Windows.Storage.Streams.Buffer((uint)bytes.Length);
         bitmap.CopyToBuffer(buffer);
         using (var reader = DataReader.FromBuffer(buffer))
@@ -335,25 +364,32 @@ internal sealed class SoftwareBitmapFrameConverter : IFrameConverter
         }
 
         var result = new Bitmap(width, height, PixelFormat.Format32bppArgb);
-        var data = result.LockBits(new Rectangle(0, 0, width, height), ImageLockMode.WriteOnly, PixelFormat.Format32bppArgb);
         try
         {
-            var stride = Math.Abs(data.Stride);
-            if (stride == width * 4)
+            var data = result.LockBits(new Rectangle(0, 0, width, height), ImageLockMode.WriteOnly, PixelFormat.Format32bppArgb);
+            try
             {
-                Marshal.Copy(bytes, 0, data.Scan0, bytes.Length);
-            }
-            else
-            {
-                for (var y = 0; y < height; y++)
+                if (data.Stride == width * 4)
                 {
-                    Marshal.Copy(bytes, y * width * 4, data.Scan0 + y * data.Stride, width * 4);
+                    Marshal.Copy(bytes, 0, data.Scan0, bytes.Length);
+                }
+                else
+                {
+                    for (var y = 0; y < height; y++)
+                    {
+                        Marshal.Copy(bytes, y * width * 4, data.Scan0 + y * data.Stride, width * 4);
+                    }
                 }
             }
+            finally
+            {
+                result.UnlockBits(data);
+            }
         }
-        finally
+        catch
         {
-            result.UnlockBits(data);
+            result.Dispose();
+            throw;
         }
 
         return result;

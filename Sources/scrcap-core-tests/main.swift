@@ -439,9 +439,11 @@ test("tolerance allows small noise") {
 
 test("perceptual alignment tolerates rerasterized rows") {
     func signature(_ row: Int, noise: Int = 0) -> StitchEngine.RowSignature {
-        StitchEngine.RowSignature(bins: (0..<32).map { bucket in
-            UInt8(min(255, 24 + ((row * 37 + bucket * 11) % 200) + noise))
-        })
+        let bins: [UInt8] = (0..<32).map { bucket in
+            let signal = (row * 37 + bucket * 11) % 200
+            return UInt8(min(255, 24 + signal + noise))
+        }
+        return StitchEngine.RowSignature(bins: bins)
     }
     let accumulated = (0..<100).map { signature($0) }
     let frame = (40..<140).map { signature($0, noise: $0 < 100 ? 2 : 0) }
@@ -562,5 +564,7 @@ test("available filename advances past collisions") {
         "scrcap-3.png"
     )
 }
+
+runAuditRegressionTests()
 
 TestRun.shared.finish()

@@ -227,12 +227,24 @@ final class EditorWindowController: NSObject, NSWindowDelegate {
         let maxCount = 20
         let maxBytes = 256 * 1024 * 1024
         history.append(snapshot)
-        var bytes = history.reduce(0) { total, item in
-            total + item.bitmap.bytesPerRow * item.bitmap.height
+        // Shape-only snapshots retain the same immutable CGImage. Charge its
+        // storage once, not once per annotation, or a 4K image loses undo early.
+        var references: [ObjectIdentifier: Int] = [:]
+        var bytes = 0
+        for item in history {
+            let identity = ObjectIdentifier(item.bitmap)
+            if references[identity] == nil {
+                bytes += item.bitmap.bytesPerRow * item.bitmap.height
+            }
+            references[identity, default: 0] += 1
         }
         while history.count > maxCount || bytes > maxBytes {
             let removed = history.removeFirst()
-            bytes -= removed.bitmap.bytesPerRow * removed.bitmap.height
+            let identity = ObjectIdentifier(removed.bitmap)
+            references[identity, default: 0] -= 1
+            if references[identity] == 0 {
+                bytes -= removed.bitmap.bytesPerRow * removed.bitmap.height
+            }
         }
     }
 
@@ -293,16 +305,21 @@ final class EditorWindowController: NSObject, NSWindowDelegate {
 
     // MARK: Output
 
-    private func flattened() -> CGImage {
+    private func flattened() -> CGImage? {
         canvas.commitTextEditing()
-        return Exporter.flatten(
-            bitmap: bitmap,
-            shapes: Array(stack.visible),
-            palette: settingsStore.settings.paletteHex,
-            strokeWidth: settingsStore.settings.strokeWidth,
-            scale: scale,
-            exportScale: settingsStore.settings.resolvedExportScale
-        )
+        do {
+            return try Exporter.flatten(
+                bitmap: bitmap,
+                shapes: Array(stack.visible),
+                palette: settingsStore.settings.paletteHex,
+                strokeWidth: settingsStore.settings.strokeWidth,
+                scale: scale,
+                exportScale: settingsStore.settings.resolvedExportScale
+            )
+        } catch {
+            presentError(error)
+            return nil
+        }
     }
 
     /// Pixels-per-point of flattened output, for DPI metadata.
@@ -312,8 +329,9 @@ final class EditorWindowController: NSObject, NSWindowDelegate {
 
     @discardableResult
     private func copyToClipboard() -> Bool {
+        guard let image = flattened() else { return false }
         let copied = Exporter.copyToClipboard(
-            flattened(),
+            image,
             pointScale: exportPointScale,
             metadata: captureMetadata
         )
@@ -334,7 +352,8 @@ final class EditorWindowController: NSObject, NSWindowDelegate {
         let settings = settingsStore.settings
         let folder = Exporter.defaultSaveFolder(settings: settings)
         let filename = Exporter.filename(pattern: settings.filenamePattern)
-        let image = flattened()
+        guard let image = flattened() else { return }
+        let savedDocument = currentSnapshot()
         let pointScale = exportPointScale
         exportInProgress = true
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
@@ -343,7 +362,7 @@ final class EditorWindowController: NSObject, NSWindowDelegate {
                 let url = try Exporter.writeUniquePNG(image, pointScale: pointScale, directory: folder, filename: filename)
                 DispatchQueue.main.async { [weak self] in
                     self?.exportInProgress = false
-                    self?.finishSave(to: url)
+                    self?.finishSave(to: url, savedDocument: savedDocument)
                 }
             } catch {
                 DispatchQueue.main.async { [weak self] in
@@ -365,7 +384,8 @@ final class EditorWindowController: NSObject, NSWindowDelegate {
         panel.beginSheetModal(for: window) { [weak self] response in
             guard let self, response == .OK, let url = panel.url else { return }
             guard !self.exportInProgress else { return }
-            let image = self.flattened()
+            guard let image = self.flattened() else { return }
+            let savedDocument = self.currentSnapshot()
             let pointScale = self.exportPointScale
             self.exportInProgress = true
             DispatchQueue.global(qos: .userInitiated).async { [weak self] in
@@ -373,7 +393,7 @@ final class EditorWindowController: NSObject, NSWindowDelegate {
                     try Exporter.writePNG(image, pointScale: pointScale, to: url)
                     DispatchQueue.main.async { [weak self] in
                         self?.exportInProgress = false
-                        self?.finishSave(to: url)
+                        self?.finishSave(to: url, savedDocument: savedDocument)
                     }
                 } catch {
                     DispatchQueue.main.async { [weak self] in
@@ -387,10 +407,14 @@ final class EditorWindowController: NSObject, NSWindowDelegate {
 
     /// Confirm a successful save with the same toast as copy (showing the path)
     /// and close the editor.
-    private func finishSave(to url: URL) {
+    private func finishSave(to url: URL, savedDocument: DocumentSnapshot) {
         if !settingsStore.settings.suppressCopyNotification {
             Notifier.saved(to: url)
         }
+        // PNG encoding and disk I/O happen off-thread. A later edit is not in
+        // that saved image and must not be discarded when the write completes.
+        guard bitmap === savedDocument.bitmap, stack == savedDocument.stack,
+              !canvas.hasPendingInteraction else { return }
         close()
     }
 
@@ -429,6 +453,23 @@ final class EditorWindowController: NSObject, NSWindowDelegate {
     #if DEBUG
     var debugContentView: NSView? { window.contentView }
 
+    func debugExerciseSharedImageHistory() -> Int {
+        var history: [DocumentSnapshot] = []
+        for _ in 0..<20 { appendSnapshot(currentSnapshot(), to: &history) }
+        return history.count
+    }
+
+    func debugExerciseEditDuringSave() -> Bool {
+        let saved = currentSnapshot()
+        stack.append(Shape(kind: .rectangle, colorIndex: 0,
+                           start: CorePoint(x: 1, y: 1), end: CorePoint(x: 8, y: 8)))
+        show()
+        finishSave(to: URL(fileURLWithPath: "/tmp/scrcap-audit-not-a-real-save.png"), savedDocument: saved)
+        let keptOpen = window.isVisible
+        close()
+        return keptOpen
+    }
+
     /// Headless smoke test for the inline text editor (SCRCAP_SMOKE=text):
     /// exercises begin → type → newline → commit without a real keyboard.
     /// Returns the committed string, or nil if the pipeline broke.
@@ -441,7 +482,7 @@ final class EditorWindowController: NSObject, NSWindowDelegate {
         editor.insertText("world", replacementRange: NSRange(location: 6, length: 0))
         canvas.commitTextEditing() // ⏎ path
         guard case .text(let string, _) = stack.visible.last?.kind else { return nil }
-        _ = flattened() // render path, including the text shape
+        guard flattened() != nil else { return nil } // includes text rendering
         return string
     }
     #endif
@@ -464,7 +505,7 @@ protocol CanvasDataSource: AnyObject {
     func expandCanvasIfNeeded(toFit rect: NSRect) -> NSPoint
     func endInteraction()
     func nextCounterNumber() -> Int
-    func dragOutImage() -> (image: CGImage, pattern: String, pointScale: CGFloat)
+    func dragOutImage() -> (image: CGImage, pattern: String, pointScale: CGFloat)?
 }
 
 extension EditorWindowController: CanvasDataSource {
@@ -663,8 +704,9 @@ extension EditorWindowController: CanvasDataSource {
 
     func nextCounterNumber() -> Int { stack.nextCounterNumber }
 
-    func dragOutImage() -> (image: CGImage, pattern: String, pointScale: CGFloat) {
-        (flattened(), settingsStore.settings.filenamePattern, exportPointScale)
+    func dragOutImage() -> (image: CGImage, pattern: String, pointScale: CGFloat)? {
+        guard let image = flattened() else { return nil }
+        return (image, settingsStore.settings.filenamePattern, exportPointScale)
     }
 
     func zoomCanvas(by factor: CGFloat, around windowPoint: NSPoint) {
@@ -1719,6 +1761,7 @@ final class CanvasView: NSView, NSDraggingSource {
     // MARK: Text tool — type in place; Return behavior is configurable
 
     var isEditingText: Bool { textEditor != nil }
+    var hasPendingInteraction: Bool { dragStart != nil || textEditor != nil }
     #if DEBUG
     var debugTextEditor: AnnotationTextView? { textEditor }
 
@@ -1782,7 +1825,7 @@ final class CanvasView: NSView, NSDraggingSource {
         guard hypot(current.x - start.x, current.y - start.y) > 6 else { return }
         isDragOut = false
 
-        let (image, pattern, pointScale) = source.dragOutImage()
+        guard let (image, pattern, pointScale) = source.dragOutImage() else { return }
         guard let fileURL = Exporter.tempFileForDrag(image, pattern: pattern, pointScale: pointScale) else { return }
         dragOutFileURL = fileURL
 

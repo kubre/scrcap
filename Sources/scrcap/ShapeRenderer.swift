@@ -65,11 +65,13 @@ enum ShapeRenderer {
         )
         guard rect.width > 1, rect.height > 1 else { return }
 
-        guard let sourceImage else {
-            // No source available (shouldn't happen in normal flows): obscure
-            // the region with a solid block rather than leaking content.
+        func obscure() {
+            // Redaction must fail closed on missing pixels or allocation failure.
             NSColor.gray.setFill()
             NSBezierPath(rect: rect).fill()
+        }
+        guard let sourceImage, sourceScale.isFinite, sourceScale > 0 else {
+            obscure()
             return
         }
 
@@ -78,7 +80,7 @@ enum ShapeRenderer {
             width: rect.width * sourceScale, height: rect.height * sourceScale
         ).integral.intersection(CGRect(x: 0, y: 0, width: sourceImage.width, height: sourceImage.height))
         guard pixelRect.width >= 1, pixelRect.height >= 1,
-              let crop = sourceImage.cropping(to: pixelRect) else { return }
+              let crop = sourceImage.cropping(to: pixelRect) else { obscure(); return }
 
         let cols = max(1, Int((rect.width / pixelateBlock).rounded()))
         let rows = max(1, Int((rect.height / pixelateBlock).rounded()))
@@ -87,10 +89,10 @@ enum ShapeRenderer {
             bitsPerComponent: 8, bytesPerRow: 0,
             space: CGColorSpace(name: CGColorSpace.sRGB)!,
             bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
-        ) else { return }
+        ) else { obscure(); return }
         ctx.interpolationQuality = .medium
         ctx.draw(crop, in: CGRect(x: 0, y: 0, width: cols, height: rows))
-        guard let blocks = ctx.makeImage() else { return }
+        guard let blocks = ctx.makeImage() else { obscure(); return }
 
         NSImage(cgImage: blocks, size: rect.size).draw(
             in: rect, from: .zero, operation: .copy, fraction: 1,
