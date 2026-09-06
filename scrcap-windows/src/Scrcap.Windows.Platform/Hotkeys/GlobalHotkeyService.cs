@@ -19,7 +19,8 @@ public sealed class GlobalHotkeyService : IGlobalHotkeyService
     private readonly Dictionary<int, AppAction> idToAction = [];
     private readonly HotkeyWindow window;
     private Keymap? lastKeymap;
-    private int nextId = 1;
+    private int suspensionDepth;
+    private bool disposed;
 
     public GlobalHotkeyService()
     {
@@ -36,12 +37,16 @@ public sealed class GlobalHotkeyService : IGlobalHotkeyService
 
     public void Register(Keymap keymap)
     {
-        UnregisterAll();
-        failed.Clear();
+        ObjectDisposedException.ThrowIf(disposed, this);
         lastKeymap = new Keymap(keymap.Bindings);
+        failed.Clear();
+        if (suspensionDepth > 0) { return; }
+        UnregisterAll();
         foreach (var (action, chord) in keymap.Bindings)
         {
-            var id = nextId++;
+            // Stable action IDs stay in Win32's application ID range even after
+            // many settings changes; re-registration does not consume new IDs.
+            var id = checked((int)action + 1);
             if (!TryVirtualKey(chord.Key, out var virtualKey))
             {
                 failed.Add(new FailedHotkey(action, chord, $"Unsupported hotkey key '{chord.Key}'."));
@@ -72,19 +77,21 @@ public sealed class GlobalHotkeyService : IGlobalHotkeyService
 
     public IDisposable Suspend()
     {
-        var restore = lastKeymap;
-        UnregisterAll();
+        ObjectDisposedException.ThrowIf(disposed, this);
+        if (suspensionDepth++ == 0) { UnregisterAll(); }
         return new Scope(() =>
         {
-            if (restore is not null)
+            if (--suspensionDepth == 0 && !disposed && lastKeymap is { } current)
             {
-                Register(restore);
+                Register(current);
             }
         });
     }
 
     public void Dispose()
     {
+        if (disposed) { return; }
+        disposed = true;
         UnregisterAll();
         window.DestroyHandle();
     }

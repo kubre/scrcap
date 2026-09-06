@@ -116,51 +116,64 @@ public sealed class EditorCanvas : System.Windows.Controls.Canvas
             : imagePoint;
     }
 
-    public byte[] FlattenPng(int scale)
+    public bool HasPendingInteraction => textEditor is not null || dragStart is not null;
+
+    public byte[] FlattenPng(int scale) => EditorClipboard.EncodePng(FlattenBitmap(scale));
+
+    internal BitmapSource FlattenBitmap(int scale)
     {
+        CommitTextEditing();
         var viewModel = ViewModel;
         if (viewModel?.Document is not { } document || SourceBitmap is null)
         {
-            return [];
+            throw new InvalidOperationException("Cannot export: no screenshot is loaded.");
         }
 
         var requestedScale = scale == 1 ? 1 : 2;
         var exportScaleX = ResolveExportScale(requestedScale, SourcePixelsPerDipX);
         var exportScaleY = ResolveExportScale(requestedScale, SourcePixelsPerDipY);
-        var width = Math.Max(1, (int)Math.Round(document.Size.Width * exportScaleX));
-        var height = Math.Max(1, (int)Math.Round(document.Size.Height * exportScaleY));
-        var visual = new DrawingVisual();
-        using (var context = visual.RenderOpen())
+        var width = Math.Max(1, checked((int)Math.Round(document.Size.Width * exportScaleX)));
+        var height = Math.Max(1, checked((int)Math.Round(document.Size.Height * exportScaleY)));
+        if (document.Shapes.Count == 0 && SourceBitmap.PixelWidth == width && SourceBitmap.PixelHeight == height
+            && SourceBitmap.DpiX == 96 * exportScaleX && SourceBitmap.DpiY == 96 * exportScaleY)
         {
-            context.PushTransform(new ScaleTransform(exportScaleX, exportScaleY));
-            DrawDocument(context, document.Size, zoom: 1, includeBackground: true);
-            var clipsAnnotations = RequiresDocumentClip(document, viewModel);
-            if (clipsAnnotations)
+            return SourceBitmap.IsFrozen ? SourceBitmap : (BitmapSource)SourceBitmap.GetAsFrozen();
+        }
+        pixelateRenderer.BeginFrame();
+        var visual = new DrawingVisual();
+        try
+        {
+            using (var context = visual.RenderOpen())
             {
-                context.PushClip(DocumentClip(document.Size));
-            }
+                context.PushTransform(new ScaleTransform(exportScaleX, exportScaleY));
+                DrawDocument(context, document.Size, zoom: 1, includeBackground: false);
+                var clipsAnnotations = RequiresDocumentClip(document, viewModel);
+                if (clipsAnnotations)
+                {
+                    context.PushClip(DocumentClip(document.Size));
+                }
 
-            foreach (var shape in document.Shapes)
-            {
-                DrawShape(context, shape, viewModel, zoom: 1, exportScale: Math.Max(exportScaleX, exportScaleY));
-            }
+                foreach (var shape in document.Shapes)
+                {
+                    DrawShape(context, shape, viewModel, zoom: 1, exportScale: Math.Max(exportScaleX, exportScaleY));
+                }
 
-            if (clipsAnnotations)
-            {
+                if (clipsAnnotations)
+                {
+                    context.Pop();
+                }
+
                 context.Pop();
             }
 
-            context.Pop();
         }
+        finally { pixelateRenderer.EndFrame(); }
 
         var bitmap = new RenderTargetBitmap(width, height, 96 * exportScaleX, 96 * exportScaleY, PixelFormats.Pbgra32);
         bitmap.Render(visual);
 
-        var encoder = new PngBitmapEncoder();
-        encoder.Frames.Add(BitmapFrame.Create(bitmap));
-        using var stream = new MemoryStream();
-        encoder.Save(stream);
-        return stream.ToArray();
+        bitmap.Freeze();
+        return bitmap;
     }
 
     protected override void OnMouseDown(MouseButtonEventArgs e)
@@ -441,33 +454,38 @@ public sealed class EditorCanvas : System.Windows.Controls.Canvas
             return;
         }
 
-        imageRect = ImageRect(document.Size, RenderSize);
-        drawingContext.PushTransform(new TranslateTransform(imageRect.X, imageRect.Y));
-        drawingContext.PushTransform(new ScaleTransform(ViewModel.Zoom, ViewModel.Zoom));
-        DrawDocument(drawingContext, document.Size, zoom: 1, includeBackground: true);
-        var clipsAnnotations = RequiresDocumentClip(document, ViewModel);
-        if (clipsAnnotations)
+        pixelateRenderer.BeginFrame();
+        try
         {
-            drawingContext.PushClip(DocumentClip(document.Size));
-        }
+            imageRect = ImageRect(document.Size, RenderSize);
+            drawingContext.PushTransform(new TranslateTransform(imageRect.X, imageRect.Y));
+            drawingContext.PushTransform(new ScaleTransform(ViewModel.Zoom, ViewModel.Zoom));
+            DrawDocument(drawingContext, document.Size, zoom: 1, includeBackground: true);
+            var clipsAnnotations = RequiresDocumentClip(document, ViewModel);
+            if (clipsAnnotations)
+            {
+                drawingContext.PushClip(DocumentClip(document.Size));
+            }
 
-        foreach (var shape in document.Shapes)
-        {
-            DrawShape(drawingContext, shape, ViewModel, zoom: 1);
-        }
+            foreach (var shape in document.Shapes)
+            {
+                DrawShape(drawingContext, shape, ViewModel, zoom: 1);
+            }
 
-        if (dragStart is { } start && dragCurrent is { } current)
-        {
-            DrawPreview(drawingContext, ViewModel, start, current);
-        }
+            if (dragStart is { } start && dragCurrent is { } current)
+            {
+                DrawPreview(drawingContext, ViewModel, start, current);
+            }
 
-        if (clipsAnnotations)
-        {
+            if (clipsAnnotations)
+            {
+                drawingContext.Pop();
+            }
+
+            drawingContext.Pop();
             drawingContext.Pop();
         }
-
-        drawingContext.Pop();
-        drawingContext.Pop();
+        finally { pixelateRenderer.EndFrame(); }
     }
 
     private static RectangleGeometry DocumentClip(CoreSize size) =>
@@ -573,7 +591,7 @@ public sealed class EditorCanvas : System.Windows.Controls.Canvas
             return;
         }
 
-        var value = editor.Text.Trim();
+        var value = editor.Text;
         var anchor = textEditorAnchor;
         RemoveTextEditor();
         Focus();
@@ -614,10 +632,10 @@ public sealed class EditorCanvas : System.Windows.Controls.Canvas
             CaretBrush = new SolidColorBrush(viewModel.ActiveColor),
             Foreground = new SolidColorBrush(viewModel.ActiveColor),
             FontFamily = new System.Windows.Media.FontFamily("Segoe UI"),
-            FontSize = viewModel.Settings.TextSize * viewModel.Zoom,
+            FontSize = viewModel.TextSize * viewModel.Zoom,
             FontWeight = FontWeights.Bold,
             MinWidth = 60,
-            MinHeight = Math.Ceiling(viewModel.Settings.TextSize * viewModel.Zoom * 1.5),
+            MinHeight = Math.Ceiling(viewModel.TextSize * viewModel.Zoom * 1.5),
             Padding = new Thickness(0),
             TextWrapping = TextWrapping.Wrap,
             VerticalContentAlignment = VerticalAlignment.Top,

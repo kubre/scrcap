@@ -43,7 +43,6 @@ public partial class App : System.Windows.Application
             captureService = new WindowsCaptureService();
             windowSelectionService = new WindowSelectionService();
             hotkeys = new GlobalHotkeyService();
-            RegisterHotkeys();
             hotkeys.Pressed += (_, action) => HandleCaptureAction(action);
 
             tray = new NotifyIconTrayService(new TaskbarThemeService(), () => settingsStore.Settings.Keymap);
@@ -51,6 +50,7 @@ public partial class App : System.Windows.Application
             tray.PreferencesRequested += (_, _) => OpenPreferences();
             tray.QuitRequested += (_, _) => Shutdown();
             tray.Show();
+            RegisterHotkeys();
         }
 
         if (options.OpenPreferences)

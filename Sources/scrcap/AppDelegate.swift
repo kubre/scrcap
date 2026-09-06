@@ -89,6 +89,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         #if DEBUG
+            if ProcessInfo.processInfo.environment["SCRCAP_SMOKE"] == "audit" {
+                AuditSmokeTests.run()
+                return
+            }
             if ProcessInfo.processInfo.environment["SCRCAP_SMOKE"] == "text" {
                 runTextSmokeTest()
                 return

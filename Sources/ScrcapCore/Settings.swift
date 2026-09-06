@@ -172,7 +172,6 @@ public struct Settings: Codable, Equatable, Sendable {
     /// AppKit controls, large bitmap allocations, or array-indexed palette UI.
     public mutating func normalize() {
         schemaVersion = Self.currentSchemaVersion
-        normalizeLegacyDefaultCaptureHotkeys()
 
         paletteHex = (0..<Self.paletteSlotCount).map { index in
             let candidate = paletteHex.indices.contains(index) ? paletteHex[index] : Self.defaultPalette[index]
@@ -221,7 +220,13 @@ public final class SettingsStore {
     private static func load(from url: URL) -> Settings? {
         guard let data = try? Data(contentsOf: url) else { return nil }
         guard let migrated = migrate(data: data) else { return nil }
-        return try? JSONDecoder().decode(Settings.self, from: migrated)
+        guard var settings = try? JSONDecoder().decode(Settings.self, from: migrated) else { return nil }
+        if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+           let version = json["schemaVersion"] as? Int,
+           version < Settings.currentSchemaVersion {
+            settings.normalizeLegacyDefaultCaptureHotkeys()
+        }
+        return settings
     }
 
     /// Applies schemaVersion upgrades to raw JSON before decoding. v1 is the
@@ -229,7 +234,7 @@ public final class SettingsStore {
     private static func migrate(data: Data) -> Data? {
         guard let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let version = obj["schemaVersion"] as? Int else { return nil }
-        guard version <= Settings.currentSchemaVersion else { return nil }
+        guard (1...Settings.currentSchemaVersion).contains(version) else { return nil }
         var json = obj
         var v = version
         while v < Settings.currentSchemaVersion {

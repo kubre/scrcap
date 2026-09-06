@@ -1,4 +1,5 @@
 using System.Windows;
+using System.Windows.Threading;
 using Scrcap.Windows.UI.Resources;
 
 namespace Scrcap.Rendering.Tests;
@@ -6,33 +7,35 @@ namespace Scrcap.Rendering.Tests;
 internal static class WpfTestHost
 {
     private static readonly object Gate = new();
+    private static readonly Lazy<Dispatcher> Host = new(CreateDispatcher);
 
     public static void Run(Action action)
     {
-        Exception? exception = null;
+        // Application and its resources belong to one living dispatcher. A new
+        // STA per test leaves Application.Current attached to a terminated thread.
+        lock (Gate)
+        {
+            Host.Value.Invoke(() =>
+            {
+                EnsureApplication();
+                action();
+            });
+        }
+    }
+
+    private static Dispatcher CreateDispatcher()
+    {
+        var ready = new TaskCompletionSource<Dispatcher>(TaskCreationOptions.RunContinuationsAsynchronously);
         var thread = new Thread(() =>
         {
-            lock (Gate)
-            {
-                try
-                {
-                    EnsureApplication();
-                    action();
-                }
-                catch (Exception ex)
-                {
-                    exception = ex;
-                }
-            }
-        });
+            var dispatcher = Dispatcher.CurrentDispatcher;
+            SynchronizationContext.SetSynchronizationContext(new DispatcherSynchronizationContext(dispatcher));
+            ready.SetResult(dispatcher);
+            Dispatcher.Run();
+        }) { IsBackground = true, Name = "scrcap rendering tests" };
         thread.SetApartmentState(ApartmentState.STA);
         thread.Start();
-        thread.Join();
-
-        if (exception is not null)
-        {
-            throw exception;
-        }
+        return ready.Task.GetAwaiter().GetResult();
     }
 
     public static void ApplyTheme(Core.ThemeMode mode)

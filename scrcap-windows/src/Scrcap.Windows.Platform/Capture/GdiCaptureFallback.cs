@@ -20,12 +20,23 @@ internal sealed class GdiCaptureFallback
             throw new InvalidOperationException("Could not acquire screen device context.");
         }
 
-        var memory = CreateCompatibleDC(screen);
-        var bitmapHandle = CreateCompatibleBitmap(screen, rect.Width, rect.Height);
-        var oldObject = SelectObject(memory, bitmapHandle);
-
+        var memory = IntPtr.Zero;
+        var bitmapHandle = IntPtr.Zero;
+        var oldObject = IntPtr.Zero;
         try
         {
+            memory = CreateCompatibleDC(screen);
+            if (memory == IntPtr.Zero) { throw new InvalidOperationException("CreateCompatibleDC failed for fallback capture."); }
+            bitmapHandle = CreateCompatibleBitmap(screen, rect.Width, rect.Height);
+            if (bitmapHandle == IntPtr.Zero)
+            {
+                throw new InvalidOperationException($"CreateCompatibleBitmap failed for {rect.Width} x {rect.Height} capture.");
+            }
+            oldObject = SelectObject(memory, bitmapHandle);
+            if (oldObject == IntPtr.Zero || oldObject == new IntPtr(-1))
+            {
+                throw new InvalidOperationException("SelectObject failed for fallback capture.");
+            }
             if (!BitBlt(memory, 0, 0, rect.Width, rect.Height, screen, rect.X, rect.Y, Srccopy))
             {
                 throw new InvalidOperationException("Fallback screen capture failed.");
@@ -33,22 +44,24 @@ internal sealed class GdiCaptureFallback
 
             using var captured = Image.FromHbitmap(bitmapHandle);
             var clone = new Bitmap(captured.Width, captured.Height, PixelFormat.Format32bppArgb);
-            using (var graphics = Graphics.FromImage(clone))
+            try
             {
+                using var graphics = Graphics.FromImage(clone);
                 graphics.DrawImageUnscaled(captured, 0, 0);
-                if (includeCursor)
-                {
-                    DrawCursor(graphics, rect);
-                }
+                if (includeCursor) { DrawCursor(graphics, rect); }
+                return clone;
             }
-
-            return clone;
+            catch
+            {
+                clone.Dispose();
+                throw;
+            }
         }
         finally
         {
-            SelectObject(memory, oldObject);
-            DeleteObject(bitmapHandle);
-            DeleteDC(memory);
+            if (oldObject != IntPtr.Zero && oldObject != new IntPtr(-1)) { SelectObject(memory, oldObject); }
+            if (bitmapHandle != IntPtr.Zero) { DeleteObject(bitmapHandle); }
+            if (memory != IntPtr.Zero) { DeleteDC(memory); }
             ReleaseDC(IntPtr.Zero, screen);
         }
     }

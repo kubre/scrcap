@@ -49,7 +49,7 @@ public sealed class StartupFolderLaunchAtLoginService : ILaunchAtLoginService
 
             Directory.CreateDirectory(startupDirectory);
             var tempPath = ScriptPath + ".tmp";
-            File.WriteAllText(tempPath, ScriptFor(command), Encoding.ASCII);
+            File.WriteAllText(tempPath, ScriptFor(command), new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
             File.Move(tempPath, ScriptPath, overwrite: true);
             return LaunchAtLoginResult.Success;
         }
@@ -81,7 +81,7 @@ public sealed class StartupFolderLaunchAtLoginService : ILaunchAtLoginService
     }
 
     private static string ScriptFor(LaunchCommand command) =>
-        "@echo off\r\n"
+        "@echo off\r\nsetlocal DisableDelayedExpansion\r\nchcp 65001 >nul\r\n"
         + "start \"\" "
         + QuoteForBatch(command.ExecutablePath)
         + (command.Arguments.Count == 0 ? string.Empty : " " + string.Join(" ", command.Arguments.Select(QuoteForBatch)))

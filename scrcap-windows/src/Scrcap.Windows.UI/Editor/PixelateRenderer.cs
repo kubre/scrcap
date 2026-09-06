@@ -6,9 +6,24 @@ namespace Scrcap.Windows.UI.Editor;
 
 internal sealed class PixelateRenderer
 {
-    private const int MaxCacheEntries = 24;
-
     private readonly Dictionary<PixelateCacheKey, BitmapSource> cache = [];
+    private readonly HashSet<PixelateCacheKey> used = [];
+    private readonly List<PixelateCacheKey> stale = [];
+
+    internal int CachedRegionCount => cache.Count;
+
+    public void BeginFrame() => used.Clear();
+
+    public void EndFrame()
+    {
+        stale.Clear();
+        foreach (var key in cache.Keys)
+        {
+            if (!used.Contains(key)) { stale.Add(key); }
+        }
+        foreach (var key in stale) { cache.Remove(key); }
+        stale.Clear();
+    }
     private BitmapSource? source;
     private long sourceVersion;
 
@@ -29,17 +44,13 @@ internal sealed class PixelateRenderer
         }
 
         var key = new PixelateCacheKey(sourceVersion, sourceBounds, Math.Max(1, blockSize), exportScale);
+        used.Add(key);
         if (cache.TryGetValue(key, out var cached))
         {
             return cached;
         }
 
         var bitmap = CreatePixelatedBitmap(sourceBitmap, sourceBounds, key.BlockSize);
-        if (cache.Count >= MaxCacheEntries)
-        {
-            cache.Clear();
-        }
-
         cache[key] = bitmap;
         return bitmap;
     }
@@ -67,9 +78,10 @@ internal sealed class PixelateRenderer
         BitmapSource source = cropped.Format == PixelFormats.Bgra32
             ? cropped
             : new FormatConvertedBitmap(cropped, PixelFormats.Bgra32, null, 0);
-        var stride = sourceBounds.Width * 4;
-        var sourcePixels = new byte[stride * sourceBounds.Height];
-        var outputPixels = new byte[sourcePixels.Length];
+        var stride = checked(sourceBounds.Width * 4);
+        // Blocks do not overlap. Reuse the copied source buffer rather than
+        // allocating a second full-region array for every preview miss.
+        var sourcePixels = new byte[checked(stride * sourceBounds.Height)];
         source.CopyPixels(sourcePixels, stride, 0);
 
         for (var blockY = 0; blockY < sourceBounds.Height; blockY += blockSize)
@@ -85,16 +97,16 @@ internal sealed class PixelateRenderer
                     for (var x = blockX; x < blockRight; x++)
                     {
                         var offset = (y * stride) + (x * 4);
-                        outputPixels[offset] = sourcePixels[sampleOffset];
-                        outputPixels[offset + 1] = sourcePixels[sampleOffset + 1];
-                        outputPixels[offset + 2] = sourcePixels[sampleOffset + 2];
-                        outputPixels[offset + 3] = sourcePixels[sampleOffset + 3];
+                        sourcePixels[offset] = sourcePixels[sampleOffset];
+                        sourcePixels[offset + 1] = sourcePixels[sampleOffset + 1];
+                        sourcePixels[offset + 2] = sourcePixels[sampleOffset + 2];
+                        sourcePixels[offset + 3] = sourcePixels[sampleOffset + 3];
                     }
                 }
             }
         }
 
-        var bitmap = BitmapSource.Create(sourceBounds.Width, sourceBounds.Height, 96, 96, PixelFormats.Bgra32, null, outputPixels, stride);
+        var bitmap = BitmapSource.Create(sourceBounds.Width, sourceBounds.Height, 96, 96, PixelFormats.Bgra32, null, sourcePixels, stride);
         bitmap.Freeze();
         return bitmap;
     }

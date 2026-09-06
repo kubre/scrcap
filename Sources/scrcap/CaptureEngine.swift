@@ -117,11 +117,12 @@ final class CaptureEngine: CaptureProviding {
         return CaptureResult(image: framed(image, includeShadow: includeShadow, scale: scale), scale: scale)
     }
 
-    private func rgbaContext(width: Int, height: Int) -> CGContext? {
+    private func rgbaContext(width: Int, height: Int, source: CGImage) -> CGContext? {
         CGContext(
             data: nil, width: width, height: height,
             bitsPerComponent: 8, bytesPerRow: 0,
-            space: CGColorSpace(name: CGColorSpace.sRGB)!,
+            space: source.colorSpace.flatMap { $0.model == .rgb ? $0 : nil }
+                ?? CGColorSpace(name: CGColorSpace.sRGB)!,
             bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
         )
     }
@@ -133,7 +134,7 @@ final class CaptureEngine: CaptureProviding {
         let pad = includeShadow ? Int((20 * scale).rounded()) : 0
         let canvasW = window.width + 2 * pad
         let canvasH = window.height + 2 * pad
-        guard pad > 0, let ctx = rgbaContext(width: canvasW, height: canvasH) else {
+        guard pad > 0, let ctx = rgbaContext(width: canvasW, height: canvasH, source: window) else {
             return composited(window) // no shadow → just fill the background
         }
         let rect = CGRect(x: pad, y: pad, width: window.width, height: window.height)
@@ -153,7 +154,7 @@ final class CaptureEngine: CaptureProviding {
     /// Fills `windowBackground` behind the (rounded-corner) window. Returns the
     /// image unchanged when the background is transparent.
     private func composited(_ image: CGImage) -> CGImage {
-        guard let background = windowBackground, let ctx = rgbaContext(width: image.width, height: image.height)
+        guard let background = windowBackground, let ctx = rgbaContext(width: image.width, height: image.height, source: image)
         else { return image }
         let rect = CGRect(x: 0, y: 0, width: image.width, height: image.height)
         ctx.setFillColor((background.usingColorSpace(.sRGB) ?? .white).cgColor)

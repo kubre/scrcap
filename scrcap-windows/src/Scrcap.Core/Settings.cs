@@ -114,6 +114,7 @@ public sealed class Settings
 
     public bool HasShownFirstLaunchNotice { get; set; }
 
+    [JsonIgnore]
     public int ResolvedExportScale => ExportScale == 1 ? 1 : 2;
 
     public static Settings Defaults()
@@ -137,6 +138,7 @@ public sealed class Settings
         CaptureMode.Scrolling,
     ];
 
+    [JsonIgnore]
     public Keymap Keymap
     {
         get
@@ -165,8 +167,10 @@ public sealed class Settings
 
     public void Normalize()
     {
+        ArgumentNullException.ThrowIfNull(Hotkeys);
+        ArgumentNullException.ThrowIfNull(AfterCapture);
+        ArgumentNullException.ThrowIfNull(PaletteHex);
         SchemaVersion = CurrentSchemaVersion;
-        NormalizeLegacyDefaultCaptureHotkeys();
 
         PaletteHex = Enumerable.Range(0, PaletteSlotCount)
             .Select(index =>
@@ -186,7 +190,7 @@ public sealed class Settings
         FilenamePattern = FilenameGenerator.SafeFilenameStem(FilenamePattern);
     }
 
-    private void NormalizeLegacyDefaultCaptureHotkeys()
+    internal void NormalizeLegacyDefaultCaptureHotkeys()
     {
         Hotkeys.TryGetValue(AppAction.CaptureRegion.StorageKey(), out var region);
         Hotkeys.TryGetValue(AppAction.CaptureWindow.StorageKey(), out var window);
@@ -210,8 +214,13 @@ public sealed class Settings
     private static double ClampFinite(double value, double min, double max) =>
         double.IsFinite(value) ? Math.Clamp(value, min, max) : min;
 
-    public static string? NormalizeHexColor(string raw)
+    public static string? NormalizeHexColor(string? raw)
     {
+        if (raw is null)
+        {
+            return null;
+        }
+
         var value = raw.Trim().ToUpperInvariant();
         if (value.StartsWith('#'))
         {
@@ -243,7 +252,7 @@ public static class CaptureModeExtensions
 public sealed class SettingsStore
 {
     private readonly string filePath;
-    private readonly bool loadedFromCorruptFile;
+    private bool loadedFromCorruptFile;
 
     public SettingsStore(string directory)
     {
@@ -279,6 +288,7 @@ public sealed class SettingsStore
         }
 
         Settings = next;
+        loadedFromCorruptFile = false;
         SettingsChanged?.Invoke(this, EventArgs.Empty);
         return true;
     }
@@ -327,15 +337,29 @@ public sealed class SettingsStore
                 return LoadResult.Missing;
             }
 
-            var migrated = Migrate(File.ReadAllText(path));
+            var json = File.ReadAllText(path);
+            var migrated = Migrate(json);
             if (migrated is null)
             {
                 return LoadResult.Invalid;
             }
 
-            return JsonSerializer.Deserialize<Settings>(migrated, JsonOptions) is { } settings
-                ? LoadResult.Valid(settings)
-                : LoadResult.Invalid;
+            var settings = JsonSerializer.Deserialize<Settings>(migrated, JsonOptions);
+            if (settings is null)
+            {
+                return LoadResult.Invalid;
+            }
+
+            // Nullable annotations do not prevent explicit JSON nulls. Validate
+            // before leaving this recovery boundary, not in the constructor.
+            settings.Normalize();
+            using var original = JsonDocument.Parse(json);
+            if (original.RootElement.GetProperty("schemaVersion").GetInt32() < Settings.CurrentSchemaVersion)
+            {
+                settings.NormalizeLegacyDefaultCaptureHotkeys();
+            }
+
+            return LoadResult.Valid(settings);
         }
         catch
         {
@@ -349,6 +373,7 @@ public sealed class SettingsStore
         if (node is null
             || node["schemaVersion"] is null
             || !int.TryParse(node["schemaVersion"]!.ToString(), out var version)
+            || version < 1
             || version > Settings.CurrentSchemaVersion)
         {
             return null;

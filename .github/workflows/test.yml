@@ -1,0 +1,56 @@
+name: Cross-platform tests
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build, core tests, AppKit regressions, and release compilation
+        run: |
+          set -euo pipefail
+          swift --version | tee macos-tests.log
+          bash scripts/test.sh 2>&1 | tee -a macos-tests.log
+          swift build --configuration release 2>&1 | tee -a macos-tests.log
+      - name: Preserve macOS test receipts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-test-results
+          path: macos-tests.log
+          if-no-files-found: warn
+
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+      - name: Build and run all Windows test projects
+        working-directory: scrcap-windows
+        shell: pwsh
+        run: |
+          dotnet --info | Tee-Object -FilePath windows-tests.log
+          dotnet test Scrcap.sln --configuration Release --logger trx --logger "console;verbosity=normal" 2>&1 | Tee-Object -FilePath windows-tests.log -Append
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Preserve Windows test receipts and allocation measurements
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-test-results
+          path: |
+            scrcap-windows/windows-tests.log
+            scrcap-windows/tests/**/TestResults/*.trx
+          if-no-files-found: warn

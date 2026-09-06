@@ -17,6 +17,7 @@ public static class FilenameGenerator
 
     public static string SafeFilenameStem(string raw)
     {
+        ArgumentNullException.ThrowIfNull(raw);
         var builder = new StringBuilder(raw.Length);
         var previousWasSeparator = false;
 
@@ -44,8 +45,33 @@ public static class FilenameGenerator
             previousWasSeparator = false;
         }
 
-        var stem = builder.ToString().Trim(' ', '-', '\t', '\r', '\n');
-        return stem.Length == 0 ? "scrcap" : stem;
+        var stem = builder.ToString().Trim(' ', '-', '\t', '\r', '\n').TrimEnd(' ', '.');
+        if (stem.Length == 0)
+        {
+            return "scrcap";
+        }
+
+        return IsDeviceName(stem) ? "_" + stem : stem;
+    }
+
+    private static bool IsDeviceName(string stem)
+    {
+        var dot = stem.IndexOf('.');
+        var name = (dot < 0 ? stem : stem[..dot]).TrimEnd(' ');
+        if (name.Equals("CON", StringComparison.OrdinalIgnoreCase)
+            || name.Equals("PRN", StringComparison.OrdinalIgnoreCase)
+            || name.Equals("AUX", StringComparison.OrdinalIgnoreCase)
+            || name.Equals("NUL", StringComparison.OrdinalIgnoreCase)
+            || name.Equals("CONIN$", StringComparison.OrdinalIgnoreCase)
+            || name.Equals("CONOUT$", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        return name.Length == 4
+            && (name.StartsWith("COM", StringComparison.OrdinalIgnoreCase)
+                || name.StartsWith("LPT", StringComparison.OrdinalIgnoreCase))
+            && name[3] is >= '1' and <= '9' or '¹' or '²' or '³';
     }
 
     private static bool IsInvalidFilenameCharacter(char ch) =>

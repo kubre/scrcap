@@ -175,7 +175,7 @@ public sealed class AnnotationStack
     }
 
     public int NextCounterNumber =>
-        Visible.Count(shape => shape.Kind is ShapeKind.Counter) + 1;
+        shapes.Take(Cursor).Select(shape => shape.Kind is ShapeKind.Counter counter ? counter.Number : 0).DefaultIfEmpty().Max() + 1;
 }
 
 public sealed class AnnotationDocument
@@ -204,7 +204,7 @@ public sealed class AnnotationDocument
     public bool CanRedo => Cursor < snapshots.Count - 1;
 
     public int NextCounterNumber =>
-        Shapes.Count(shape => shape.Kind is ShapeKind.Counter) + 1;
+        Shapes.Select(shape => shape.Kind is ShapeKind.Counter counter ? counter.Number : 0).DefaultIfEmpty().Max() + 1;
 
     public void AppendShape(Shape shape) =>
         Commit(Current with { Shapes = [.. Current.Shapes, shape] });

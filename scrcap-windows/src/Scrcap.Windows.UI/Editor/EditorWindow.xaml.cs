@@ -18,6 +18,8 @@ public partial class EditorWindow : Window
     private readonly Action? copiedToClipboard;
     private readonly List<BitmapSource> bitmapHistory = [];
     private BitmapSource? sourceBitmap;
+    private bool isSaving;
+    private bool isClosed;
 
     public EditorWindow(CaptureResult? capture = null, Settings? settings = null, Action? copiedToClipboard = null)
     {
@@ -30,6 +32,7 @@ public partial class EditorWindow : Window
         }
 
         InitializeComponent();
+        Closed += (_, _) => isClosed = true;
         ChromeWindow.Attach(this);
         DataContext = viewModel;
 
@@ -233,15 +236,10 @@ public partial class EditorWindow : Window
 
     private void Canvas_DragOutRequested(object? sender, EventArgs e)
     {
-        var bytes = Canvas.FlattenPng(settings.ResolvedExportScale);
-        if (bytes.Length == 0)
-        {
-            return;
-        }
-
         string? path = null;
         try
         {
+            var bytes = Canvas.FlattenPng(settings.ResolvedExportScale);
             path = DragOutPayload.CreateTempPng(bytes, settings.FilenamePattern, DateTimeOffset.Now);
             var data = DragOutPayload.CreateDataObject(path);
             System.Windows.DragDrop.DoDragDrop(Canvas, data, System.Windows.DragDropEffects.Copy);
@@ -360,14 +358,9 @@ public partial class EditorWindow : Window
 
     private bool CopyFlattened()
     {
-        var bytes = Canvas.FlattenPng(settings.ResolvedExportScale);
-        if (bytes.Length == 0)
-        {
-            return false;
-        }
-
         try
         {
+            var bytes = Canvas.FlattenPng(settings.ResolvedExportScale);
             System.Windows.Clipboard.SetDataObject(EditorClipboard.CreateDataObject(bytes), true);
             copiedToClipboard?.Invoke();
             return true;
@@ -386,50 +379,71 @@ public partial class EditorWindow : Window
         Canvas.InvalidateVisual();
     }
 
-    private void SaveConfiguredAndClose()
+    private async void SaveConfiguredAndClose()
     {
-        var folder = settings.SaveFolder;
-        if (string.IsNullOrWhiteSpace(folder))
-        {
-            folder = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
-        }
-
         try
         {
-            Directory.CreateDirectory(folder);
-            var path = Path.Combine(folder, FilenameGenerator.Filename(settings.FilenamePattern, DateTimeOffset.Now));
-            File.WriteAllBytes(path, Canvas.FlattenPng(settings.ResolvedExportScale));
-            Close();
+            var folder = string.IsNullOrWhiteSpace(settings.SaveFolder)
+                ? Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory)
+                : settings.SaveFolder;
+            var filename = FilenameGenerator.Filename(settings.FilenamePattern, DateTimeOffset.Now);
+            await SaveDocumentAsync(bytes =>
+            {
+                Directory.CreateDirectory(folder);
+                return ScreenshotFileWriter.WriteUnique(bytes, folder, filename);
+            });
         }
-        catch (Exception ex)
-        {
-            ShowRecoverableError("scrcap save failed", ex);
-        }
+        catch (Exception error) { PresentSaveError(error); }
     }
 
-    private void SaveAsAndClose()
+    private async void SaveAsAndClose()
     {
-        var dialog = new Microsoft.Win32.SaveFileDialog
+        try
         {
-            Filter = "PNG image (*.png)|*.png",
-            FileName = FilenameGenerator.Filename(settings.FilenamePattern, DateTimeOffset.Now),
-            InitialDirectory = string.IsNullOrWhiteSpace(settings.SaveFolder)
-                ? Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory)
-                : settings.SaveFolder,
-        };
-
-        if (dialog.ShowDialog(this) == true)
-        {
-            try
+            var dialog = new Microsoft.Win32.SaveFileDialog
             {
-                File.WriteAllBytes(dialog.FileName, Canvas.FlattenPng(settings.ResolvedExportScale));
-                Close();
-            }
-            catch (Exception ex)
+                Filter = "PNG image (*.png)|*.png",
+                FileName = FilenameGenerator.Filename(settings.FilenamePattern, DateTimeOffset.Now),
+                InitialDirectory = string.IsNullOrWhiteSpace(settings.SaveFolder)
+                    ? Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory)
+                    : settings.SaveFolder,
+            };
+            if (dialog.ShowDialog(this) == true)
             {
-                ShowRecoverableError("scrcap save failed", ex);
+                var path = dialog.FileName;
+                await SaveDocumentAsync(bytes => ScreenshotFileWriter.WriteReplacing(bytes, path));
             }
         }
+        catch (Exception error) { PresentSaveError(error); }
+    }
+
+    private void PresentSaveError(Exception error)
+    {
+        if (!isClosed) { ShowRecoverableError("scrcap save failed", error); }
+        else { System.Diagnostics.Trace.TraceError($"Screenshot save failed after editor closed: {error}"); }
+    }
+
+    internal async Task SaveDocumentAsync(Func<byte[], string> write)
+    {
+        if (isSaving) { return; }
+        isSaving = true;
+        try
+        {
+            // WPF drawing stays on the dispatcher. A frozen snapshot can safely
+            // be encoded and written off-thread without stalling the editor.
+            var image = Canvas.FlattenBitmap(settings.ResolvedExportScale);
+            var savedSource = sourceBitmap;
+            var savedShapes = viewModel.Document!.Shapes;
+            var savedSettings = settings;
+            await Task.Run(() => write(EditorClipboard.EncodePng(image)));
+            if (!isClosed && ReferenceEquals(savedSource, sourceBitmap)
+                && ReferenceEquals(savedShapes, viewModel.Document?.Shapes)
+                && ReferenceEquals(savedSettings, settings) && !Canvas.HasPendingInteraction)
+            {
+                Close();
+            }
+        }
+        finally { isSaving = false; }
     }
 
     private void ShowRecoverableError(string title, Exception exception) =>
